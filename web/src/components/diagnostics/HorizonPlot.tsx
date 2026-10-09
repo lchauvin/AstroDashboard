@@ -38,7 +38,7 @@ export function HorizonPlot({ data }: { data: HorizonData }) {
         <p>
           Built from every analysed night: each frame where part of the field went dark while the sky was clear marks an
           obstruction at the telescope&apos;s azimuth and altitude. Two such frames in a 10° sector set the horizon
-          there. Planning will use it (Phase 4).
+          there. Use it as a site's horizon profile in Settings → Sites.
         </p>
         <p className="muted mono" style={{ fontSize: 11 }}>
           {data.nights} night{data.nights === 1 ? "" : "s"} · {data.samples} frames with pointing · {data.obstructed} obstructed

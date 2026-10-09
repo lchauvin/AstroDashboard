@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import __version__
+from . import __version__, api_planning, planning
 from .cache import HeaderCache
 from .config import Config
 from .diagnostics.detectors import analyse as analyse_frames, horizon_samples, learn_horizon
@@ -124,6 +124,15 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None)
         rev = state.require_library().revision(rev_id)
         if rev is None:
             raise HTTPException(404, detail="No such target revision")
+        # Goals edited in the dashboard win over target.json; sessions get the nearest known site.
+        stored = state.cache.goals().get(rev_id)
+        if stored is not None:
+            rev = {**rev, "goals": stored}
+        sites = state.cache.sites()
+        rev["sessions"] = [
+            {**s, "siteName": (near := planning.nearest_site(sites, *(s.get("site") or (None, None)))) and near["name"]}
+            for s in rev["sessions"]
+        ]
         return rev
 
     @app.get("/api/revisions/{rev_id}/preview.jpg")
@@ -273,6 +282,7 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None)
         state.rebuild()
         return {"ok": removed}
 
+    api_planning.register(app, state)
     return app
 
 

@@ -37,6 +37,17 @@ CREATE TABLE IF NOT EXISTS diagnostics (
     result   TEXT NOT NULL,
     PRIMARY KEY (revision, session)
 );
+CREATE TABLE IF NOT EXISTS sites (
+    id      TEXT PRIMARY KEY,
+    data    TEXT NOT NULL,
+    created REAL NOT NULL,
+    updated REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS goals (
+    revision TEXT PRIMARY KEY,
+    data     TEXT NOT NULL,
+    updated  REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -135,3 +146,48 @@ class HeaderCache:
         with self._lock:
             row = self._conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return row[0] if row else None
+
+    def get_json(self, key: str) -> Any:
+        raw = self.get_meta(key)
+        return json.loads(raw) if raw else None
+
+    def set_json(self, key: str, value: Any) -> None:
+        self.set_meta(key, json.dumps(value))
+
+    # ------------------------------------------------------------------ planning
+
+    def sites(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT id, data, created, updated FROM sites ORDER BY created").fetchall()
+        return [{**json.loads(d), "id": i, "created": c, "updated": u} for i, d, c, u in rows]
+
+    def save_site(self, site_id: str, data: dict[str, Any]) -> None:
+        body = {k: v for k, v in data.items() if k not in ("id", "created", "updated")}
+        now = time.time()
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO sites(id, data, created, updated) VALUES (?,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated=excluded.updated",
+                (site_id, json.dumps(body), now, now),
+            )
+
+    def delete_site(self, site_id: str) -> bool:
+        """Removes a site record from the dashboard database (never touches the data root)."""
+        with self._lock, self._conn:
+            return self._conn.execute("DELETE FROM sites WHERE id = ?", (site_id,)).rowcount > 0
+
+    def goals(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT revision, data FROM goals").fetchall()
+        return {r: json.loads(d) for r, d in rows}
+
+    def save_goals(self, revision: str, goals: dict[str, Any]) -> None:
+        with self._lock, self._conn:
+            if goals:
+                self._conn.execute(
+                    "INSERT INTO goals(revision, data, updated) VALUES (?,?,?) "
+                    "ON CONFLICT(revision) DO UPDATE SET data=excluded.data, updated=excluded.updated",
+                    (revision, json.dumps(goals), time.time()),
+                )
+            else:
+                self._conn.execute("DELETE FROM goals WHERE revision = ?", (revision,))

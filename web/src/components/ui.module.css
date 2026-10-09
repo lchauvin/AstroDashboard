@@ -49,16 +49,14 @@
   white-space: normal;
   box-shadow: var(--shadow-md);
   pointer-events: none;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 80ms ease-out;
+  /* Hidden tooltips stay out of layout, so one near the right edge cannot widen the page. */
+  display: none;
 }
 
 .tip:hover > .tipBox,
 .tip:focus-visible > .tipBox,
 .tip:focus-within > .tipBox {
-  opacity: 1;
-  visibility: visible;
+  display: block;
 }
 
 .badge {

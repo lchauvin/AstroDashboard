@@ -7,7 +7,10 @@ import { EngineNotice } from "@/components/EngineNotice";
 import { FilterIntegration } from "@/components/FilterIntegration";
 import { SessionMatrix } from "@/components/SessionMatrix";
 import { Badge, Marks, StatTile } from "@/components/ui";
+import { GoalsEditor } from "@/components/planning/GoalsEditor";
 import { engineGet } from "@/lib/engine";
+import { isoDate } from "@/lib/planning/night";
+import { goalRowsFor, loadPlanningData, planOne } from "@/server/planning";
 import { hours, shortDate, stageLabel } from "@/lib/format";
 import type { Revision } from "@/lib/types";
 import styles from "./target.module.css";
@@ -34,6 +37,9 @@ export default async function TargetPage({ params }: { params: Promise<{ rev: st
   const rev = res.data;
   const t = rev.totals;
   const lights = rev.sessions.filter((s) => s.totals.lights > 0);
+  // Goals: the same model and editor as Planning, at the default site.
+  const planning = await loadPlanningData();
+  const one = planning.ok ? planOne(planning.data, rev.id, null, isoDate(new Date()), 0) : null;
 
   return (
     <main className="page">
@@ -110,6 +116,24 @@ export default async function TargetPage({ params }: { params: Promise<{ rev: st
           <Checklist checks={rev.checks} />
         </section>
       </div>
+
+      {one && planning.ok ? (
+        <section className={styles.block}>
+          <div className={styles.blockHead}>
+            <h2 className="section-title">Goals</h2>
+            <Link href={`/planning/target/${encodeURIComponent(rev.id)}`} className="eyebrow">
+              Plan this target →
+            </Link>
+          </div>
+          <GoalsEditor
+            revId={rev.id}
+            rows={goalRowsFor(one)}
+            capHours={planning.data.context.settings.goalCapHours}
+            seasonHours={one.plan.hours90}
+            siteName={one.site.name}
+          />
+        </section>
+      ) : null}
 
       <section className={styles.block}>
         <div className={styles.blockHead}>

@@ -98,6 +98,9 @@ class Library:
             for f in frames if f.kind == "LIGHT" and f.area == "session"
         }
         self.unreadable = sum(1 for f in frames if f.status == "unreadable")
+        # Kept for Planning: rig detection, and the raw biases that give the sky pedestal.
+        self.ok_lights = [f for f in frames if f.kind == "LIGHT" and f.area == "session" and f.status == "ok"]
+        self.library_frames = [f for f in frames if f.area == "library"]
 
         self.darks = DarkLibrary(
             [f for f in frames if f.area == "library"],
@@ -179,6 +182,7 @@ class Library:
             "hasPreview": info.finished_preview is not None,
             "previewPath": info.finished_preview,
             "panels": panels,
+            "pointing": _pointing(lights_ok),
             "equipment": [{"instrume": i, "telescop": tel, "focalLength": fl} for i, tel, fl in equipment],
             "totals": {
                 "seconds": total_seconds,
@@ -709,6 +713,24 @@ def _site(lights: list[Frame]) -> list[float] | None:
     lat = _median(f.header.get("SITELAT") for f in lights if isinstance(f.header.get("SITELAT"), (int, float)))
     lon = _median(f.header.get("SITELONG") for f in lights if isinstance(f.header.get("SITELONG"), (int, float)))
     return [lat, lon] if lat is not None and lon is not None else None
+
+
+def _pointing(lights: list[Frame]) -> dict[str, float] | None:
+    """Where the revision's lights point: circular mean of RA, mean of DEC (degrees, J2000).
+
+    Mosaics get the centre of all their panels, which is what visibility needs.
+    """
+    ras, decs = [], []
+    for f in lights:
+        ra, dec = f.header.get("RA"), f.header.get("DEC")
+        if isinstance(ra, (int, float)) and isinstance(dec, (int, float)) and not isinstance(ra, bool):
+            ras.append(float(ra))
+            decs.append(float(dec))
+    if not ras:
+        return None
+    x = sum(math.cos(math.radians(r)) for r in ras)
+    y = sum(math.sin(math.radians(r)) for r in ras)
+    return {"ra": round(math.degrees(math.atan2(y, x)) % 360, 4), "dec": round(sum(decs) / len(decs), 4)}
 
 
 def dark_key(exposure, readout, gain, offset, set_temp, instrume) -> str:

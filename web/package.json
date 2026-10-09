@@ -7,19 +7,28 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:snr": "node --import tsx scripts/verify-snr.ts",
+    "check:ephemeris": "node --import tsx scripts/verify-ephemeris.ts",
+    "check:planner": "node --import tsx scripts/verify-planner.ts",
+    "verify": "npm run typecheck && npm run check:snr && npm run check:ephemeris && npm run check:planner"
   },
   "dependencies": {
+    "astronomy-engine": "^2.1.19",
+    "leaflet": "^1.9.4",
     "lucide-react": "^1.32.0",
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-leaflet": "^5.0.0",
     "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.0"
   }
 }

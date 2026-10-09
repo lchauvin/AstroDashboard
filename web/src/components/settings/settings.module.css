@@ -1,0 +1,366 @@
+.tabs {
+  display: inline-flex;
+  border: 1px solid var(--color-divider);
+  margin-bottom: 26px;
+}
+
+.tab {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 16px;
+  font: 400 10.5px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-right: 1px solid var(--color-divider);
+  text-decoration: none;
+}
+
+.tab:last-child {
+  border-right: none;
+}
+
+.tabOn {
+  color: var(--color-text);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+/* ------------------------------------------------------------ sites */
+
+.sites {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.mapCol {
+  position: sticky;
+  top: 96px;
+}
+
+.map {
+  height: 520px;
+  border: 1px solid var(--color-divider);
+  background:
+    linear-gradient(var(--color-divider) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(90deg, var(--color-divider) 1px, transparent 1px) 0 0 / 40px 40px;
+}
+
+.mapInner {
+  height: 100%;
+  width: 100%;
+  background: transparent;
+}
+
+.mapPlacing :global(.leaflet-container) {
+  cursor: crosshair;
+}
+
+.pin {
+  display: block;
+  width: var(--pin);
+  height: var(--pin);
+  margin: calc((18px - var(--pin)) / 2);
+  border: 2px solid var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 35%, var(--color-bg));
+  box-shadow: 0 0 0 2px var(--color-bg);
+}
+
+.pin_default {
+  background: var(--color-accent);
+}
+
+.pin_suggestion {
+  background: transparent;
+  border-style: dashed;
+}
+
+.pin_draft {
+  background: var(--status-serious);
+  border-color: var(--color-bg);
+  cursor: grab;
+}
+
+.popup {
+  font: 400 12.5px/1.5 var(--font-body);
+  min-width: 200px;
+}
+
+.popupTag {
+  margin-left: 8px;
+  font: 400 9.5px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.popupActions {
+  display: flex;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.popupActions button,
+.popupActions a {
+  color: var(--color-accent-700);
+  text-decoration: underline;
+  font-size: 12.5px;
+}
+
+.listCol {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.toolbar,
+.rowActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.form {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fromFrame {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.framePreview {
+  border-left: 2px solid var(--color-accent);
+  padding: 6px 12px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field > span {
+  font: 400 10px/1.3 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.input,
+.inputSmall {
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--color-divider);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 14px;
+  font-family: inherit;
+  border-radius: 0;
+}
+
+.inputSmall {
+  width: 76px;
+  height: 28px;
+  font: 400 13px var(--font-mono);
+}
+
+.input:focus,
+.inputSmall:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.hint {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.ok {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.warn {
+  font-size: 12.5px;
+  color: var(--status-serious);
+}
+
+.error {
+  font-size: 13px;
+  color: var(--status-bad);
+}
+
+.link {
+  color: var(--color-accent-700);
+  text-decoration: underline;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.confirm {
+  font-size: 13px;
+}
+
+.siteList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.siteItem {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-divider);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.siteHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 400 9.5px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-accent-700);
+}
+
+.siteMeta {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.suggestions {
+  margin-top: 10px;
+}
+
+.horizon {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.hRing {
+  fill: none;
+  stroke: var(--color-divider);
+}
+
+.hSky {
+  fill: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  stroke: var(--color-accent);
+  stroke-width: 1;
+}
+
+.hLabel {
+  font: 600 9px var(--font-mono);
+  fill: var(--text-muted);
+}
+
+.hRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.rig {
+  max-width: 860px;
+}
+
+@media (max-width: 900px) {
+  .sites {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mapCol {
+    position: static;
+  }
+
+  .map {
+    height: 360px;
+  }
+}
+
+/* Leaflet chrome in the Industry style: square, themed, hairline. */
+.mapInner :global(.leaflet-popup-content-wrapper),
+.mapInner :global(.leaflet-popup-tip) {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border-radius: 0;
+  box-shadow: var(--shadow-md);
+}
+
+.mapInner :global(.leaflet-popup-content-wrapper) {
+  border: 1px solid var(--color-accent);
+}
+
+.mapInner :global(.leaflet-bar a) {
+  border-radius: 0 !important;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.mapInner :global(.leaflet-control-attribution) {
+  background: color-mix(in srgb, var(--color-bg) 80%, transparent);
+  color: var(--text-muted);
+}
+
+.mapLight :global(.leaflet-tile-pane) {
+  filter: grayscale(1) contrast(0.85) brightness(1.06);
+}
+
+.mapDark :global(.leaflet-tile-pane) {
+  filter: grayscale(1) invert(1) brightness(0.75) contrast(0.9);
+}
+
+/* Let form columns shrink below the inputs' intrinsic width (no page-wide horizontal scroll). */
+.listCol,
+.grid2 > *,
+.field {
+  min-width: 0;
+}
+
+.field > .input {
+  width: 100%;
+  box-sizing: border-box;
+}

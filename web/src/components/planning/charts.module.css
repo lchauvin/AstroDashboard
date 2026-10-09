@@ -1,0 +1,138 @@
+.figure {
+  margin: 0;
+}
+
+.svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+
+.grid {
+  stroke: var(--color-divider);
+  stroke-width: 1;
+}
+
+.axis {
+  font: 400 10px var(--font-mono);
+  fill: var(--text-muted);
+}
+
+.bandTwilight {
+  fill: color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+
+.bandDark {
+  fill: color-mix(in srgb, var(--color-text) 9%, transparent);
+}
+
+.usable {
+  fill: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+.targetLine {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 2;
+}
+
+.moonLine {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.floor {
+  fill: none;
+  stroke: var(--color-text);
+  stroke-width: 1;
+  stroke-dasharray: 1 3;
+  opacity: 0.7;
+}
+
+.crosshair {
+  stroke: var(--color-text);
+  stroke-width: 1;
+  opacity: 0.35;
+}
+
+.targetDot {
+  fill: var(--color-accent);
+  stroke: var(--color-bg);
+  stroke-width: 2;
+}
+
+.moonDot {
+  fill: var(--text-muted);
+  stroke: var(--color-bg);
+  stroke-width: 2;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-top: 10px;
+  font: 400 11px/1.4 var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend i {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+}
+
+.keyTarget {
+  border-top: 2px solid var(--color-accent);
+}
+
+.keyMoon {
+  border-top: 2px dashed var(--text-muted);
+}
+
+.keyFloor {
+  border-top: 1px dotted var(--color-text);
+}
+
+.legend i.keyUsable {
+  height: 10px;
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+.keySeries {
+  border-top: 2px solid;
+}
+
+.readout {
+  margin-left: auto;
+  color: var(--color-text) !important;
+}
+
+.seriesLine {
+  fill: none;
+  stroke-width: 2;
+}
+
+.seriesLabel {
+  font: 600 11px var(--font-mono);
+  fill: var(--text-secondary);
+}
+
+.goalDot {
+  stroke: var(--color-bg);
+  stroke-width: 2;
+}
+
+.nowDot {
+  fill: var(--color-bg);
+  stroke-width: 2;
+}

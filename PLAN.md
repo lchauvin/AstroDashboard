@@ -7,7 +7,7 @@ One place to answer four questions about the hobby:
 3. **Live** — how is tonight's session going?
 4. **Planning** — what should I shoot next, with which filter, and for how long?
 
-Status: **Phases 0–3 implemented (2026-10-09)** — scaffold, header indexer, Library (targets, target pages, calibration library), Diagnostics v1 (astro-eval jobs, timeline, frame table, previews) and v2 (findings: clouds, obstruction, twilight, moon, dew, focus drift, tracking, mispointing/rotation, flat↔light check; learned horizon). Phases 4–6 not started.
+Status: **Phases 0–4 implemented (2026-10-09)** — scaffold, header indexer, Library (targets, target pages, calibration library), Diagnostics v1 (astro-eval jobs, timeline, frame table, previews) and v2 (findings: clouds, obstruction, twilight, moon, dew, focus drift, tracking, mispointing/rotation, flat↔light check; learned horizon), Planning (sites, sky calibrated from your subs, ranking, moon-aware filter suggestion, calendar, ideas, SNR curves, goals; see §6.5 for what was built and how it differs). Phases 5–6 not started.
 
 ---
 
@@ -318,7 +318,7 @@ Sites are managed on the **Settings → Sites** page (decided 2026-10-08) and se
 
 **Sites map.** The Sites page opens on a map showing every site as a pin, with the site list beside it:
 
-- **Library**: Leaflet (`react-leaflet`), with OpenStreetMap-based tiles. No API key is needed. Tiles are muted to match the Industry style: CARTO "Positron" in the light theme and "Dark Matter" in the dark/night themes, with the required attribution shown.
+- **Library**: Leaflet (`react-leaflet`), with OpenStreetMap-based tiles. No API key is needed. Tiles are muted to match the Industry style. *As built:* CARTO's basemaps now return an "API key required" watermark, so the map uses the OpenStreetMap standard tiles, greyscaled by a CSS filter in the light theme and inverted in the dark/night themes, with the OSM attribution shown.
 - **Pins**: square markers in the accent colour, matching the design system's square corners. The default site gets a distinct marker. Pin size or a small badge reflects how many nights were shot there.
 - **Clicking a pin** opens a card with the name, coordinates, elevation, SQM/Bortle, horizon minimum, nights shot, last session date, and links to **Edit** and "**Plan here**" (opens the Planner with that site selected).
 - **Placing and moving sites**: "Add site" lets you click on the map to drop a pin. In the edit form, the pin can be dragged to fine-tune the coordinates. The same map is the preview used when filling a site from a FITS frame (below).
@@ -408,6 +408,25 @@ The flag offers "**switch to hours**" pre-filled with the cap. It also names the
 - The Library shows progress bars per filter: actual *good* hours (after diagnostics rejection) against the goal hours, with the predicted SNR so far.
 - Planning's "need" factor uses the remaining deficit in hours, whichever mode set it.
 - Goals are stored in the revision's `target.json`, and are editable from the target page.
+
+### 6.5 As built (Phase 4, 2026-10-09)
+
+Where the build follows §6.1–6.4 it is not repeated here; these are the decisions and differences.
+
+**Split of work.** The engine supplies what only it can see; the planner itself runs in the Next.js server on the vendored AstroPlanner modules, so pages arrive fully rendered (≈ 70 ms for 13 targets, 363 catalog ideas and 30 calendar nights).
+
+- Engine (`astrodash/planning.py`, `halpha.py`, `api_planning.py`): sites, goals and settings in `var/astrodash.db`; header site parsing and clustering; rig detection from the headers; revision pointing (mean RA/Dec of the lights); the measured sky; the Hα survey measurement with a cached, rate-limited background prefetch.
+- Web (`src/lib/snr`, `src/lib/astro` vendored unmodified with provenance headers; `src/lib/planning` new): fast night grids (sun/moon/sidereal time once per night, then trigonometry per target), per-filter evaluation, ranking, calendar, calibration. `scripts/verify-planner.ts` pins it to the vendored `ephemeris.ts` (alt/az within 0.6°, darkness within a minute, usable hours within 20 min) and the vendored sky model.
+
+**Sky calibrated from your own subs, by photon transfer.** For each kept light of an analysed night, sky electrons = ((background − bias pedestal) / background noise)², independent of the camera gain. The pedestal is the median of raw biases at the light's settings (≈ 400 ADU in Linearity HDR). Comparing with the model at that moment (site SQM through the filter, plus moonlight) gives κ per filter and site; frames with the moon down are preferred. At Home: L κ 1.04 (≈ SQM 17.96), H 1.06, O 2.34, S 0.81. The same measurement gives the camera's e⁻/ADU as a by-product (≈ 0.70 in HDR, against the 0.35 preset). Target signal is still estimated (Hα survey or class typical, OIII/SII by class ratios); measuring it from subs is left for later.
+
+**Two additions to the sky model** (stated in `skymodel.ts`): κ scales only the dark sky (light pollution is line-rich, moonlight is a continuum), and KS91's Rayleigh term is coloured as (550/λ)⁴, so the moon costs OIII and B more than Hα and SII.
+
+**Scoring.** Value of a filter tonight = usable hours × efficiency (SNR² tonight ÷ same hours moonless) × need × (1 + (2·moon-down fraction − 1) × moon sensitivity). The last term is the opportunity cost: moonless hours go to the filters the moon hurts most, moonlit hours to the ones it does not. Need is the goal deficit; without goals, filters lagging behind the target's best-covered one are wanted more. Finished targets are hidden unless included. Ideas are weighted by brightness (hours to SNR 30) and framing (best at ~60 % of the field width), and exclude anything inside one of your fields.
+
+**Goals are stored in the dashboard database**, not in `target.json`: writing into the data root is reserved for approved organizer plans (Phase 6 can export them). A `target.json` `goals` block is still read and shown until goals are saved in the dashboard. Goals are editable on the Planning target page and on the Library target page.
+
+**Not built (yet):** elevation estimated from coordinates (a DEM lookup; the field says "type it in"), the light-pollution map layer, picking an individual Library frame for a site (the "Suggest sites from my data" clusters cover frames already in the Library), timezones per site (times show in the dashboard machine's local time; night boundaries are computed from the sun, so they are right at any site), and preference weights beyond the stage weighting.
 
 ---
 

@@ -1,0 +1,305 @@
+/* Planning section. Same Industry vocabulary as Library: hairline frames, mono labels, square corners. */
+
+.controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldLabel {
+  font: 400 10px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.input {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--color-divider);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 14.5px;
+  font-family: inherit;
+  border-radius: 0;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+select.input {
+  padding-right: 6px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* ------------------------------------------------------------ tonight */
+
+.tonight {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0;
+  padding: 0;
+  margin-bottom: 34px;
+}
+
+.tonightCell {
+  padding: 16px 20px;
+  border-right: 1px solid var(--color-divider);
+}
+
+.tonightCell:last-child {
+  border-right: none;
+}
+
+.big {
+  font: 600 26px/1.1 var(--font-heading);
+  letter-spacing: 0.02em;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.small {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+/* ------------------------------------------------------------ sections */
+
+.section {
+  margin-bottom: 40px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.sectionNote {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  max-width: 760px;
+  line-height: 1.5;
+}
+
+.rank {
+  font: 400 11px/1 var(--font-mono);
+  color: var(--text-muted);
+  width: 24px;
+}
+
+.targetLink {
+  font-weight: 600;
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.targetLink:hover {
+  color: var(--color-accent-700);
+}
+
+.sub {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.advice {
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  max-width: 420px;
+}
+
+.best {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+/* efficiency bars: one per relevant filter */
+.effList {
+  display: grid;
+  grid-template-columns: auto 64px auto;
+  gap: 3px 8px;
+  align-items: center;
+  font-size: 11.5px;
+}
+
+.bar {
+  height: 6px;
+  background: var(--bar-track);
+  position: relative;
+}
+
+.bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+}
+
+.goalBar {
+  height: 6px;
+  background: var(--bar-track);
+  position: relative;
+  width: 72px;
+}
+
+.goalBar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-accent);
+}
+
+.flag {
+  color: var(--status-serious);
+}
+
+/* season strip */
+.season {
+  display: block;
+}
+
+.seasonCell {
+  fill: var(--color-accent);
+}
+
+.seasonAxis {
+  font: 400 8.5px var(--font-mono);
+  fill: var(--text-muted);
+}
+
+.seasonToday {
+  stroke: var(--color-text);
+  stroke-width: 1;
+}
+
+/* ------------------------------------------------------------ calendar */
+
+.calendar {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+}
+
+.night {
+  padding: 10px 12px;
+  border: 1px solid var(--color-divider);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 112px;
+}
+
+.nightToday {
+  border-color: var(--color-accent);
+}
+
+.nightDate {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font: 400 10.5px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.nightBar {
+  flex: 1;
+  height: 5px;
+  background: var(--bar-track);
+  position: relative;
+}
+
+.nightBar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-accent);
+}
+
+.nightMeta {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.nightBest {
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.moon {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* The lit part is drawn as moonlight, the dark limb in ink, so a full moon reads bright in every theme. */
+.moonDark {
+  fill: color-mix(in srgb, var(--color-text) 72%, transparent);
+  stroke: color-mix(in srgb, var(--color-text) 72%, transparent);
+  stroke-width: 1;
+}
+
+.moonLit {
+  fill: #f1ecd9;
+}
+
+:global([data-theme="night"]) .moonLit {
+  fill: var(--color-text);
+}
+
+.foot {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.55;
+  max-width: 860px;
+  margin-top: 8px;
+}
+
+@media (max-width: 720px) {
+  .tonightCell {
+    border-right: none;
+    border-bottom: 1px solid var(--color-divider);
+  }
+}
+
+.effList > * {
+  white-space: nowrap;
+}
+
+.targetCell {
+  min-width: 150px;
+}
+
+.adviceCell {
+  min-width: 200px;
+}
