@@ -1,7 +1,8 @@
-"""The data root is only ever changed by one module (PLAN.md §2.1).
+"""The data root is only ever changed by two modules (PLAN.md §2.1).
 
-`ingest/fileops.py` is the single module allowed to move/copy files (and to
-remove empty .Download folders on request); it re-checks every path itself.
+`ingest/fileops.py` (auto-ingest) and `organizer/apply.py` (approved organizer
+plans) are the only modules allowed to move/copy files (fileops may also
+remove empty .Download folders on request); each re-checks every path itself.
 Everything else stays read-only. The only other file-mutating calls swap
 freshly written cache files into place inside var/.
 """
@@ -18,7 +19,7 @@ FORBIDDEN = re.compile(
     r"|open\([^)]*['\"](w|a|x|r\+|wb|ab|xb)['\"]"
 )
 # Whole modules allowed to mutate files (each guards its own paths).
-WRITER_MODULES = {"fileops.py"}
+WRITER_MODULES = {("ingest", "fileops.py"), ("organizer", "apply.py")}
 WRITE_ALLOWED = {
     # var/thumbs only: `tmp.replace(out)` swaps a freshly written thumbnail into place
     ("api.py", "tmp.replace(out)"),
@@ -32,7 +33,7 @@ def test_no_file_mutation_outside_allowlist():
     for path in PACKAGE.rglob("*.py"):
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             code = line.split("#", 1)[0]
-            if path.name in WRITER_MODULES and path.parent.name == "ingest":
+            if (path.parent.name, path.name) in WRITER_MODULES:
                 continue
             if FORBIDDEN.search(code) and not any(path.name == f and snippet in code for f, snippet in WRITE_ALLOWED):
                 offenders.append(f"{path.name}:{lineno}: {line.strip()}")

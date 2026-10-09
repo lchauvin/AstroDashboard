@@ -47,6 +47,9 @@ export default async function LibraryPage() {
           <Link href="/library/calibration" className="button">
             Calibration library
           </Link>
+          <Link href="/library/organizer" className="button">
+            Organizer
+          </Link>
           <RescanButton />
         </div>
       </div>

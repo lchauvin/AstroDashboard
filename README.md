@@ -6,7 +6,10 @@ Library, diagnostics, live monitoring and planning for the observatory. Design a
 own detectors and learned horizon), and Planning (sites with a map, sky calibrated from your own subs, tonight's
 ranking with a moon-aware filter suggestion, a 30-night calendar, new target ideas, SNR curves and goals per filter).
 Phase 5 adds Live (a read-only view of AstroController) and auto-ingest from `G:\Astro\.Download`,
-which runs in **Dry-run** until you switch it to Auto on the Live page (PLAN.md §5.2). The organizer (Phase 6) is next.
+which runs in **Dry-run** until you switch it to Auto on the Live page (PLAN.md §5.2). Phase 6 adds the Organizer (Library → Organizer): a lint of every target against the canonical layout, and
+migration plans you read operation by operation and approve by typing the plan id. Moves only (legacy sessions go to
+`.Trash\<plan>`), journaled in `G:\Astro\.Dashboard\journal.jsonl`, and undoable. Nothing has been applied to
+`G:\Astro` yet; that is your call, target by target (PLAN.md §3.3).
 
 Planning vendors AstroPlanner's SNR and ephemeris modules (`web/src/lib/snr`, `web/src/lib/astro`) and its deep-sky
 catalog (`web/data/catalog`, OpenNGC CC-BY-SA-4.0 + VizieR) — copied once with provenance headers, never read from
@@ -41,6 +44,7 @@ header cache in `var/astrodash.db`); **Rescan** on the Library page picks up new
 The engine never writes to the data root, with one bounded exception: auto-ingest in **Auto** mode moves finished
 frames from `.Download` into targets' `.SessionData\NIGHT_<date>` folders (and copies shared flats). That code is
 confined to `engine/astrodash/ingest/fileops.py`, never overwrites or deletes, and is journaled and undoable per night.
+Organizer plans you approve are applied by `engine/astrodash/organizer/apply.py` under the same rules.
 Otherwise the engine only lists directories and reads FITS/XISF *headers* (plus the pixels of a
 few raw biases for the sky pedestal, and of frames you preview). Its own files (header cache, thumbnails, sites, goals,
 settings) live in `var/`. `engine/tests/test_safety.py` fails if any module gains a

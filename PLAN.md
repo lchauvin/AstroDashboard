@@ -7,7 +7,7 @@ One place to answer four questions about the hobby:
 3. **Live** — how is tonight's session going?
 4. **Planning** — what should I shoot next, with which filter, and for how long?
 
-Status: **Phases 0–5 implemented (2026-10-09)** — scaffold, header indexer, Library (targets, target pages, calibration library), Diagnostics v1 (astro-eval jobs, timeline, frame table, previews) and v2 (findings: clouds, obstruction, twilight, moon, dew, focus drift, tracking, mispointing/rotation, flat↔light check; learned horizon), Planning (sites, sky calibrated from your subs, ranking, moon-aware filter suggestion, calendar, ideas, SNR curves, goals; see §6.5 for what was built and how it differs), Live (AstroController client) and auto-ingest from `.Download` in Dry-run by default (§5.2). Phase 6 not started.
+Status: **Phases 0–6 implemented (2026-10-09)** — scaffold, header indexer, Library (targets, target pages, calibration library), Diagnostics v1 (astro-eval jobs, timeline, frame table, previews) and v2 (findings: clouds, obstruction, twilight, moon, dew, focus drift, tracking, mispointing/rotation, flat↔light check; learned horizon), Planning (sites, sky calibrated from your subs, ranking, moon-aware filter suggestion, calendar, ideas, SNR curves, goals; see §6.5 for what was built and how it differs), Live (AstroController client) and auto-ingest from `.Download` in Dry-run by default (§5.2), and the Organizer (§3.3): lint, dry-run plans, typed approval, journal, undo, trash. No plan has been applied to `G:\Astro`.
 
 ---
 
@@ -210,6 +210,24 @@ Migration of the existing tree (organizer plan, applied per target after approva
 | Empty `1.`–`7.` folders | removed; non-empty ones are kept |
 
 Any existing PixInsight/WBPP project files that reference old paths will break after a move. The organizer lists every `.pxiproject` and `WBPP` folder in the affected target before applying, so you can choose to migrate only targets that are finished or not yet processed.
+
+### 3.3 Organizer as built (Phase 6, 2026-10-09)
+
+Library → **Organizer** (`/library/organizer`). The machinery follows §2.1, with these decisions:
+
+- **Plans are generated against a virtual copy of the target's tree.** Every operation sees the effect of the ones before it. A folder moves with a single rename when its destination is free, and is merged file by file when it isn't. A clash blocks the whole plan ("blocked"); nothing is ever overwritten.
+- **The executor is `organizer/apply.py`.** It and `ingest/fileops.py` are the only modules that change the data root, and `test_safety.py` and `test_organizer.py` enforce it.
+  - It refuses paths outside the root, into `.Download` or the global `.Calibration`, and trash that isn't in `.Trash\<this plan>`.
+  - It re-checks every source (files: size and mtime) and destination just before each step.
+  - It stops at the first problem and journals every step to `G:\Astro\.Dashboard\journal.jsonl`.
+- **Approval:** a plan is a draft until you type its id. For targets with `.pxiproject` or WBPP folders you also tick an acknowledgement. Applying holds the ingest lock, so auto-ingest never moves frames into a tree being reorganized.
+- **Undo** is the inverse of what actually ran, newest step first. It is a new draft that needs its own approval.
+- **Stored Diagnostics follow the frames.** Applying a plan (or its undo) rewrites the stored frame paths and renamed session keys in the dashboard database, so earlier analyses, previews and the learned horizon keep working.
+- **"New revision…"** creates `<Target> R<n+1>\.SessionData` and a `target.json` (create-only). It moves nothing.
+- **Dry run on the real tree (2026-10-09, read-only):** no conflicts in any of the 14 targets. The legacy sessions found are exactly the four listed above. Nearly every target gets a warning about a `.pxiproject` to re-point.
+- **Tested** on the synthetic fixture and on a scratch copy: apply, then undo restores the exact tree. No file disappears (trash is a move), and Library totals are identical after a migration.
+
+**Not built:** a "quarantine this frame" action from Diagnostics, and offering `.Download` darks/biases to the calibration library. Both would be organizer plans. Neither is needed for the migration.
 
 ---
 

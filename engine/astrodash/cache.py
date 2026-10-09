@@ -69,6 +69,15 @@ CREATE TABLE IF NOT EXISTS object_map (
     catalog_id  TEXT,
     created     REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS organizer_plans (
+    id        TEXT PRIMARY KEY,
+    created   REAL NOT NULL,
+    revision  TEXT,
+    title     TEXT NOT NULL,
+    status    TEXT NOT NULL,
+    data      TEXT NOT NULL,
+    result    TEXT
+);
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -258,3 +267,52 @@ class HeaderCache:
         """Forget a mapping row in the dashboard database (no files involved)."""
         with self._lock, self._conn:
             return self._conn.execute("DELETE FROM object_map WHERE object = ?", (display.casefold(),)).rowcount > 0
+
+    # ------------------------------------------------------------------ organizer
+
+    def save_plan(self, plan_id: str, revision: str | None, title: str, status: str, data: dict[str, Any], result: dict[str, Any] | None = None) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO organizer_plans(id, created, revision, title, status, data, result) VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET status=excluded.status, data=excluded.data, result=excluded.result",
+                (plan_id, time.time(), revision, title, status, json.dumps(data), json.dumps(result) if result is not None else None),
+            )
+
+    def plans(self, limit: int = 200) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, created, revision, title, status, data, result FROM organizer_plans ORDER BY created DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [
+            {"id": i, "created": c, "revisionId": r, "title": t, "status": s, **json.loads(d), "result": json.loads(res) if res else None}
+            for i, c, r, t, s, d, res in rows
+        ]
+
+    def plan(self, plan_id: str) -> dict[str, Any] | None:
+        return next((p for p in self.plans(10000) if p["id"] == plan_id), None)
+
+    def remap_diagnostics(self, revision: str, moves: list[tuple[str, str]], session_renames: dict[str, str]) -> int:
+        """After an organizer plan: point stored diagnostics at the frames' new paths and session names.
+
+        `moves` are (src, dst) relative paths in the order they ran; each is applied as a
+        path-prefix replacement. Only this dashboard database changes.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT session, summary, result FROM diagnostics WHERE revision = ?", (revision,)
+            ).fetchall()
+        changed = 0
+        for session, summary, result in rows:
+            new_s, new_r = summary, result
+            for src, dst in moves:
+                new_s = new_s.replace(f'"{src}/', f'"{dst}/').replace(f'"{src}"', f'"{dst}"')
+                new_r = new_r.replace(f'"{src}/', f'"{dst}/').replace(f'"{src}"', f'"{dst}"')
+            new_session = session_renames.get(session, session)
+            if (new_s, new_r, new_session) != (summary, result, session):
+                with self._lock, self._conn:
+                    self._conn.execute(
+                        "UPDATE diagnostics SET session = ?, summary = ?, result = ? WHERE revision = ? AND session = ?",
+                        (new_session, new_s, new_r, revision, session),
+                    )
+                changed += 1
+        return changed
