@@ -40,6 +40,7 @@ source = { editable = "." }
 dependencies = [
     { name = "astropy" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "numpy" },
     { name = "pillow" },
     { name = "scipy" },
@@ -58,6 +59,7 @@ dev = [
 requires-dist = [
     { name = "astropy", specifier = ">=8.0.1" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "numpy", specifier = ">=2.5.3" },
     { name = "pillow", specifier = ">=11.0" },
     { name = "scipy", specifier = ">=1.18.1" },

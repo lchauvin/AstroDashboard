@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import __version__, api_planning, planning
+from . import __version__, api_live, api_planning, planning
 from .cache import HeaderCache
 from .config import Config
 from .diagnostics.detectors import analyse as analyse_frames, horizon_samples, learn_horizon
@@ -90,7 +90,11 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None)
     async def lifespan(_: FastAPI):
         if scan_on_start:
             state.start_scan()
+            # The ingest watcher runs whether or not the Live page is open (it only plans unless mode is Auto).
+            state.ingest.start()
         yield
+        if scan_on_start:
+            state.ingest.stop()
 
     app = FastAPI(title="AstroDashboard engine", version=__version__, lifespan=lifespan)
     app.state.engine = state
@@ -283,6 +287,7 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None)
         return {"ok": removed}
 
     api_planning.register(app, state)
+    api_live.register(app, state)
     return app
 
 

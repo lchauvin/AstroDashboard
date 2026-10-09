@@ -26,6 +26,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "goalCapHours": 40,
     # Rig used by the SNR model; null fields are filled from the headers in the web app.
     "rig": None,
+    # AstroController, for Live (its token comes from ASTROCONTROLLER_TOKEN, never from here).
+    "liveUrl": "http://127.0.0.1:3005",
 }
 
 
@@ -237,6 +239,8 @@ def register(app: FastAPI, state) -> None:
             cap = body["goalCapHours"]
             if not isinstance(cap, (int, float)) or not 1 <= cap <= 500:
                 raise HTTPException(422, detail="goalCapHours must be between 1 and 500")
+        if "liveUrl" in body and not (isinstance(body["liveUrl"], str) and body["liveUrl"].startswith(("http://", "https://"))):
+            raise HTTPException(422, detail="liveUrl must be an http(s) URL")
         merged = {**(cache.get_json("settings") or {}), **body}
         cache.set_json("settings", merged)
         return {"settings": _settings()}

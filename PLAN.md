@@ -7,7 +7,7 @@ One place to answer four questions about the hobby:
 3. **Live** — how is tonight's session going?
 4. **Planning** — what should I shoot next, with which filter, and for how long?
 
-Status: **Phases 0–4 implemented (2026-10-09)** — scaffold, header indexer, Library (targets, target pages, calibration library), Diagnostics v1 (astro-eval jobs, timeline, frame table, previews) and v2 (findings: clouds, obstruction, twilight, moon, dew, focus drift, tracking, mispointing/rotation, flat↔light check; learned horizon), Planning (sites, sky calibrated from your subs, ranking, moon-aware filter suggestion, calendar, ideas, SNR curves, goals; see §6.5 for what was built and how it differs). Phases 5–6 not started.
+Status: **Phases 0–5 implemented (2026-10-09)** — scaffold, header indexer, Library (targets, target pages, calibration library), Diagnostics v1 (astro-eval jobs, timeline, frame table, previews) and v2 (findings: clouds, obstruction, twilight, moon, dew, focus drift, tracking, mispointing/rotation, flat↔light check; learned horizon), Planning (sites, sky calibrated from your subs, ranking, moon-aware filter suggestion, calendar, ideas, SNR curves, goals; see §6.5 for what was built and how it differs), Live (AstroController client) and auto-ingest from `.Download` in Dry-run by default (§5.2). Phase 6 not started.
 
 ---
 
@@ -296,6 +296,23 @@ This is the **one standing exception** to "every move needs approval". You appro
 **Closing the night.** Once the sequence has ended (from AstroController) or after local noon, the last held frame is moved. Directories left empty in `.Download\<YYYY-MM-DD>\` are then removed with `rmdir_empty`. Live then shows a night summary: frames ingested per target/filter, anything held back and why, and a link to run diagnostics on the new session.
 
 **Tie-in with Live diagnostics.** The cheap checks in §4.2 (obstruction, dawn creep, clouds, mispointing) run on each frame as it is ingested. The results are on the Live page within a minute of the frame being saved.
+
+### 5.2 As built (Phase 5, 2026-10-09)
+
+**Live.** The engine reads AstroController's `/api/state` and its two preview images and serves them under `/api/live/*`, adding `ASTROCONTROLLER_TOKEN` from its own environment (never stored, never sent to the browser). The page polls every 3 s rather than relaying the SSE stream: simpler through the Next.js rewrite, and plenty for a page that changes once per guide step. It shows the running step, camera/mount/focuser/guider state, the latest frame, RA/Dec guiding, conditions and moon, and tonight's frames with AstroController's own flag notes. It is read-only; controls stay in AstroController. The address is in Settings → Live · Ingest.
+
+**Auto-ingest** follows §5.1, with these decisions:
+
+- `ingest/fileops.py` is the only module that changes the data root (`test_safety.py` allows it and nothing else; `test_ingest.py` checks that only the ingest service imports it). Every call re-checks its own paths: source under `.Download`, destination in a `.SessionData\NIGHT_` folder of the same volume, never overwriting.
+- **Default mode is Dry-run**, and switching to Auto needs a confirmation in the UI. It has not been switched on.
+- **Undo pauses the night.** Otherwise Auto re-ingests it on the next pass (found while testing). A paused night shows what would move and has a Resume button.
+- **Empty `.Download` folders are never removed automatically.** Removing them is a deletion, so each night has a "Remove N empty folders…" button with a confirmation, and the API refuses without `confirm: true`. `os.rmdir` itself refuses a folder with anything in it.
+- **Flat copies are not deleted by undo.** They are reported instead, because removing a copy is a deletion.
+- **A night is closed** by your click, after the next local noon, or when AstroController reports no running step. Until then the newest light stays for the preview.
+- **The object → target table** is learned from the OBJECT headers already in the Library (e.g. "Bubble Nebula" → NGC 7635). Your own rows win and can name a specific revision, including a finished one.
+- **Tested end to end** with a scratch data root (the throwaway fixture used while building), never `G:\`: dry-run plan, mapping prompt, Auto moves and the flat copy, close night, undo + pause, and cleanup.
+
+**Not built (yet):** incremental per-frame diagnostics on ingest (the night's summary links to Diagnostics instead); offering DARK/BIAS frames to the calibration library (they stay in `.Download` for the organizer, Phase 6); push alerts for held files (they show on the Live page); and the real-night dry-run check, which is yours to do before switching Auto on.
 
 ---
 

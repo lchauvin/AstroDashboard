@@ -183,6 +183,11 @@ class Library:
             "previewPath": info.finished_preview,
             "panels": panels,
             "pointing": _pointing(lights_ok),
+            # Where new nights go (ingest): the .SessionData of the latest session, else <target>/.SessionData.
+            "sessionRoot": next(
+                (s["path"].rsplit("/", 1)[0] for s in reversed(sessions) if s.get("path") and "/.SessionData/" in s["path"].replace("\\", "/")),
+                info.path.replace("\\", "/").rstrip("/") + "/.SessionData",
+            ),
             "equipment": [{"instrume": i, "telescop": tel, "focalLength": fl} for i, tel, fl in equipment],
             "totals": {
                 "seconds": total_seconds,

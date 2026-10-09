@@ -75,6 +75,7 @@ export type RigSettings = {
 export type DashSettings = {
   goalCapHours: number;
   rig: RigSettings | null;
+  liveUrl?: string;
 };
 
 export type PlanningContext = {

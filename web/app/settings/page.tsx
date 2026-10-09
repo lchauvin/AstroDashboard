@@ -1,12 +1,13 @@
 import Link from "next/link";
 
 import { EngineNotice } from "@/components/EngineNotice";
+import { LiveIngestSettings } from "@/components/settings/LiveIngestSettings";
 import { GoalCapForm, RigForm } from "@/components/settings/RigForm";
 import { SitesManager, type LearnedBin, type SiteSky } from "@/components/settings/SitesManager";
 import type { Suggestion } from "@/components/settings/SitesMap";
 import styles from "@/components/settings/settings.module.css";
-import { Marks } from "@/components/ui";
 import { engineGet } from "@/lib/engine";
+import type { IngestStatus, LivePayload } from "@/lib/live";
 import { loadPlanningData } from "@/server/planning";
 import pageStyles from "../library/library.module.css";
 
@@ -17,7 +18,7 @@ const TABS = [
   { id: "sites", label: "Sites" },
   { id: "rig", label: "Rig" },
   { id: "goals", label: "Goals" },
-  { id: "more", label: "Data · Ingest · Live" },
+  { id: "live", label: "Live · Ingest" },
 ] as const;
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
@@ -28,6 +29,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     engineGet<{ suggestions: Suggestion[] }>("/api/sites/suggest"),
     engineGet<{ bins: LearnedBin[] }>("/api/horizon"),
   ]);
+  const [live, ingest] =
+    tab === "live" ? await Promise.all([engineGet<LivePayload>("/api/live/state"), engineGet<IngestStatus>("/api/ingest")]) : [null, null];
 
   return (
     <main className="page">
@@ -78,13 +81,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <GoalCapForm cap={data.data.context.settings.goalCapHours} />
         </div>
       ) : (
-        <div className="framed" style={{ padding: "20px 24px", maxWidth: 720 }}>
-          <Marks />
-          <p className={styles.hint}>
-            Data root and filter aliases are read from <code>astrodashboard.toml</code> for now. Auto-ingest (Phase 5) and the
-            AstroController link for Live arrive with their sections.
-          </p>
-        </div>
+        <LiveIngestSettings
+          liveUrl={data.data.context.settings.liveUrl ?? "http://127.0.0.1:3005"}
+          tokenSet={live?.ok ? live.data.tokenSet : false}
+          online={live?.ok ? live.data.online : false}
+          ingest={ingest?.ok ? ingest.data : null}
+        />
       )}
     </main>
   );

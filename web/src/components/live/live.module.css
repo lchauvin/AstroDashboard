@@ -1,0 +1,297 @@
+.live {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.statusLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.big {
+  font: 600 28px/1.1 var(--font-heading);
+  letter-spacing: 0.02em;
+}
+
+.path {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 14px;
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.facts dt {
+  font: 400 10px/1.9 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.warnText {
+  color: var(--status-serious);
+}
+
+.frame {
+  width: 100%;
+  height: auto;
+  display: block;
+  background: #000;
+}
+
+.rms {
+  display: flex;
+  gap: 18px;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}
+
+.rms b {
+  color: var(--color-text);
+  font-size: 18px;
+}
+
+.guide {
+  margin: 0;
+}
+
+.guide svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.zero {
+  stroke: var(--color-divider);
+}
+
+.raLine,
+.decLine {
+  fill: none;
+  stroke-width: 1.5;
+}
+
+.raLine {
+  stroke: var(--filter-B);
+}
+
+.decLine {
+  stroke: var(--filter-H);
+}
+
+.axis {
+  font: 400 9.5px var(--font-mono);
+  fill: var(--text-muted);
+}
+
+.keyRa,
+.keyDec {
+  display: inline-block;
+  width: 14px;
+  border-top: 2px solid;
+  vertical-align: middle;
+  margin: 0 4px 0 8px;
+}
+
+.keyRa {
+  border-color: var(--filter-B);
+}
+
+.keyDec {
+  border-color: var(--filter-H);
+}
+
+.guideRow {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.guideStar {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  background: #000;
+  border: 1px solid var(--color-divider);
+}
+
+.offline {
+  padding: 18px 20px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 26px;
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scroller {
+  overflow-x: auto;
+}
+
+.flagged {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 12.5px;
+}
+
+.hint {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.error {
+  font-size: 13px;
+  color: var(--status-bad);
+}
+
+/* ------------------------------------------------------------ ingest */
+
+.ingest {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ingestHead,
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.modes {
+  display: inline-flex;
+  border: 1px solid var(--color-divider);
+}
+
+.mode {
+  height: 32px;
+  padding: 0 14px;
+  font: 400 10.5px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-right: 1px solid var(--color-divider);
+}
+
+.mode:last-child {
+  border-right: none;
+}
+
+.modeOn {
+  color: var(--color-text);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+.confirmBox {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-color: var(--color-accent);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.night {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nightHead {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nightTitle {
+  font: 600 15px var(--font-body);
+}
+
+.confirmInline {
+  font-size: 13px;
+}
+
+.link {
+  color: var(--color-accent-700);
+  text-decoration: underline;
+  font-size: 13px;
+}
+
+.holds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.holds li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.prompt {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-left: 2px solid var(--status-warn);
+  font-size: 13.5px;
+}
+
+.select {
+  height: 30px;
+  border: 1px solid var(--color-divider);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  border-radius: 0;
+  max-width: 340px;
+}
+
+.scroller :global(td.num),
+.block :global(td.num) {
+  white-space: nowrap;
+}

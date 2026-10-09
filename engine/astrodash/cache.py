@@ -48,6 +48,27 @@ CREATE TABLE IF NOT EXISTS goals (
     data     TEXT NOT NULL,
     updated  REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ingest_journal (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts             REAL NOT NULL,
+    download_night TEXT NOT NULL,
+    op             TEXT NOT NULL,
+    src            TEXT NOT NULL,
+    dst            TEXT NOT NULL,
+    size           INTEGER,
+    revision       TEXT,
+    kind           TEXT,
+    filter         TEXT,
+    undone         REAL,
+    error          TEXT
+);
+CREATE TABLE IF NOT EXISTS object_map (
+    object      TEXT PRIMARY KEY,
+    display     TEXT NOT NULL,
+    revision_id TEXT,
+    catalog_id  TEXT,
+    created     REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -191,3 +212,49 @@ class HeaderCache:
                 )
             else:
                 self._conn.execute("DELETE FROM goals WHERE revision = ?", (revision,))
+
+    # ------------------------------------------------------------------ ingest
+
+    def journal_add(self, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "INSERT INTO ingest_journal(ts, download_night, op, src, dst, size, revision, kind, filter, error) "
+                "VALUES (:ts, :download_night, :op, :src, :dst, :size, :revision, :kind, :filter, :error)",
+                rows,
+            )
+
+    def journal(self, download_night: str | None = None, limit: int = 5000) -> list[dict[str, Any]]:
+        q = "SELECT id, ts, download_night, op, src, dst, size, revision, kind, filter, undone, error FROM ingest_journal"
+        args: tuple = ()
+        if download_night:
+            q += " WHERE download_night = ?"
+            args = (download_night,)
+        q += " ORDER BY id DESC LIMIT ?"
+        with self._lock:
+            rows = self._conn.execute(q, args + (limit,)).fetchall()
+        keys = ("id", "ts", "downloadNight", "op", "src", "dst", "size", "revision", "kind", "filter", "undone", "error")
+        return [dict(zip(keys, r)) for r in rows]
+
+    def journal_mark_undone(self, ids: list[int]) -> None:
+        with self._lock, self._conn:
+            self._conn.executemany("UPDATE ingest_journal SET undone = ? WHERE id = ?", [(time.time(), i) for i in ids])
+
+    def object_map(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT object, display, revision_id, catalog_id, created FROM object_map").fetchall()
+        return {o: {"object": d, "revisionId": r, "catalogId": c, "created": t} for o, d, r, c, t in rows}
+
+    def map_object(self, display: str, revision_id: str | None, catalog_id: str | None) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO object_map(object, display, revision_id, catalog_id, created) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(object) DO UPDATE SET display=excluded.display, revision_id=excluded.revision_id, catalog_id=excluded.catalog_id",
+                (display.casefold(), display, revision_id, catalog_id, time.time()),
+            )
+
+    def unmap_object(self, display: str) -> bool:
+        """Forget a mapping row in the dashboard database (no files involved)."""
+        with self._lock, self._conn:
+            return self._conn.execute("DELETE FROM object_map WHERE object = ?", (display.casefold(),)).rowcount > 0
