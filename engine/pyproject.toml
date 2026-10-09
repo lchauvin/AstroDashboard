@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astrodash-engine"
+version = "0.1.0"
+description = "AstroDashboard engine: indexes G:\\Astro, serves the Library, diagnostics and live proxy"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pillow>=11.0",
+    "numpy>=2.5.3",
+    "scipy>=1.18.1",
+    "astropy>=8.0.1",
+    "sep>=1.4.1",
+    "xisf>=0.9.7",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[project.scripts]
+astrodash-engine = "astrodash.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["astrodash*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

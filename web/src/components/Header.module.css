@@ -1,0 +1,133 @@
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.inner {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  height: 64px;
+  padding: 0 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brandMark {
+  width: 12px;
+  height: 12px;
+  background: var(--color-accent);
+  flex: none;
+}
+
+.brandName {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 23px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text);
+  line-height: 1;
+}
+
+.brandTagline {
+  font: 400 9.5px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+  padding-top: 3px;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+
+.navLink {
+  font-family: var(--font-heading);
+  font-size: 15px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+  border-bottom: 2px solid transparent;
+  padding-bottom: 2px;
+  transition: color var(--transition), border-color var(--transition);
+}
+
+.navLink:hover {
+  color: var(--color-accent-700);
+  border-bottom-color: var(--color-accent-400);
+}
+
+.navLink:active {
+  color: var(--color-accent-600);
+}
+
+.navLinkActive {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
+}
+
+.navLinkActive:hover {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
+}
+
+@media (max-width: 720px) {
+  .inner {
+    padding: 0 18px;
+    gap: 12px;
+  }
+  .brandTagline {
+    display: none;
+  }
+  .nav {
+    gap: 16px;
+  }
+}
+
+.divider {
+  width: 1px;
+  height: 18px;
+  background: var(--color-divider);
+}
+
+.iconLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: var(--color-neutral-600);
+  border: 1px solid transparent;
+  transition: color var(--transition), border-color var(--transition);
+}
+
+.iconLink:hover {
+  color: var(--color-accent-700);
+  border-color: var(--color-divider);
+}
+
+.iconLinkActive {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+@media (max-width: 720px) {
+  .divider {
+    display: none;
+  }
+  .nav {
+    overflow-x: auto;
+  }
+}

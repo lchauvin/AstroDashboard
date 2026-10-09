@@ -1,0 +1,91 @@
+/*
+ * Dashboard additions to the Industry tokens (PLAN.md §7).
+ *
+ * Status palette: reserved for state, always paired with an icon + label,
+ * never used as a series colour. Filter colours: the validated categorical
+ * steps (dataviz reference palette), assigned per filter in the fixed order
+ * L R G B H O S. Validated light: R↔G CVD ΔE 7.2 (floor band) — legal because a
+ * filter colour is always shown next to its letter. Dark: all checks pass.
+ */
+:root {
+  --status-good: #0ca30c;
+  --status-warn: #fab219;
+  --status-serious: #ec835a;
+  --status-bad: #d03b3b;
+  --status-info: var(--color-accent);
+
+  --filter-L: #4a3aa7;
+  --filter-R: #e34948;
+  --filter-G: #008300;
+  --filter-B: #2a78d6;
+  --filter-H: #eb6834;
+  --filter-O: #1baf7a;
+  --filter-S: #eda100;
+  --filter-other: #98989b;
+
+  --text-muted: var(--color-neutral-600);
+  --text-secondary: var(--color-neutral-700);
+  --panel-fill: transparent;
+  --row-hover: color-mix(in srgb, var(--color-accent) 6%, transparent);
+  --bar-track: color-mix(in srgb, var(--color-text) 6%, transparent);
+  --hatch-bg: repeating-linear-gradient(135deg, var(--hatch) 0 1px, transparent 1px 7px);
+
+  color-scheme: light;
+}
+
+/* Dark: its own steps, not an inversion. Used for Live and night work. */
+:root[data-theme="dark"] {
+  --color-bg: #0c0e11;
+  --color-surface: #15181c;
+  --color-text: #e6e8ea;
+  --color-accent: #749dc4;
+  --color-accent-2: #7e9cb8;
+  --color-divider: rgba(242, 242, 243, 0.14);
+  --color-neutral-500: #7a7a7d;
+  --color-neutral-600: #98989b;
+  --color-neutral-700: #b7b7ba;
+  --color-accent-700: #94bce3;
+  --color-accent-400: #597ea3;
+
+  --filter-L: #9085e9;
+  --filter-R: #e66767;
+  --filter-G: #008300;
+  --filter-B: #3987e5;
+  --filter-H: #d95926;
+  --filter-O: #199e70;
+  --filter-S: #c98500;
+
+  color-scheme: dark;
+}
+
+/* Red night mode for use at the scope: everything collapses to dim reds.
+   Filter identity is carried by the letter labels, which are always shown. */
+:root[data-theme="night"] {
+  --color-bg: #070000;
+  --color-surface: #120202;
+  --color-text: #d23a2e;
+  --color-accent: #a32a22;
+  --color-accent-2: #8a241d;
+  --color-divider: rgba(210, 58, 46, 0.22);
+  --color-neutral-500: #7a2620;
+  --color-neutral-600: #93302a;
+  --color-neutral-700: #b13a31;
+  --color-accent-700: #c23a30;
+  --color-accent-400: #7a1f19;
+  --hatch: rgba(163, 42, 34, 0.5);
+
+  --status-good: #d23a2e;
+  --status-warn: #d23a2e;
+  --status-serious: #d23a2e;
+  --status-bad: #ff5544;
+
+  --filter-L: #8a241d;
+  --filter-R: #b3302a;
+  --filter-G: #6e1c17;
+  --filter-B: #9e2a23;
+  --filter-H: #c43a30;
+  --filter-O: #7f2019;
+  --filter-S: #a82d26;
+
+  color-scheme: dark;
+}

@@ -1,0 +1,101 @@
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.metric select {
+  height: 30px;
+  border: 1px solid var(--color-divider);
+  background: var(--color-bg);
+  padding: 0 8px;
+  font-size: 13.5px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-bottom: 8px;
+  font: 400 10.5px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.twilightSwatch {
+  display: inline-block;
+  width: 12px;
+  height: 10px;
+  background: var(--hatch-bg);
+  border: 1px solid var(--color-divider);
+}
+
+.chart {
+  position: relative;
+  width: 100%;
+}
+
+.chart svg {
+  display: block;
+  overflow: visible;
+}
+
+.grid {
+  stroke: var(--color-divider);
+  stroke-width: 1;
+}
+
+.axis {
+  stroke: var(--color-neutral-500);
+  stroke-width: 1;
+}
+
+.tick {
+  font: 400 10px var(--font-mono);
+  fill: var(--text-muted);
+}
+
+.twilight {
+  fill: color-mix(in srgb, var(--status-warn) 10%, transparent);
+}
+
+.twilightDeep {
+  fill: color-mix(in srgb, var(--status-warn) 22%, transparent);
+}
+
+.tooltip {
+  position: absolute;
+  z-index: 5;
+  width: 240px;
+  padding: 8px 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-accent);
+  box-shadow: var(--shadow-md);
+  font: 400 12px/1.45 var(--font-body);
+  pointer-events: none;
+}
+
+.flip {
+  stroke: var(--color-accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+
+.focus {
+  fill: var(--text-muted);
+}

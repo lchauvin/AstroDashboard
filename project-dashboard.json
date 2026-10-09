@@ -1,0 +1,19 @@
+{
+  "name": "AstroDashboard",
+  "services": [
+    {
+      "name": "Web UI",
+      "type": "Next.js",
+      "port": 3006,
+      "command": "npm run dev -- --port 3006",
+      "cwd": "web"
+    },
+    {
+      "name": "Engine",
+      "type": "FastAPI",
+      "port": 3007,
+      "command": "uv run astrodash-engine --port 3007",
+      "cwd": "engine"
+    }
+  ]
+}

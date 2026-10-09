@@ -1,0 +1,96 @@
+.card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "text svg" "legend svg";
+  gap: 14px 28px;
+  padding: 18px 22px;
+  margin-bottom: 34px;
+}
+
+.text {
+  grid-area: text;
+}
+
+.text p {
+  margin-top: 10px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 560px;
+}
+
+.hover {
+  font: 400 12px/1.4 var(--font-mono) !important;
+  color: var(--color-text) !important;
+}
+
+.svg {
+  grid-area: svg;
+  overflow: visible;
+}
+
+.legend {
+  grid-area: legend;
+  align-self: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font: 400 10.5px/1 var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ring {
+  fill: none;
+  stroke: var(--color-divider);
+  stroke-width: 1;
+}
+
+.cardinal {
+  font: 600 12px var(--font-heading);
+  letter-spacing: 0.1em;
+  fill: var(--text-secondary);
+}
+
+.altLabel {
+  font: 400 9px var(--font-mono);
+  fill: var(--text-muted);
+}
+
+.wedge {
+  fill: color-mix(in srgb, var(--status-serious) 35%, transparent);
+  stroke: var(--status-serious);
+  stroke-width: 1;
+}
+
+.wedgeSwatch {
+  display: inline-block;
+  width: 12px;
+  height: 10px;
+  background: color-mix(in srgb, var(--status-serious) 35%, transparent);
+  border: 1px solid var(--status-serious);
+}
+
+.clear {
+  fill: var(--color-neutral-500);
+  opacity: 0.6;
+}
+
+.blocked {
+  fill: var(--status-serious);
+  stroke: var(--color-bg);
+  stroke-width: 1.5;
+}
+
+@media (max-width: 720px) {
+  .card {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "text" "svg" "legend";
+  }
+}

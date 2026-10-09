@@ -1,0 +1,42 @@
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 0;
+  white-space: nowrap;
+}
+
+.link:hover {
+  color: var(--color-accent-700);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 230px;
+}
+
+.input {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--color-accent);
+  background: transparent;
+  font-size: 13.5px;
+  outline: none;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.error {
+  font: 400 11px/1.3 var(--font-mono);
+  color: var(--status-bad);
+}

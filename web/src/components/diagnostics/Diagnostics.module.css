@@ -1,0 +1,366 @@
+.queueInfo {
+  margin-left: auto;
+  font: 400 10.5px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.nightLink,
+.targetLink {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 17px;
+  letter-spacing: 0.04em;
+}
+
+.nightLink:hover,
+.targetLink:hover {
+  color: var(--color-accent-700);
+}
+
+.chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font: 400 11px/1 var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.progressBar {
+  display: inline-block;
+  width: 120px;
+  height: 6px;
+  background: var(--bar-track);
+}
+
+.progressBar > span {
+  display: block;
+  height: 6px;
+  background: var(--color-accent);
+  transition: width 300ms ease-out;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 14px;
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 0;
+}
+
+.action:hover {
+  color: var(--color-accent-700);
+}
+
+/* ---- session page ---------------------------------------------------- */
+
+.runBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 18px 0 30px;
+}
+
+.meta {
+  font: 400 10.5px/1.5 var(--font-mono);
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 18px;
+  margin-bottom: 36px;
+}
+
+.card {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cardBig {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.cardBig small {
+  font-size: 16px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.cardStats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 10px;
+  font: 400 11.5px/1.5 var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.block {
+  margin-bottom: 38px;
+}
+
+.blockHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.calRow {
+  display: grid;
+  grid-template-columns: 22px 120px 200px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--color-divider);
+  font-size: 14px;
+  align-items: start;
+}
+
+.calIssues {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.calIssues li {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.select {
+  height: 30px;
+  border: 1px solid var(--color-divider);
+  background: var(--color-bg);
+  padding: 0 8px;
+  font-size: 13.5px;
+}
+
+.tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--color-divider);
+}
+
+.tab {
+  height: 30px;
+  padding: 0 12px;
+  font: 400 10px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-right: 1px solid var(--color-divider);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tab:last-child {
+  border-right: none;
+}
+
+.tabActive {
+  color: var(--color-text);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+.frameTable td {
+  font-size: 13px;
+  padding: 7px 8px;
+  white-space: nowrap;
+}
+
+.frameTable th {
+  cursor: pointer;
+  user-select: none;
+}
+
+.frameTable th[aria-sort] {
+  color: var(--color-text);
+}
+
+.frameTable tbody tr {
+  cursor: pointer;
+}
+
+.rejectedRow td {
+  color: var(--text-muted);
+}
+
+.reasonList {
+  white-space: normal;
+  font-size: 12px;
+  color: var(--text-secondary);
+  max-width: 260px;
+}
+
+.flatCard {
+  padding: 14px 16px;
+}
+
+.flatNotes {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.flatNotes li {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---- preview modal --------------------------------------------------- */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.modal {
+  position: relative;
+  background: var(--mount);
+  border: 1px solid var(--dark-hairline-strong);
+  max-width: min(1400px, 96vw);
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  color: #e6e8ea;
+}
+
+.modal img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(94vh - 90px);
+  object-fit: contain;
+  background: #000;
+}
+
+.modalBar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  font: 400 11.5px/1.4 var(--font-mono);
+  border-top: 1px solid var(--dark-hairline);
+  flex-wrap: wrap;
+}
+
+.modalBar button {
+  color: #e6e8ea;
+  display: inline-flex;
+  align-items: center;
+}
+
+.modalBar button:hover {
+  color: var(--color-accent-400);
+}
+
+.modalLoading {
+  width: min(1000px, 90vw);
+  height: 60vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 400 12px/1 var(--font-mono);
+  color: rgba(242, 242, 243, 0.6);
+}
+
+@media (max-width: 720px) {
+  .calRow {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+}
+
+.flatMatch {
+  margin-bottom: 18px;
+}
+
+.flatMatchRow {
+  display: grid;
+  grid-template-columns: 22px 260px minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--color-divider);
+  align-items: start;
+  font-size: 13.5px;
+}
+
+.flatMatchNotes {
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.flagBadges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.flagBadge {
+  font: 500 9px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 5px;
+  border: 1px solid var(--color-divider);
+  color: var(--text-secondary);
+}
+
+@media (max-width: 720px) {
+  .flatMatchRow {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+}

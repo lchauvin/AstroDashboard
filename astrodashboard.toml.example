@@ -1,0 +1,38 @@
+# Copy to astrodashboard.toml (next to this file). Every key is optional.
+
+[data]
+root = "G:/Astro"
+# Flats further than this from the lights' focuser position get a warning.
+focus_tolerance_steps = 100
+
+# Extra filter aliases (case-insensitive) on top of the built-in ones
+# (Ha/H-Alpha → H, OIII/O3 → O, SII/S2 → S, Lum → L, Red → R ...).
+[data.filter_aliases]
+# "Halpha3nm" = "H"
+
+[server]
+host = "127.0.0.1"
+port = 3007
+# db_path = "D:/Python/AstroDashboard/var/astrodash.db"
+
+[camera]
+# Readout modes in which the camera ignores gain and offset. Frames in these modes are
+# grouped and matched on readout + exposure + temperature only. Verified on the
+# QHY miniCam8M (IMX585): ~400 ADU bias level and ~1.4 ADU read noise whether
+# gain 9 / offset 100 or gain 69 / offset 1.
+gain_ignored_readouts = ["Linearity HDR"]
+# Readout mode flats must be taken in (the IMX585 misbehaves for flats in HDR).
+# Set to "" to disable the check.
+flat_readout = "Full Resolution"
+# Bias frames shorter than this are flagged as suspect (1 µs HDR biases measured
+# ~24.5 ADU noise vs ~1.4 ADU for every other HDR frame on this camera).
+min_bias_exposure_s = 0.2
+
+[diagnostics]
+# astro-eval checkout used for session diagnostics, and worker processes (0 = cores - 1).
+# astro_eval_path = "D:/Python/AstroSubQualityEvaluation"
+# workers = 0
+
+[darks]
+temp_tolerance_c = 1.0
+exposure_tolerance_s = 0.5

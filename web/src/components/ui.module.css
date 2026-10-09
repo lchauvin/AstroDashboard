@@ -1,0 +1,108 @@
+.status {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: -2px;
+}
+
+.filterChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 500 11px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: none;
+  color: var(--color-text);
+}
+
+.filterSwatch {
+  width: 9px;
+  height: 9px;
+  flex: none;
+}
+
+.tip {
+  position: relative;
+  display: inline-flex;
+  outline-offset: 1px;
+}
+
+.tipBlock {
+  display: flex;
+  width: 100%;
+}
+
+.tipBox {
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  min-width: 160px;
+  max-width: 320px;
+  width: max-content;
+  padding: 9px 11px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-accent);
+  color: var(--color-text);
+  font: 400 12px/1.45 var(--font-body);
+  text-align: left;
+  white-space: normal;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 80ms ease-out;
+}
+
+.tip:hover > .tipBox,
+.tip:focus-visible > .tipBox,
+.tip:focus-within > .tipBox {
+  opacity: 1;
+  visibility: visible;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  font: 500 9.5px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border: 1px solid var(--color-divider);
+  white-space: nowrap;
+}
+
+.badge_neutral {
+  color: var(--color-text);
+}
+
+.badge_accent {
+  color: var(--color-accent-700);
+  border-color: var(--color-accent);
+}
+
+.badge_muted {
+  color: var(--text-muted);
+}
+
+.stat {
+  padding: 14px 16px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.statValue {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 35px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.statSub {
+  font: 400 11px/1.3 var(--font-mono);
+  color: var(--text-muted);
+}

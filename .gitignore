@@ -1,0 +1,8 @@
+var/
+web/node_modules/
+web/.next/
+web/next-env.d.ts
+engine/.venv/
+**/__pycache__/
+*.egg-info/
+astrodashboard.toml

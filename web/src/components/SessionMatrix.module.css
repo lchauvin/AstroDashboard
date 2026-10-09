@@ -1,0 +1,149 @@
+.scroller {
+  overflow-x: auto;
+  padding-top: 70px;
+  margin-top: -70px;
+}
+
+.matrix td {
+  vertical-align: top;
+}
+
+.night {
+  white-space: nowrap;
+  min-width: 170px;
+}
+
+.date {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 17px;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+}
+
+.folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.note {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font: 400 10.5px/1.2 var(--font-mono);
+  color: var(--text-muted);
+}
+
+.cell {
+  min-width: 92px;
+  white-space: nowrap;
+}
+
+.empty {
+  color: var(--text-muted);
+}
+
+.frames {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.hours {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.panels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+
+.panelMissing {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.marks {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font: 500 10px/1 var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.setAside {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.total {
+  text-align: right;
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+
+.total .muted {
+  font-size: 11px;
+}
+
+.conditions {
+  white-space: nowrap;
+}
+
+.condLine {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.moon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.key {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 10px;
+  font: 400 10.5px/1.4 var(--font-mono);
+  color: var(--text-muted);
+}
+
+.diagLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+  font: 500 9.5px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.diagLink:hover {
+  color: var(--color-accent-700);
+}

@@ -1,0 +1,149 @@
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 400 10.5px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 18px;
+}
+
+.back:hover {
+  color: var(--color-accent-700);
+}
+
+.title {
+  font-size: 46px;
+  line-height: 0.96;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-top: 8px;
+}
+
+.lead {
+  margin: 12px 0 30px;
+  max-width: 720px;
+  color: var(--text-secondary);
+}
+
+.block {
+  margin-bottom: 38px;
+}
+
+.block > h2 {
+  margin-bottom: 14px;
+}
+
+.note {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: -6px 0 10px;
+}
+
+.scroller {
+  overflow-x: auto;
+  padding-top: 60px;
+  margin-top: -60px;
+}
+
+.statusCell {
+  white-space: nowrap;
+}
+
+.dismissedRow td {
+  color: var(--text-muted);
+}
+
+.dismissNote {
+  margin-top: 4px;
+  font-size: 12px;
+  white-space: normal;
+  max-width: 240px;
+  color: var(--text-secondary);
+}
+
+.uses {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+}
+
+.uses a:hover {
+  color: var(--color-accent-700);
+}
+
+.suspectList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13.5px;
+  line-height: 1.9;
+}
+
+.coverage td,
+.coverage th {
+  white-space: nowrap;
+}
+
+.coverCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+}
+
+.builds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 22px;
+}
+
+.build {
+  padding: 16px 18px;
+}
+
+.buildHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.buildName {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 20px;
+  letter-spacing: 0.06em;
+}
+
+.masterList {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  font-size: 12.5px;
+  line-height: 1.75;
+}
+
+.raw summary {
+  cursor: pointer;
+  font: 400 10.5px/1.6 var(--font-mono);
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.raw summary:hover {
+  color: var(--color-accent-700);
+}
+
+.raw table td {
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+@media (max-width: 720px) {
+  .builds {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
