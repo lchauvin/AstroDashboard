@@ -162,6 +162,7 @@ def test_conflicts_block_and_changed_sources_stop(data_root, tmp_path):
     {"op": "rmdir_empty", "dst": "IC 1848 (Soul Nebula)"},
     {"op": "write_new", "dst": "IC 1848 (Soul Nebula)/.SessionData/NIGHT_2026-02-01/LIGHT/H/h0.fits", "text": "x"},
     {"op": "delete", "dst": "IC 1848 (Soul Nebula)"},
+    {"op": "repoint", "src": "IC 1848 (Soul Nebula)/.SessionData/NIGHT_2026-02-01/LIGHT/H/h0.fits", "dst": ".Dashboard/backups/p1/x", "size": 0, "mtime": 0, "sha1": "", "refs": 0},
 ])
 def test_apply_refuses_unsafe_operations(data_root, op):
     before = files(data_root)
@@ -191,3 +192,72 @@ def test_only_the_organizer_api_imports_apply():
 
     users = [p.relative_to(pkg).as_posix() for p in pkg.rglob("*.py") if imports_apply(p.read_text(encoding="utf-8"))]
     assert users == ["api_organizer.py"]
+
+
+def _project(data_root: Path) -> tuple[Path, str, bytes]:
+    """A PixInsight project in the M 31 target referencing the year-level paths, an old root and unrelated files."""
+    root = data_root.as_posix()
+    night = "M 31 (Andromeda Galaxy)/2026/.SessionData/NIGHT_2026-08-20"
+    url = f"file:///{root}/{night}/M 31 Panel 2/LIGHT/L/l2.fits".replace(" ", "%20")
+    xosm = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<xosm><Project sealedProject="true"/>\n'
+        f'<td id="path">{root}/{night}/M 31 Panel 1/LIGHT/L/l1.fits</td>\n'
+        f'<property id="XISF:ResourceURL" type="0x100000000">{url}</property>\n'
+        f'<td id="filePath">E:/Photo/Astro/{night}/FlatWizard/FLAT/L/f.fits</td>\n'
+        '<td id="path">F:/Astrophoto/MARS Database/MARS-DR1.xmars</td>\n'
+        '<td id="path">C:/astro/ALIGNED/a.xisf</td>\n</xosm>\n'
+    ).encode("utf-8")
+    bundle = data_root / "M 31 (Andromeda Galaxy)" / "M31.pxiproject"
+    (bundle / "project.data").mkdir(parents=True)
+    (bundle / "project.xosm").write_bytes(xosm)
+    (bundle / "project.data" / "project.seal").write_bytes(b"seal")
+    return bundle, root, xosm
+
+
+def test_pixinsight_projects_follow_the_moves_and_undo_restores_them(data_root, tmp_path):
+    bundle, root, original = _project(data_root)
+    app = client_for(data_root, tmp_path)
+    with TestClient(app) as client:
+        app.state.engine._run_scan()
+        plan = client.post("/api/organizer/plans", json={"revisionId": "m-31-andromeda-galaxy"}).json()
+        rp = [o for o in plan["ops"] if o["op"] == "repoint"]
+        assert len(rp) == 1 and rp[0]["refs"] == 3 and plan["ops"][-1]["op"] == "repoint"
+        assert rp[0]["dst"] == f".Dashboard/backups/{plan['id']}/M 31 (Andromeda Galaxy)/M31.pxiproject/project.xosm"
+        assert any(l["code"] == "pxiproject" for l in plan["lint"]) and any("seal" in w for w in plan["warnings"])
+        done = client.post(f"/api/organizer/plans/{plan['id']}/apply", json={"confirm": plan["id"]}).json()
+        assert done["status"] == "applied", done["result"]
+
+        text = (bundle / "project.xosm").read_text(encoding="utf-8")
+        night = "M 31 (Andromeda Galaxy)/.SessionData/NIGHT_2026-08-20"
+        assert f"{root}/{night}/PANEL_1/LIGHT/L/l1.fits" in text
+        assert f"file:///{root}/{night}/PANEL_2/LIGHT/L/l2.fits".replace(" ", "%20") in text
+        assert f"{root}/{night}/FLAT/L/f.fits" in text            # E:/Photo/Astro → the data root, and flattened
+        assert "F:/Astrophoto/MARS Database/MARS-DR1.xmars" in text and "C:/astro/ALIGNED/a.xisf" in text
+        assert "/2026/" not in text and "E:/Photo" not in text
+        for line in text.splitlines():                              # every re-pointed path exists
+            if root in line:
+                p = line.split(">", 1)[1].split("<", 1)[0].replace("file:///", "").replace("%20", " ")
+                assert Path(p).is_file(), p
+        assert (data_root / rp[0]["dst"]).read_bytes() == original  # the original is kept
+        assert (bundle / "project.data" / "project.seal").read_bytes() == b"seal"
+        assert not (bundle / "project.xosm.part").exists()
+
+        undo = client.post(f"/api/organizer/plans/{plan['id']}/undo").json()
+        assert [o["op"] for o in undo["ops"][:2]] == ["trash", "move"]
+        assert client.post(f"/api/organizer/plans/{undo['id']}/apply", json={"confirm": undo["id"]}).json()["status"] == "applied"
+        assert (bundle / "project.xosm").read_bytes() == original
+        assert not (data_root / rp[0]["dst"]).exists()
+
+
+def test_project_saved_after_planning_is_not_touched(data_root, tmp_path):
+    bundle, _, _ = _project(data_root)
+    app = client_for(data_root, tmp_path)
+    with TestClient(app) as client:
+        app.state.engine._run_scan()
+        plan = client.post("/api/organizer/plans", json={"revisionId": "m-31-andromeda-galaxy"}).json()
+        saved = (bundle / "project.xosm").read_bytes() + b"<!-- saved in PixInsight -->\n"
+        (bundle / "project.xosm").write_bytes(saved)  # fixture: the project is saved in between
+        done = client.post(f"/api/organizer/plans/{plan['id']}/apply", json={"confirm": plan["id"]}).json()
+        assert done["status"] == "partial" and "changed" in done["result"]["error"]
+        assert (bundle / "project.xosm").read_bytes() == saved
+        assert not (data_root / ".Dashboard" / "backups").exists()

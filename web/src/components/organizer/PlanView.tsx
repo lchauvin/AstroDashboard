@@ -115,7 +115,12 @@ export function PlanView({ plan }: { plan: OrgPlan }) {
                       {op.kind === "file" ? " (file)" : ""}
                     </td>
                     <td className={`mono ${styles.path}`}>
-                      {op.src ? (
+                      {op.op === "repoint" ? (
+                        <>
+                          {strip(op.src).replace(/\/project\.xosm$/, "")} <span className={styles.arrow}>·</span> {(op.refs ?? 0).toLocaleString("en-CA")} paths
+                          <span className={styles.hint}> (original kept in {op.dst})</span>
+                        </>
+                      ) : op.src ? (
                         <>
                           {strip(op.src)} <span className={styles.arrow}>→</span> {op.op === "trash" ? op.dst : strip(op.dst)}
                         </>
@@ -160,7 +165,7 @@ export function PlanView({ plan }: { plan: OrgPlan }) {
           <input className={styles.input} value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={plan.id} spellCheck={false} aria-label="Plan id" />
           {needsAck ? (
             <label className={styles.ack}>
-              <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} /> I understand the PixInsight projects / WBPP folders above will need re-pointing.
+              <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} /> I have read the warnings above.
             </label>
           ) : null}
           <div className={styles.row}>

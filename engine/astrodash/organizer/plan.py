@@ -12,6 +12,8 @@ Operations (no permanent delete exists in this vocabulary):
   rmdir_empty(dst)      remove a folder that is empty at that point
   trash(src, dst)       move into .Trash\\<plan-id>\\<original relative path>
   write_new(dst, text)  create a file that must not exist (target.json of a new revision)
+  repoint(src, dst)     re-point the paths inside a PixInsight project.xosm (pxi.py); the
+                        original is moved to dst (.Dashboard/backups/<plan-id>/…), never lost
 
 All paths are relative to the data root, with "/" separators.
 """
@@ -24,6 +26,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import pxi
 from ..layout import (
     LEGACY_PANEL_RE,
     PANEL_RE,
@@ -50,6 +53,8 @@ class Op:
     size: int | None = None        # files: re-checked before applying
     mtime: float | None = None
     text: str | None = None        # write_new
+    sha1: str | None = None        # repoint: the project file as planned
+    refs: int | None = None        # repoint: references that change
     why: str = ""
 
     def as_dict(self) -> dict[str, Any]:
@@ -195,6 +200,7 @@ class Planner:
         t = self.plan.target
         tree = self.tree
         lint = self.plan.lint
+        projects = sorted(f for f in tree.files if f.endswith(f".pxiproject/{pxi.XOSM}"))
 
         years = [c for c in tree.children(t) if YEAR_RE.match(c) and tree.is_dir(f"{t}/{c}")]
         if len(years) > 1:
@@ -233,13 +239,50 @@ class Planner:
                 lint.append({"code": "empty-stage", "level": "info", "text": f"Empty {c}"})
                 self.rmdir_empty(f"{t}/{c}", "empty legacy processing folder")
 
-        # Files that reference today's paths and will break after the moves.
-        refs = [p for p in (*tree.files, *tree.dirs) if p.lower().endswith(".pxiproject") or re.search(r"(^|/)WBPP[^/]*$", p)]
-        if refs and any(o.op in ("move", "trash") for o in self.plan.ops):
-            self.plan.warnings.append(
-                "PixInsight projects / WBPP folders reference the current paths and will need re-pointing: "
-                + ", ".join(sorted({r.split("/", 1)[1] if "/" in r else r for r in refs})[:8]))
+        self._repoint(projects)
         return self.plan
+
+    def _repoint(self, projects: list[str]) -> None:
+        """Last steps: PixInsight projects follow the moves (and leave a former data root such as E:/Photo/Astro)."""
+        root = pxi.posix_root(self.root)
+        moves = [(o.src, o.dst) for o in self.plan.ops if o.op == "move"]
+        trashed = [o.src for o in self.plan.ops if o.op == "trash"]
+        mapper = pxi.Mapper(root, pxi.top_level(self.root), moves, trashed)
+        edited = []
+        for rel in projects:
+            bundle = rel.rsplit("/", 2)[-2]
+            if mapper.trashed_ref(f"{root}/{rel}"):
+                continue  # inside a session going to the trash: it travels with it
+            try:
+                sha1, refs = pxi.scan(self.root / rel)
+                st = (self.root / rel).stat()
+            except OSError as exc:
+                self.plan.warnings.append(f"{bundle} could not be read ({exc}); its paths are not re-pointed.")
+                continue
+            stats = pxi.plan_refs(refs, mapper)
+            n = stats["moved"] + stats["formerRoot"]
+            if stats["trashed"]:
+                self.plan.warnings.append(
+                    f"{bundle}: {stats['trashed']} references into sessions going to the trash stay as they are.")
+            if not n:
+                continue
+            now = (mapper(f"{root}/{rel}") or f"{root}/{rel}")[len(root) + 1:]
+            self.plan.ops.append(Op(
+                "repoint", now, f".Dashboard/backups/{{plan}}/{now}", "file", st.st_size, st.st_mtime,
+                sha1=sha1, refs=n, why="PixInsight projects follow the new paths"))
+            parts = []
+            if stats["moved"]:
+                n_moved = stats["moved"]
+                parts.append(f"{n_moved:,} path{'s follow' if n_moved > 1 else ' follows'} the moves")
+            if stats["formerRoot"]:
+                parts.append(f"{stats['formerRoot']:,} leave a former data root for {root}")
+            self.plan.lint.append({"code": "pxiproject", "level": "info", "text": f"{bundle}: " + ", ".join(parts)})
+            edited.append(bundle)
+        if edited:
+            self.plan.warnings.append(
+                f"PixInsight will say the seal of {', '.join(edited)} has been edited: expected. Open the project, "
+                "check it, and save it once to reseal it. The original project file is kept in "
+                ".Dashboard\backups until you undo or remove it.")
 
     def _night(self, night: str) -> None:
         tree = self.tree

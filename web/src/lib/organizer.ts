@@ -1,12 +1,14 @@
 /** Organizer payloads (engine/astrodash/api_organizer.py). */
 
 export type OrgOp = {
-  op: "move" | "mkdir" | "rmdir_empty" | "trash" | "write_new";
+  op: "move" | "mkdir" | "rmdir_empty" | "trash" | "write_new" | "repoint";
   src?: string;
   dst?: string;
   kind?: "dir" | "file";
   why?: string;
   text?: string;
+  /** repoint: PixInsight project references that change. */
+  refs?: number;
 };
 
 export type Lint = { code: string; level: "info" | "warn"; text: string };
@@ -55,6 +57,7 @@ export const OP_LABEL: Record<OrgOp["op"], string> = {
   rmdir_empty: "Remove empty folder",
   trash: "To trash",
   write_new: "New file",
+  repoint: "Re-point project",
 };
 
 export const bytes = (n: number) =>

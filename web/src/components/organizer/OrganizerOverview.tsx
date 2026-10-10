@@ -97,7 +97,7 @@ export function OrganizerOverview({ data }: { data: Overview }) {
                           ) : null}
                           {r.warnings.length ? (
                             <span className={styles.chip} title={r.warnings.join("\n")}>
-                              <StatusIcon level="warn" size={12} /> projects to re-point
+                              <StatusIcon level="warn" size={12} /> {r.warnings.length} note{r.warnings.length > 1 ? "s" : ""}
                             </span>
                           ) : null}
                         </span>
@@ -187,4 +187,5 @@ const LINT_LABEL: Record<string, string> = {
   panel: "panel folders",
   "empty-stage": "empty 1.–7.",
   nonconforming: "non-conforming",
+  pxiproject: "PixInsight projects",
 };
