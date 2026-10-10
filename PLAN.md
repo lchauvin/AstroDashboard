@@ -209,7 +209,7 @@ Migration of the existing tree (organizer plan, applied per target after approva
 | `.OLDCAMERA-…` and `[GARBAGE] …` sessions | **removed** (legacy, confirmed unused): IC 1848 `[GARBAGE] 2025-12-27`, `[GARBAGE] 2026-01-04`; IC 5070 `.OLDCAMERA-2025-07-26`; NGC 281 `.OLDCAMERA-SESSION_2025-08-01`. Any other match the scan finds is added to the list. |
 | Empty `1.`–`7.` folders | removed; non-empty ones are kept |
 
-Any existing PixInsight/WBPP project files that reference old paths will break after a move. The organizer lists every `.pxiproject` and `WBPP` folder in the affected target before applying, so you can choose to migrate only targets that are finished or not yet processed.
+PixInsight project files reference the old paths. The organizer re-points them as part of the plan (§3.3, as built).
 
 ### 3.3 Organizer as built (Phase 6, 2026-10-09)
 
@@ -220,11 +220,18 @@ Library → **Organizer** (`/library/organizer`). The machinery follows §2.1, w
   - It refuses paths outside the root, into `.Download` or the global `.Calibration`, and trash that isn't in `.Trash\<this plan>`.
   - It re-checks every source (files: size and mtime) and destination just before each step.
   - It stops at the first problem and journals every step to `G:\Astro\.Dashboard\journal.jsonl`.
-- **Approval:** a plan is a draft until you type its id. For targets with `.pxiproject` or WBPP folders you also tick an acknowledgement. Applying holds the ingest lock, so auto-ingest never moves frames into a tree being reorganized.
+- **Approval:** a plan is a draft until you type its id. When a plan has warnings (e.g. projects whose seal PixInsight will report as edited) you also tick an acknowledgement. Applying holds the ingest lock, so auto-ingest never moves frames into a tree being reorganized.
 - **Undo** is the inverse of what actually ran, newest step first. It is a new draft that needs its own approval.
 - **Stored Diagnostics follow the frames.** Applying a plan (or its undo) rewrites the stored frame paths and renamed session keys in the dashboard database, so earlier analyses, previews and the learned horizon keep working.
 - **"New revision…"** creates `<Target> R<n+1>\.SessionData` and a `target.json` (create-only). It moves nothing.
-- **Dry run on the real tree (2026-10-09, read-only):** no conflicts in any of the 14 targets. The legacy sessions found are exactly the four listed above. Nearly every target gets a warning about a `.pxiproject` to re-point.
+- **Dry run on the real tree (2026-10-09, read-only):** no conflicts in any of the 14 targets. The legacy sessions found are exactly the four listed above.
+- **PixInsight projects are re-pointed (2026-10-10).** A plan's last steps (`repoint`, `organizer/pxi.py`) rewrite the paths inside each `<target>\*.pxiproject\project.xosm`:
+  - paths follow the plan's moves;
+  - paths under a former data root (`E:/Photo/Astro/<existing target or .Calibration>/…`) move to `G:/Astro`;
+  - paths into trashed sessions, unrelated drives (`C:/astro/ALIGNED`, `F:/Astrophoto/MARS Database`) and the image blobs in `project.data` are untouched;
+  - the original file is moved to `.Dashboardackups\<plan>\…`, and undo restores it byte for byte.
+- **Tested with PixInsight 1.9 (2026-10-10)** on copies, including one that saves its images: an edited *sealed* project opens with a "seal has been edited" warning and uses the new paths and images. Removing the seal only changes the warning, so the seal is left as it is; saving the project once in PixInsight reseals it. A project saved after the plan was prepared is refused (size, mtime and sha1 re-checked).
+- **Dry run, real tree (2026-10-10):** 15 projects in 11 targets would be re-pointed, about 17,000 references in all; 11 of them still point at the old `E:/Photo/Astro` root today. Many references point to intermediate files you deleted after processing; those stay as they are. The shared projects in `.PixInsight\` are not touched.
 - **Tested** on the synthetic fixture and on a scratch copy: apply, then undo restores the exact tree. No file disappears (trash is a move), and Library totals are identical after a migration.
 
 **Not built:** a "quarantine this frame" action from Diagnostics, and offering `.Download` darks/biases to the calibration library. Both would be organizer plans. Neither is needed for the migration.
