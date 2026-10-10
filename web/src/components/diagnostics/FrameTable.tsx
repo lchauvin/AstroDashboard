@@ -29,17 +29,24 @@ export function FrameTable({
   groups,
   onSelect,
   flags = {},
+  panelOf,
 }: {
   groups: LightGroupResult[];
   onSelect: (frames: LightFrame[], index: number) => void;
   flags?: Record<string, string[]>;
+  /** Mosaics: the panel label of a frame path (adds a Panel column). */
+  panelOf?: (path: string) => string | undefined;
 }) {
   const [tab, setTab] = useState<string>("all");
   const [sort, setSort] = useState<{ key: Col["key"]; dir: 1 | -1 }>({ key: "time", dir: 1 });
   const [onlyRejected, setOnlyRejected] = useState(false);
 
+  const filters = [...new Set(groups.map((g) => g.filter))];
+  const current = tab === "all" || filters.includes(tab) ? tab : "all";
+  const inTab = (g: LightGroupResult) => current === "all" || g.filter === current;
+
   const rows = useMemo(() => {
-    const src = tab === "all" ? groups.flatMap((g) => g.frames) : groups.find((g) => g.key === tab)?.frames ?? [];
+    const src = groups.filter(inTab).flatMap((g) => g.frames);
     const filtered = onlyRejected ? src.filter((f) => f.rejected) : src;
     const val = (f: LightFrame) => (sort.key === "time" ? timeOf(f) : (f[sort.key] as number | null));
     return [...filtered].sort((a, b) => {
@@ -49,26 +56,23 @@ export function FrameTable({
       if (vb == null || Number.isNaN(vb)) return -1;
       return (va - vb) * sort.dir;
     });
-  }, [groups, tab, sort, onlyRejected]);
+  }, [groups, current, sort, onlyRejected]);
 
-  const rejectedCount = (tab === "all" ? groups.flatMap((g) => g.frames) : groups.find((g) => g.key === tab)?.frames ?? []).filter(
-    (f) => f.rejected,
-  ).length;
+  const rejectedCount = groups.filter(inTab).flatMap((g) => g.frames).filter((f) => f.rejected).length;
 
   return (
     <div>
       <div className={styles.blockHead}>
-        <h2 className="section-title">Frames</h2>
         <span className={styles.tabs} role="group" aria-label="Filter">
-          {[{ key: "all", filter: null as string | null }, ...groups.map((g) => ({ key: g.key, filter: g.filter }))].map((t) => (
+          {["all", ...filters].map((t) => (
             <button
-              key={t.key}
+              key={t}
               type="button"
-              className={tab === t.key ? `${styles.tab} ${styles.tabActive}` : styles.tab}
-              aria-pressed={tab === t.key}
-              onClick={() => setTab(t.key)}
+              className={current === t ? `${styles.tab} ${styles.tabActive}` : styles.tab}
+              aria-pressed={current === t}
+              onClick={() => setTab(t)}
             >
-              {t.filter ? <FilterChip filter={filterLetter(t.filter)} /> : "All"}
+              {t === "all" ? "All filters" : <FilterChip filter={filterLetter(t)} />}
             </button>
           ))}
         </span>
@@ -81,6 +85,7 @@ export function FrameTable({
         <table className={`table ${styles.frameTable}`}>
           <thead>
             <tr>
+              {panelOf ? <th>Panel</th> : null}
               <th>Filter</th>
               <th>Status</th>
               <th>Findings</th>
@@ -101,6 +106,7 @@ export function FrameTable({
           <tbody>
             {rows.map((f, i) => (
               <tr key={f.path} className={f.rejected ? styles.rejectedRow : undefined} onClick={() => onSelect(rows, i)}>
+                {panelOf ? <td>{panelOf(f.path)}</td> : null}
                 <td>
                   <FilterChip filter={filterLetter(f.filter_name)} />
                 </td>

@@ -18,8 +18,15 @@ export async function generateMetadata({ params }: { params: Params }) {
   return { title: `Diagnostics · ${rev} · ${decodeURIComponent(session)}` };
 }
 
-export default async function SessionDiagnosticsPage({ params }: { params: Params }) {
+export default async function SessionDiagnosticsPage({
+  params,
+  searchParams,
+}: {
+  params: Params;
+  searchParams: Promise<{ tab?: string; panel?: string }>;
+}) {
   const { rev, session } = await params;
+  const { tab, panel } = await searchParams;
   const folder = decodeURIComponent(session);
   const res = await engineGet<DiagDetail>(`/api/diagnostics/${encodeURIComponent(rev)}/${encodeURIComponent(folder)}`);
   if (!res.ok) {
@@ -62,7 +69,7 @@ export default async function SessionDiagnosticsPage({ params }: { params: Param
           </Link>
         ) : null}
       </div>
-      <SessionDiagnostics detail={d} />
+      <SessionDiagnostics key={folder} detail={d} initialSection={tab} initialPanel={panel} />
     </main>
   );
 }

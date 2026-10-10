@@ -78,3 +78,56 @@
 .preview:hover {
   color: var(--color-accent-700);
 }
+
+.count {
+  font: 500 11px/1 var(--font-mono);
+  color: var(--text-muted);
+}
+
+.episodes {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.episodes summary,
+.minor summary {
+  cursor: pointer;
+  font: 400 11px/1.6 var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.episodes summary:hover,
+.minor summary:hover {
+  color: var(--color-accent-700);
+}
+
+.episodes ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.episodes li {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  line-height: 1.5;
+}
+
+.minor {
+  margin-top: 12px;
+}
+
+.minor[open] summary {
+  margin-bottom: 8px;
+}
+
+@media (max-width: 720px) {
+  .episodes li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}

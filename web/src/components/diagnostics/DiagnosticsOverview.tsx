@@ -14,6 +14,19 @@ import styles from "./Diagnostics.module.css";
 
 type Show = "all" | "pending" | "done";
 
+/** Findings folded by kind: a mosaic repeats the same problem once per panel and filter. */
+function kinds(findings: NonNullable<DiagResultRow["findings"]>) {
+  const m = new Map<string, { title: string; short: string; n: number; frames: number }>();
+  for (const f of findings) {
+    const title = f.code === "flat-mismatch" ? "Flats don't match the lights" : f.title;
+    const k = m.get(f.code) ?? { title, short: f.code === "flat-mismatch" ? "Flats" : title.split(" ")[0], n: 0, frames: 0 };
+    k.n += 1;
+    k.frames += f.frames;
+    m.set(f.code, k);
+  }
+  return [...m.values()];
+}
+
 export function DiagnosticsOverview({
   sessions,
   initialJobs,
@@ -186,9 +199,10 @@ export function DiagnosticsOverview({
                       <Tip
                         tip={
                           <span>
-                            {r.findings.map((f, i) => (
-                              <span key={i}>
-                                {f.title} ({f.frames} frame{f.frames === 1 ? "" : "s"})
+                            {kinds(r.findings).map((k) => (
+                              <span key={k.title}>
+                                {k.title}
+                                {k.n > 1 ? ` ×${k.n}` : ""} ({k.frames} frame{k.frames === 1 ? "" : "s"})
                                 <br />
                               </span>
                             ))}
@@ -197,9 +211,12 @@ export function DiagnosticsOverview({
                       >
                         <span className={styles.chip}>
                           <StatusIcon level="warn" size={13} label="Findings" />
-                          <span className="num">{r.findings.length}</span>
+                          <span className="num">{kinds(r.findings).length}</span>
                           <span className="muted" style={{ fontSize: 12 }}>
-                            {[...new Set(r.findings.map((f) => f.title.split(" ")[0]))].slice(0, 3).join(", ")}
+                            {kinds(r.findings)
+                              .slice(0, 3)
+                              .map((k) => k.short)
+                              .join(", ")}
                           </span>
                         </span>
                       </Tip>

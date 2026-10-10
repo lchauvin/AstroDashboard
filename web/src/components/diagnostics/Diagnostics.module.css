@@ -88,7 +88,7 @@
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 18px;
   margin-bottom: 36px;
 }
@@ -363,4 +363,119 @@
   .flatMatchRow {
     grid-template-columns: 22px minmax(0, 1fr);
   }
+}
+
+/* ---- session page: scope and sections ------------------------------- */
+
+.panelBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -12px 0 18px;
+}
+
+.panelBar .eyebrow {
+  margin-right: 6px;
+}
+
+.panelBtn {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--color-divider);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.panelBtn:hover {
+  color: var(--color-text);
+  border-color: var(--text-muted);
+}
+
+.panelBtnActive {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+.sectionTabs {
+  display: flex;
+  gap: 4px 22px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--color-divider);
+  margin-bottom: 26px;
+}
+
+.sectionTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0 9px;
+  margin-bottom: -1px;
+  font: 500 10.5px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+}
+
+.sectionTab:hover {
+  color: var(--color-text);
+}
+
+.sectionTabActive {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
+}
+
+.tabCount {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.cardHours {
+  font: 400 11px/1 var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.calCommon {
+  font-size: 13.5px;
+  margin-bottom: 8px;
+}
+
+.calPanels {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.flatTable td {
+  font-size: 13px;
+  padding: 7px 8px;
+  vertical-align: top;
+}
+
+.flatNotesCell {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  min-width: 220px;
+}
+
+.matrix td,
+.matrix th {
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.matrixLink {
+  font-weight: 500;
+}
+
+.matrixLink:hover {
+  color: var(--color-accent-700);
+}
+
+.matrixLoss {
+  color: var(--text-secondary);
 }

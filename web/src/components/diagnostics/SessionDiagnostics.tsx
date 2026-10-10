@@ -1,28 +1,36 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Play, RotateCw } from "lucide-react";
 
-import type { DiagDetail, DiagJob, LightFrame, Note } from "@/lib/diagnostics";
+import type { DiagDetail, DiagJob, LightFrame, LightGroupResult } from "@/lib/diagnostics";
 import { FLAG_LABELS, filterLetter, reasonLabel } from "@/lib/diagnostics";
 import { hours, num, relativeTime } from "@/lib/format";
-import type { Level } from "@/lib/types";
 import { FilterChip, Marks, StatusIcon } from "../ui";
+import { Calibration, flatLevel } from "./Calibration";
 import { Findings } from "./Findings";
 import { FrameTable } from "./FrameTable";
 import { PreviewModal } from "./PreviewModal";
+import { byFilter, calibrationEntries, groupFindings, panelsOf, scopeFindings, worst } from "./scope";
 import { Timeline } from "./Timeline";
 import { jobLabel } from "./useJobs";
 import styles from "./Diagnostics.module.css";
 
-const NOTE_LEVEL: Record<Note["level"], Level> = { ok: "ok", info: "info", warn: "warn", bad: "bad" };
-const CAL_LEVEL: Record<string, Level> = { ok: "ok", warn: "warn", bad: "bad", missing: "bad" };
+export type Section = "summary" | "night" | "frames" | "calibration";
+const SECTIONS: { id: Section; label: string }[] = [
+  { id: "summary", label: "Summary" },
+  { id: "night", label: "Through the night" },
+  { id: "frames", label: "Frames" },
+  { id: "calibration", label: "Calibration" },
+];
 
-export function SessionDiagnostics({ detail }: { detail: DiagDetail }) {
+export function SessionDiagnostics({ detail, initialSection, initialPanel }: { detail: DiagDetail; initialSection?: string; initialPanel?: string }) {
   const router = useRouter();
   const [job, setJob] = useState<DiagJob | null>(detail.job);
   const [selected, setSelected] = useState<{ list: { path: string; file: string; caption: string }[]; index: number } | null>(null);
+  const [section, setSection] = useState<Section>(SECTIONS.some((s) => s.id === initialSection) ? (initialSection as Section) : "summary");
+  const [panelId, setPanelId] = useState<string | null>(initialPanel ?? null);
   const active = job && (job.status === "queued" || job.status === "running");
   const url = `/engine/api/diagnostics/${detail.revision.id}/${encodeURIComponent(detail.session.folder)}`;
 
@@ -54,12 +62,43 @@ export function SessionDiagnostics({ detail }: { detail: DiagDetail }) {
 
   const stored = detail.stored;
   const r = stored?.result;
-  const lights = r?.lights ?? [];
   const analysis = detail.analysis;
-  const flags = analysis?.flags ?? {};
+  const flags = useMemo(() => analysis?.flags ?? {}, [analysis]);
+  const allLights = useMemo(() => r?.lights ?? [], [r]);
+
+  // Mosaic scope: one panel, or all of them.
+  const panels = useMemo(() => panelsOf(allLights), [allLights]);
+  const panel = panels.find((p) => p.label === panelId) ?? null;
+  const lights = panel ? allLights.filter((g) => g.target === panel.id) : allLights;
+  const panelOfPath = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of allLights) for (const f of g.frames) m.set(f.path, panels.find((p) => p.id === g.target)?.label ?? "");
+    return m;
+  }, [allLights, panels]);
+
+  const scope = useMemo(() => {
+    const paths = panel ? new Set(lights.flatMap((g) => g.frames.map((f) => f.path))) : null;
+    const filters = panel ? new Set(lights.map((g) => g.filter)) : null;
+    const findings = groupFindings(scopeFindings(analysis?.findings ?? [], paths, filters));
+    const keys = new Set(lights.map((g) => g.key));
+    const cal = r ? calibrationEntries(r, keys, panels) : [];
+    const flats = (r?.flats ?? []).filter((f) => !filters || filters.has(f.filter));
+    return { findings, cal, flats };
+  }, [panel, lights, analysis, r, panels]);
+
+  const select = (s: Section, p: string | null) => {
+    setSection(s);
+    setPanelId(p);
+    const q = new URLSearchParams();
+    if (s !== "summary") q.set("tab", s);
+    if (p) q.set("panel", p);
+    window.history.replaceState(null, "", `${window.location.pathname}${q.size ? `?${q}` : ""}`);
+  };
+
   const caption = (f: LightFrame) => {
     const found = (flags[f.path] ?? []).map((c) => FLAG_LABELS[c] ?? c);
     return [
+      panels.length ? panelOfPath.get(f.path) : "",
       f.filter_name ?? "",
       f.rejected ? "rejected: " + f.reasons.map(reasonLabel).join(", ") : "kept",
       `FWHM ${num(f.fwhm_median, 2)}″`,
@@ -74,12 +113,16 @@ export function SessionDiagnostics({ detail }: { detail: DiagDetail }) {
     setSelected({ list: frames.map((f) => ({ path: f.path, file: f.file, caption: caption(f) })), index });
   const openPaths = (paths: string[]) => {
     const wanted = new Set(paths);
-    const frames = lights
+    const frames = allLights
       .flatMap((g) => g.frames)
       .filter((f) => wanted.has(f.path))
       .sort((a, b) => (a.obs_time ?? "").localeCompare(b.obs_time ?? ""));
     if (frames.length) openFrames(frames, 0);
   };
+
+  const warnings = scope.findings.filter((g) => g.level !== "info");
+  const calLevel = worst([...scope.cal.map((e) => e.level), ...scope.flats.map((f) => flatLevel(f))]);
+  const frameCount = lights.reduce((s, g) => s + g.summary.frames, 0);
 
   return (
     <>
@@ -92,7 +135,7 @@ export function SessionDiagnostics({ detail }: { detail: DiagDetail }) {
             {jobLabel(job)}
           </span>
         ) : (
-          <button type="button" className="button button-primary" onClick={run}>
+          <button type="button" className="button" onClick={run}>
             {stored ? <RotateCw size={13} strokeWidth={1.8} /> : <Play size={13} strokeWidth={1.8} />}
             {stored ? "Re-run analysis" : "Analyse this night"}
           </button>
@@ -103,10 +146,11 @@ export function SessionDiagnostics({ detail }: { detail: DiagDetail }) {
           </span>
         ) : null}
         {stored ? (
-          <span className={styles.meta}>
-            Analysed {relativeTime(new Date(stored.finished * 1000).toISOString())} in {stored.duration.toFixed(0)} s ·
-            astro-eval {r?.astroEvalVersion} · {r?.measured} frames
-            {r?.configPath ? ` · config ${r.configPath}` : " · default config"}
+          <span
+            className={styles.meta}
+            title={`astro-eval ${r?.astroEvalVersion} · ${r?.configPath ? `config ${r.configPath}` : "default config"} · ${stored.duration.toFixed(0)} s`}
+          >
+            Analysed {relativeTime(new Date(stored.finished * 1000).toISOString())} · {r?.measured} frames measured
             {r?.errors.length ? ` · ${r.errors.length} unreadable` : ""}
           </span>
         ) : null}
@@ -119,167 +163,175 @@ export function SessionDiagnostics({ detail }: { detail: DiagDetail }) {
         </p>
       ) : (
         <>
-          {analysis ? <Findings findings={analysis.findings} onPreview={openPaths} /> : null}
-
-          <section className={styles.cards}>
-            {lights.map((g) => {
-              const reasons = Object.entries(g.summary.reasons).sort((a, b) => b[1] - a[1]);
-              return (
-                <div key={g.key} className={`framed ${styles.card}`}>
-                  <Marks />
-                  <div className={styles.cardHead}>
-                    <FilterChip filter={filterLetter(g.filter)} long />
-                    <span className="eyebrow">{g.target && g.key !== g.filter ? g.target : ""}</span>
-                  </div>
-                  <div className={styles.cardBig}>
-                    {g.summary.kept}
-                    <small>/ {g.summary.frames} kept</small>
-                  </div>
-                  <div className={styles.cardStats}>
-                    <span>{hours(g.summary.keptSeconds)} usable</span>
-                    <span>FWHM {num(g.summary.median.fwhm_median, 2)}″</span>
-                    <span>{num(g.summary.median.n_stars)} stars</span>
-                    <span>ecc {num(g.summary.median.eccentricity_median, 2)}</span>
-                  </div>
-                  {reasons.length ? (
-                    <div className={styles.reasons}>
-                      {reasons.slice(0, 5).map(([k, v]) => (
-                        <span key={k}>
-                          {reasonLabel(k)} <span className="num">×{v}</span>
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className={styles.reasons}>
-                      <StatusIcon level="ok" size={13} /> nothing rejected
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </section>
-
-          {r.calibration?.rows.length ? (
-            <section className={styles.block}>
-              <div className={styles.blockHead}>
-                <h2 className="section-title">Lights ↔ flats</h2>
-                <span className="eyebrow">astro-eval calibration check</span>
-              </div>
-              {r.calibration.common.map((n) => (
-                <p key={n.text} style={{ fontSize: 13.5, marginBottom: 8 }}>
-                  <StatusIcon level={NOTE_LEVEL[n.level]} size={13} /> {n.text}
-                </p>
-              ))}
-              {r.calibration.rows.map((row) => (
-                <div key={row.light} className={styles.calRow}>
-                  <StatusIcon level={CAL_LEVEL[row.status] ?? "info"} label={row.status} />
-                  <span>
-                    <FilterChip filter={filterLetter(row.filter)} long /> <span className="muted num">· {row.n}</span>
-                    {row.light.includes(" · ") ? (
-                      <span className="muted" style={{ display: "block", fontSize: 11.5 }}>
-                        {row.light.split(" · ")[0]}
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="mono" style={{ fontSize: 12 }}>
-                    {row.flat ?? "no flats"}
-                  </span>
-                  <ul className={styles.calIssues}>
-                    {row.issues
-                      .filter((i) => i.level !== "ok")
-                      .map((i) => (
-                        <li key={i.text}>
-                          <StatusIcon level={NOTE_LEVEL[i.level]} size={12} />
-                          <span>{i.text}</span>
-                        </li>
-                      ))}
-                  </ul>
-                </div>
-              ))}
-            </section>
+          {panels.length ? (
+            <div className={styles.panelBar} role="group" aria-label="Mosaic panel">
+              <span className="eyebrow">Mosaic</span>
+              {[null, ...panels].map((p) => {
+                const id = p?.label ?? null;
+                const on = (panel?.label ?? null) === id;
+                return (
+                  <button
+                    key={id ?? "all"}
+                    type="button"
+                    className={on ? `${styles.panelBtn} ${styles.panelBtnActive}` : styles.panelBtn}
+                    aria-pressed={on}
+                    onClick={() => select(section, id)}
+                  >
+                    {p ? p.label : `All ${panels.length} panels`}
+                  </button>
+                );
+              })}
+            </div>
           ) : null}
 
-          <section className={styles.block}>
-            <Timeline groups={lights} onSelect={openFrames} events={analysis?.events ?? []} flags={flags} />
-          </section>
+          <nav className={styles.sectionTabs} role="tablist" aria-label="Sections">
+            {SECTIONS.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                role="tab"
+                aria-selected={section === s.id}
+                className={section === s.id ? `${styles.sectionTab} ${styles.sectionTabActive}` : styles.sectionTab}
+                onClick={() => select(s.id, panel?.label ?? null)}
+              >
+                {s.id === "summary" && warnings.length ? <StatusIcon level={worst(warnings.map((g) => g.level))} size={12} /> : null}
+                {s.id === "calibration" && (scope.cal.length || scope.flats.length) ? <StatusIcon level={calLevel} size={12} /> : null}
+                {s.label}
+                {s.id === "frames" ? <span className={styles.tabCount}>{frameCount}</span> : null}
+                {s.id === "summary" && warnings.length ? <span className={styles.tabCount}>{warnings.length}</span> : null}
+              </button>
+            ))}
+          </nav>
 
-          <section className={styles.block}>
-            <FrameTable groups={lights} onSelect={openFrames} flags={flags} />
-          </section>
-
-          {r.flats.length ? (
-            <section className={styles.block}>
-              <div className={styles.blockHead}>
-                <h2 className="section-title">Flats</h2>
-                <span className="eyebrow">per set · master SNR = per-flat SNR × √n</span>
-              </div>
-              {r.flatMatch?.length ? (
-                <div className={styles.flatMatch}>
-                  <div className="eyebrow" style={{ marginBottom: 8 }}>
-                    Do the flats correct these lights? (dust shadows and vignetting, experimental)
-                  </div>
-                  {r.flatMatch.map((m) => (
-                    <div key={m.light} className={styles.flatMatchRow}>
-                      <StatusIcon
-                        level={m.verdict === "ok" ? "ok" : m.verdict === "unknown" ? "info" : "warn"}
-                        label={m.verdict}
-                        size={13}
-                      />
-                      <span>
-                        <FilterChip filter={filterLetter(m.filter)} long />{" "}
-                        <span className="muted mono" style={{ fontSize: 11 }}>
-                          {m.light !== m.filter ? m.light.split(" · ")[0] + " · " : ""}
-                          {m.flatSet}
-                        </span>
-                      </span>
-                      <span className={styles.flatMatchNotes}>{m.notes.join(" ")}</span>
-                    </div>
-                  ))}
-                </div>
+          {section === "summary" ? (
+            <>
+              {analysis ? <Findings groups={scope.findings} onPreview={openPaths} /> : null}
+              {panels.length && !panel ? (
+                <PanelMatrix
+                  panels={panels}
+                  lights={allLights}
+                  onOpen={(label) => select("summary", label)}
+                />
               ) : null}
-              <div className={styles.cards}>
-                {r.flats.map((f) => (
-                  <div key={f.key} className={`framed ${styles.flatCard}`}>
+              <section className={styles.cards}>
+                {byFilter(lights).map((s) => (
+                  <div key={s.filter} className={`framed ${styles.card}`}>
                     <Marks />
                     <div className={styles.cardHead}>
-                      <span>
-                        <StatusIcon
-                          level={f.summary?.verdict === "good" ? "ok" : f.summary?.verdict === "warn" ? "warn" : "bad"}
-                          label={f.summary?.verdict}
-                        />{" "}
-                        <FilterChip filter={filterLetter(f.filter)} long />
-                      </span>
-                      <span className="eyebrow">{f.key.split("· ").pop()}</span>
+                      <FilterChip filter={filterLetter(s.filter)} long />
+                      <span className={styles.cardHours}>{hours(s.keptSeconds)} usable</span>
                     </div>
-                    {f.summary ? (
-                      <div className={styles.cardStats} style={{ marginTop: 8 }}>
+                    <div className={styles.cardBig}>
+                      {s.kept}
+                      <small>/ {s.frames} kept</small>
+                    </div>
+                    <div className={styles.cardStats}>
+                      <span>FWHM {num(s.fwhm, 2)}″</span>
+                      <span>{num(s.stars)} stars</span>
+                      <span>ecc {num(s.ecc, 2)}</span>
+                    </div>
+                    <div className={styles.reasons}>
+                      {s.reasons.length ? (
+                        s.reasons.slice(0, 3).map(([k, v]) => (
+                          <span key={k}>
+                            {reasonLabel(k)} <span className="num">×{v}</span>
+                          </span>
+                        ))
+                      ) : (
                         <span>
-                          {f.summary.kept}/{f.summary.n} kept
+                          <StatusIcon level="ok" size={12} /> nothing rejected
                         </span>
-                        <span>level {f.summary.level != null ? `${Math.round(f.summary.level * 100)}%` : "—"}</span>
-                        <span>SNR {num(f.summary.snr)}</span>
-                        <span>master {num(f.summary.masterSnr)}</span>
-                      </div>
-                    ) : null}
-                    <ul className={styles.flatNotes}>
-                      {(f.summary?.notes ?? [])
-                        .filter((n) => n.level !== "info")
-                        .map((n) => (
-                          <li key={n.text}>
-                            <StatusIcon level={NOTE_LEVEL[n.level]} size={12} />
-                            <span>{n.text}</span>
-                          </li>
-                        ))}
-                    </ul>
+                      )}
+                    </div>
                   </div>
                 ))}
-              </div>
+              </section>
+            </>
+          ) : null}
+
+          {section === "night" ? (
+            <section className={styles.block}>
+              <Timeline groups={lights} onSelect={openFrames} events={analysis?.events ?? []} flags={flags} />
             </section>
           ) : null}
+
+          {section === "frames" ? (
+            <section className={styles.block}>
+              <FrameTable
+                groups={lights}
+                onSelect={openFrames}
+                flags={flags}
+                panelOf={panels.length && !panel ? (p) => panelOfPath.get(p) : undefined}
+              />
+            </section>
+          ) : null}
+
+          {section === "calibration" ? <Calibration result={r} entries={scope.cal} flats={scope.flats} mosaic={panels.length > 0 && !panel} /> : null}
         </>
       )}
 
       {selected ? <PreviewModal items={selected.list} index={selected.index} onClose={() => setSelected(null)} /> : null}
     </>
+  );
+}
+
+/** Mosaic at a glance: kept / measured per panel and filter. */
+function PanelMatrix({
+  panels,
+  lights,
+  onOpen,
+}: {
+  panels: { id: string; label: string }[];
+  lights: LightGroupResult[];
+  onOpen: (label: string) => void;
+}) {
+  const filters = [...new Set(lights.map((g) => g.filter))];
+  return (
+    <section className={styles.block}>
+      <div className={styles.blockHead}>
+        <h2 className="section-title">Panels</h2>
+        <span className="eyebrow">kept / measured</span>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table className={`table ${styles.matrix}`}>
+          <thead>
+            <tr>
+              <th>Panel</th>
+              {filters.map((f) => (
+                <th key={f} className="num">
+                  <FilterChip filter={filterLetter(f)} />
+                </th>
+              ))}
+              <th className="num">Usable</th>
+            </tr>
+          </thead>
+          <tbody>
+            {panels.map((p) => {
+              const gs = lights.filter((g) => g.target === p.id);
+              return (
+                <tr key={p.id}>
+                  <td>
+                    <button type="button" className={styles.matrixLink} onClick={() => onOpen(p.label)}>
+                      {p.label}
+                    </button>
+                  </td>
+                  {filters.map((f) => {
+                    const g = gs.filter((x) => x.filter === f);
+                    const frames = g.reduce((s, x) => s + x.summary.frames, 0);
+                    const kept = g.reduce((s, x) => s + x.summary.kept, 0);
+                    return (
+                      <td key={f} className={`num ${frames && kept < frames ? styles.matrixLoss : ""}`}>
+                        {frames ? `${kept}/${frames}` : "—"}
+                      </td>
+                    );
+                  })}
+                  <td className="num">{hours(gs.reduce((s, x) => s + x.summary.keptSeconds, 0))}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
