@@ -53,6 +53,14 @@
   display: none;
 }
 
+.tipLeft > .tipBox {
+  left: auto;
+  right: calc(100% + 8px);
+  bottom: auto;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
 .tip:hover > .tipBox,
 .tip:focus-visible > .tipBox,
 .tip:focus-within > .tipBox {

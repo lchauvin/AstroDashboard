@@ -133,8 +133,21 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None)
         if stored is not None:
             rev = {**rev, "goals": stored}
         sites = state.cache.sites()
+        # Integration left after diagnostics rejection (only where a night was analysed).
+        per_filter, analysed = planning.accepted_seconds(rev, state.cache.diagnostic_summaries(), cfg.filter_aliases)
+        rev["filters"] = [
+            {**f, "acceptedSeconds": per_filter.get(f["filter"], {}).get("goodSeconds", f["seconds"]),
+             "analysedSeconds": per_filter.get(f["filter"], {}).get("analysedSeconds", 0.0)}
+            for f in rev["filters"]
+        ]
+        rev["totals"] = {
+            **rev["totals"],
+            "acceptedSeconds": sum(v["goodSeconds"] for v in per_filter.values()),
+            "analysedSeconds": sum(v["analysedSeconds"] for v in per_filter.values()),
+        }
         rev["sessions"] = [
-            {**s, "siteName": (near := planning.nearest_site(sites, *(s.get("site") or (None, None)))) and near["name"]}
+            {**s, "siteName": (near := planning.nearest_site(sites, *(s.get("site") or (None, None)))) and near["name"],
+             "diagnostic": analysed.get(s["folder"])}
             for s in rev["sessions"]
         ]
         return rev

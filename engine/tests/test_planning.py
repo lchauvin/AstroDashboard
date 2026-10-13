@@ -249,3 +249,27 @@ def test_load_env_file_does_not_override_the_real_environment(tmp_path, monkeypa
     assert "ASTRODASH_T3" not in os.environ
     for k in ("ASTRODASH_T1", "ASTRODASH_T2"):
         monkeypatch.delenv(k)
+
+
+def test_accepted_seconds_counts_diagnostics_rejections_only_on_analysed_nights():
+    rev = {"id": "r1", "sessions": [
+        {"folder": "2026-01-01", "lightGroups": [
+            {"filter": "H", "frames": 10, "seconds": 3000.0},
+            {"filter": "O", "frames": 10, "seconds": 3000.0},
+            {"filter": "S", "frames": 0, "seconds": 0.0},
+        ]},
+        {"folder": "2026-01-02", "lightGroups": [{"filter": "H", "frames": 4, "seconds": 1200.0}]},
+    ]}
+    summaries = [
+        {"revisionId": "r1", "session": "2026-01-01", "finished": 1.0, "summary": {"lights": [
+            {"key": "a", "filter": "Ha", "frames": 10, "kept": 8, "rejected": 2, "keptSeconds": 2400.0},
+        ]}},
+        {"revisionId": "other", "session": "2026-01-02", "finished": 2.0, "summary": {"lights": []}},
+    ]
+    per_filter, sessions = planning.accepted_seconds(rev, summaries, {"ha": "H"})
+    # H: analysed night keeps 2400 of 3000, unanalysed night counts in full.
+    assert per_filter["H"] == {"seconds": 4200.0, "goodSeconds": 3600.0, "analysedSeconds": 3000.0}
+    # O was not in the analysis: counted in full, not analysed.
+    assert per_filter["O"] == {"seconds": 3000.0, "goodSeconds": 3000.0, "analysedSeconds": 0.0}
+    assert "S" not in per_filter
+    assert sessions == {"2026-01-01": {"finished": 1.0, "acceptedSeconds": 5400.0, "rejected": 2}}

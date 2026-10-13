@@ -7,7 +7,7 @@ import { Save } from "lucide-react";
 import { goalStatus } from "@/lib/planning/goals";
 import type { FilterLetter } from "@/lib/planning/rig";
 import type { Goal, GoalMode } from "@/lib/planning/types";
-import { FilterChip, StatusIcon } from "../ui";
+import { FilterChip, StatusIcon, Tip } from "../ui";
 import styles from "./goals.module.css";
 
 export type GoalRow = {
@@ -20,6 +20,8 @@ export type GoalRow = {
   rate: number;
   /** Basis of the target signal in this filter, shown under the row. */
   basis: string;
+  /** What `basis` means, shown when hovering it. */
+  basisTip: string;
 };
 
 type Draft = { mode: GoalMode; hours: string; snr: string };
@@ -130,7 +132,9 @@ export function GoalsEditor({
               <tr key={r.letter}>
                 <td>
                   <FilterChip filter={r.letter} /> {r.name}
-                  <div className={styles.basis}>{r.basis}</div>
+                  <div className={styles.basis}>
+                    {r.basisTip ? <Tip tip={r.basisTip}>{r.basis}</Tip> : r.basis}
+                  </div>
                 </td>
                 <td>
                   <div className={styles.modes} role="group" aria-label={`${r.name} goal mode`}>

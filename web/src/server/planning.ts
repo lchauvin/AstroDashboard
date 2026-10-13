@@ -141,6 +141,7 @@ export function goalRowsFor(one: NonNullable<ReturnType<typeof planOne>>): GoalR
       rawSeconds: tot?.seconds ?? 0,
       rate: sig && fs ? snr2PerHour(sig, fs, result.rig) : 0,
       basis: sig?.basis ?? "",
+      basisTip: sig?.explain ?? "",
     };
   });
 }

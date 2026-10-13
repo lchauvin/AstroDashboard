@@ -1,7 +1,10 @@
+/* Hidden headroom above and below, so tooltips are not clipped by the horizontal scroller. */
 .scroller {
   overflow-x: auto;
   padding-top: 70px;
   margin-top: -70px;
+  padding-bottom: 50px;
+  margin-bottom: -50px;
 }
 
 .matrix td {
@@ -101,10 +104,6 @@
   white-space: nowrap;
 }
 
-.total .muted {
-  font-size: 11px;
-}
-
 .conditions {
   white-space: nowrap;
 }
@@ -137,13 +136,34 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-top: 5px;
+  height: 20px;
+  padding: 0 7px;
   font: 500 9.5px/1 var(--font-mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  white-space: nowrap;
   color: var(--text-muted);
+  border: 1px solid var(--color-divider);
+  transition: border-color var(--transition), color var(--transition);
 }
 
 .diagLink:hover {
+  border-color: var(--color-accent);
   color: var(--color-accent-700);
+}
+
+/* Not analysed yet: the call to action reads in the accent. */
+.diagRun {
+  color: var(--color-accent-700);
+  border-style: dashed;
+}
+
+.usable {
+  display: block;
+  color: var(--color-accent-700);
+}
+
+.diagCell {
+  text-align: right;
+  white-space: nowrap;
 }

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, Moon } from "lucide-react";
+import { Activity, Moon, Play } from "lucide-react";
 
 import { exposure, FILTER_ORDER, filterLabel, hours, num, settingsLabel, shortDate } from "@/lib/format";
 import type { DarkStatus, FlatStatus, LightGroup, Level, Revision, Session } from "@/lib/types";
@@ -183,18 +183,24 @@ function ConditionsCell({ s }: { s: Session }) {
   return (
     <td className={styles.conditions}>
       <Tip
+        side="left"
         tip={
           <span className="num">
-            Ambient {num(c.ambientC, 1)} °C · dew point {num(c.dewPointC, 1)} °C
+            Ambient {num(c.ambientC, 1)} °C
             <br />
-            Min dew margin {num(c.minDewMarginC, 1)} °C · humidity {num(c.humidity)} %
+            Dew point {num(c.dewPointC, 1)} °C
             <br />
-            Wind {num(c.windKph, 1)} km/h · airmass {num(c.airmassMin, 2)}–{num(c.airmassMax, 2)}
+            Humidity {num(c.humidity)} %
+            <br />
+            Wind {num(c.windKph, 1)} km/h
             {c.moon ? (
               <>
                 <br />
-                Moon {Math.round(c.moon.illumination * 100)} % lit · {num(c.moon.separation)}° away · alt{" "}
-                {num(c.moon.altitude)}° (mid-session)
+                Moon {Math.round(c.moon.illumination * 100)} % lit
+                <br />
+                Moon {num(c.moon.separation)}° away
+                <br />
+                Moon altitude {num(c.moon.altitude)}° (mid-session)
               </>
             ) : null}
           </span>
@@ -238,7 +244,13 @@ export function SessionMatrix({ rev }: { rev: Revision }) {
               </th>
             ))}
             <th style={{ textAlign: "right" }}>Total</th>
+            <th style={{ textAlign: "right" }} title="Integration left after diagnostics rejection">
+              Usable
+            </th>
             <th>Conditions</th>
+            <th>
+              <span className="sr-only">Diagnostic</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -250,9 +262,6 @@ export function SessionMatrix({ rev }: { rev: Revision }) {
                   <span className="mono">{s.folder}</span>
                   {s.naming === "legacy" ? <Badge tone="muted">legacy name</Badge> : null}
                 </div>
-                <Link href={`/diagnostics/${rev.id}/${encodeURIComponent(s.folder)}`} className={styles.diagLink}>
-                  <Activity size={11} strokeWidth={1.8} aria-hidden="true" /> Diagnostics
-                </Link>
                 {s.nightMismatch ? (
                   <div className={styles.note}>
                     <StatusIcon level="info" size={12} /> headers say {s.headerNights.join(", ")}
@@ -263,16 +272,38 @@ export function SessionMatrix({ rev }: { rev: Revision }) {
                 <Cell key={f} session={s} filter={f} panels={rev.panels} />
               ))}
               <td className={`num ${styles.total}`}>
-                {hours(s.totals.seconds)}
-                <div className="muted">{s.totals.lights} fr</div>
+                <Tip tip={`Total frames: ${s.totals.lights}`}>{hours(s.totals.seconds)}</Tip>
+              </td>
+              <td className={`num ${styles.total}`}>
+                {s.diagnostic ? (
+                  <Tip tip={`Rejected frames: ${s.diagnostic.rejected}`}>
+                    <span className={styles.usable}>{hours(s.diagnostic.acceptedSeconds)}</span>
+                  </Tip>
+                ) : (
+                  <span className="muted" aria-label="Not analysed">—</span>
+                )}
               </td>
               <ConditionsCell s={s} />
+              <td className={styles.diagCell}>
+                {s.diagnostic ? (
+                  <Link href={`/diagnostics/${rev.id}/${encodeURIComponent(s.folder)}`} className={styles.diagLink}>
+                    <Activity size={11} strokeWidth={1.8} aria-hidden="true" /> Diagnostic
+                  </Link>
+                ) : s.totals.lights ? (
+                  <Link
+                    href={`/diagnostics/${rev.id}/${encodeURIComponent(s.folder)}?run=1`}
+                    className={`${styles.diagLink} ${styles.diagRun}`}
+                  >
+                    <Play size={10} strokeWidth={1.8} aria-hidden="true" /> Run diagnostic
+                  </Link>
+                ) : null}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
       <p className={styles.key}>
-        <StatusIcon level="ok" size={12} /> F flats / D master dark present · <StatusIcon level="warn" size={12} /> needs a look (focus moved, flats not calibratable, borrowed) · <StatusIcon level="bad" size={12} /> missing · −n frames rejected or quarantined. Hover a cell for details.
+        <StatusIcon level="ok" size={12} /> F flats / D master dark present · <StatusIcon level="warn" size={12} /> needs a look (focus moved, flats not calibratable, borrowed) · <StatusIcon level="bad" size={12} /> missing. Hover a cell for details.
       </p>
     </div>
   );

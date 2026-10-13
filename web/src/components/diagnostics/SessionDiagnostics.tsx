@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Play, RotateCw } from "lucide-react";
 
@@ -25,7 +25,18 @@ const SECTIONS: { id: Section; label: string }[] = [
   { id: "calibration", label: "Calibration" },
 ];
 
-export function SessionDiagnostics({ detail, initialSection, initialPanel }: { detail: DiagDetail; initialSection?: string; initialPanel?: string }) {
+export function SessionDiagnostics({
+  detail,
+  initialSection,
+  initialPanel,
+  autoRun = false,
+}: {
+  detail: DiagDetail;
+  initialSection?: string;
+  initialPanel?: string;
+  /** Start the analysis on arrival when the night has none yet ("Run diagnostic" from a target page). */
+  autoRun?: boolean;
+}) {
   const router = useRouter();
   const [job, setJob] = useState<DiagJob | null>(detail.job);
   const [selected, setSelected] = useState<{ list: { path: string; file: string; caption: string }[]; index: number } | null>(null);
@@ -59,6 +70,18 @@ export function SessionDiagnostics({ detail, initialSection, initialPanel }: { d
     const body = (await res.json()) as { jobs: DiagJob[] };
     setJob(body.jobs[0] ?? null);
   }
+
+  const autoRan = useRef(false);
+  useEffect(() => {
+    if (!autoRun || autoRan.current) return;
+    autoRan.current = true;
+    // Drop ?run=1 so a reload or back-navigation does not queue another run.
+    const params = new URLSearchParams(window.location.search);
+    params.delete("run");
+    router.replace(`${window.location.pathname}${params.size ? `?${params}` : ""}`, { scroll: false });
+    if (!detail.stored && !(job && ["queued", "running"].includes(job.status))) void run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRun]);
 
   const stored = detail.stored;
   const r = stored?.result;

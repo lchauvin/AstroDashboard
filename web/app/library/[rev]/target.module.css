@@ -95,6 +95,10 @@
   margin-bottom: 34px;
 }
 
+.stats5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .columns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

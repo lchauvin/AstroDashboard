@@ -37,6 +37,9 @@ export default async function TargetPage({ params }: { params: Promise<{ rev: st
   const rev = res.data;
   const t = rev.totals;
   const lights = rev.sessions.filter((s) => s.totals.lights > 0);
+  // Usable = acquired minus what diagnostics rejected; shown once any night has been analysed.
+  const analysed = t.analysedSeconds ?? 0;
+  const accepted = t.acceptedSeconds ?? t.seconds;
   // Goals: the same model and editor as Planning, at the default site.
   const planning = await loadPlanningData();
   const one = planning.ok ? planOne(planning.data, rev.id, null, isoDate(new Date()), 0) : null;
@@ -91,8 +94,19 @@ export default async function TargetPage({ params }: { params: Promise<{ rev: st
         ) : null}
       </div>
 
-      <div className={styles.stats}>
-        <StatTile label="Integration" value={hours(t.seconds)} sub={`${t.lights} usable lights`} />
+      <div className={analysed ? `${styles.stats} ${styles.stats5}` : styles.stats}>
+        <StatTile label="Acquired" value={hours(t.seconds)} sub={`${t.lights} lights`} />
+        {analysed ? (
+          <StatTile
+            label="Usable"
+            value={hours(accepted)}
+            sub={
+              analysed < t.seconds
+                ? `after diagnostics · ${hours(analysed)} of ${hours(t.seconds)} analysed`
+                : `after diagnostics · −${hours(t.seconds - accepted)}`
+            }
+          />
+        ) : null}
         <StatTile label="Nights" value={t.nights} sub={t.first ? `${shortDate(t.first)} → ${shortDate(t.last)}` : "—"} />
         <StatTile
           label="Filters"

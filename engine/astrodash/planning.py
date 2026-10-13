@@ -111,6 +111,47 @@ def nearest_site(sites: list[dict[str, Any]], lat: float | None, lon: float | No
     return best[0] if best else None
 
 
+def accepted_seconds(rev: dict[str, Any], summaries: list[dict[str, Any]],
+                     aliases: dict[str, str]) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, Any]]]:
+    """Integration after diagnostics rejection, per filter and per session.
+
+    Per filter: all acquired ("seconds"), accepted ("goodSeconds": diagnostics' kept time
+    where a night was analysed, the acquired time elsewhere) and the acquired time covered
+    by an analysis ("analysedSeconds"). Per analysed session folder: its accepted seconds,
+    rejected frames and when the analysis finished.
+    """
+    stored = {r["session"]: r for r in summaries if r["revisionId"] == rev["id"]}
+    out: dict[str, dict[str, float]] = {}
+    sessions: dict[str, dict[str, Any]] = {}
+    for s in rev["sessions"]:
+        raw: dict[str, float] = {}
+        for g in s["lightGroups"]:
+            if g["frames"]:
+                raw[g["filter"]] = raw.get(g["filter"], 0.0) + g["seconds"]
+        diag = stored.get(s["folder"])
+        kept: dict[str, float] = {}
+        rejected = 0
+        if diag:
+            for g in diag["summary"].get("lights", []):
+                filt = aliases.get(str(g.get("filter", "")).casefold(), g.get("filter"))
+                kept[filt] = kept.get(filt, 0.0) + (g.get("keptSeconds") or 0)
+                rejected += g.get("rejected") or 0
+        accepted = 0.0
+        for filt, secs in raw.items():
+            o = out.setdefault(filt, {"seconds": 0.0, "goodSeconds": 0.0, "analysedSeconds": 0.0})
+            o["seconds"] += secs
+            if diag and filt in kept:
+                good = min(secs, kept[filt])
+                o["analysedSeconds"] += secs
+            else:
+                good = secs
+            o["goodSeconds"] += good
+            accepted += good
+        if diag:
+            sessions[s["folder"]] = {"finished": diag["finished"], "acceptedSeconds": accepted, "rejected": rejected}
+    return out, sessions
+
+
 def session_locations(library) -> list[dict[str, Any]]:
     """Every session with lights and a header location: (lat, lon, date, target)."""
     out = []

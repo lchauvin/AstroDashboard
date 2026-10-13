@@ -89,6 +89,8 @@ export type FilterSignal = {
   /** e⁻/s/px at the zenith. */
   zenithRate: number;
   basis: string;
+  /** Plain-language explanation of `basis`, for a tooltip. */
+  explain: string;
   estimated: boolean;
 };
 
@@ -119,6 +121,10 @@ export function targetSignals(rig: PlanRig, info: CatalogInfo, anchor: HalphaAnc
           filter.line === "Ha"
             ? `${r.toFixed(0)} R Hα (${anchor.basis})`
             : `${r.toFixed(0)} R = Hα × ${(filter.line === "OIII" ? ratios.oiii : ratios.sii).toFixed(2)} (class ratio)`,
+        explain:
+          filter.line === "Ha"
+            ? `Estimated brightness of the target's Hα emission, in Rayleighs (R), used to predict the SNR this filter reaches. ${anchor.note}`
+            : `Estimated ${filter.line} brightness in Rayleighs (R). It is not measured: it is the Hα estimate times the line ratio typical of ${classPhrase(cls)} (${(filter.line === "OIII" ? ratios.oiii : ratios.sii).toFixed(2)}), so real targets can differ a lot.`,
         estimated: true,
       });
       continue;
@@ -130,7 +136,20 @@ export function targetSignals(rig: PlanRig, info: CatalogInfo, anchor: HalphaAnc
     const inBand = emitsLines(cls) || cls === "galaxy" ? LINES.filter((l) => l.nm >= lo && l.nm <= hi && lineR[l.line] > 0) : [];
     for (const l of inBand) rate += lineSignalRate({ ...ctx, filter: { ...filter, centerNm: l.nm } }, lineR[l.line]);
     const parts = [surf != null ? `${surf.toFixed(1)} mag/″² continuum` : null, inBand.length ? `${inBand.map((l) => l.line).join(" + ")} lines` : null].filter(Boolean);
-    out.push({ letter, zenithRate: rate, basis: parts.length ? parts.join(" + ") : "no broadband signal known", estimated: true });
+    const band = `${Math.round(lo)}–${Math.round(hi)} nm`;
+    const explain = [
+      "What the SNR model assumes this broadband filter collects from the target.",
+      surf != null
+        ? `Continuum: the catalog's mean surface brightness, ${surf.toFixed(1)} mag/arcsec² (starlight and reflected light, spread evenly over the object).`
+        : "Continuum: none — the catalog gives no magnitude or surface brightness for this object.",
+      inBand.length
+        ? `Emission: the ${inBand.map((l) => `${l.line === "Ha" ? "Hα" : l.line} (${l.nm.toFixed(0)} nm)`).join(" and ")} line${inBand.length > 1 ? "s" : ""} of the target fall${inBand.length > 1 ? "" : "s"} inside this filter's ${band} passband and add${inBand.length > 1 ? "" : "s"} to its signal.`
+        : `Emission: none of the modelled lines (Hα, OIII, SII) falls inside this filter's ${band} passband.`,
+      parts.length ? null : "With neither, the predicted signal is zero, so an SNR goal cannot be computed for this filter; use an hours goal.",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    out.push({ letter, zenithRate: rate, basis: parts.length ? parts.join(" + ") : "no broadband signal known", explain, estimated: true });
   }
   return out;
 }

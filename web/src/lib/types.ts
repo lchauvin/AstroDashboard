@@ -35,6 +35,10 @@ export interface RevisionTotals {
   nights: number;
   first: string | null;
   last: string | null;
+  /** Revision detail only: seconds left after diagnostics rejection (unanalysed nights count in full). */
+  acceptedSeconds?: number;
+  /** Revision detail only: acquired seconds on nights diagnostics has analysed. */
+  analysedSeconds?: number;
 }
 
 export interface TargetGroup {
@@ -140,6 +144,8 @@ export interface Session {
   end: string | null;
   conditions: Conditions | null;
   totals: { lights: number; seconds: number; rejected: number; quarantined: number; flats: number };
+  /** Revision detail only: the stored diagnostics run for this night, if any. */
+  diagnostic?: { finished: number; acceptedSeconds: number; rejected: number } | null;
 }
 
 export interface Check {
@@ -155,6 +161,10 @@ export interface FilterDetail extends FilterTotal {
   sessions: number;
   sessionsWithFlats: number;
   exposures: number[];
+  /** Seconds left after diagnostics rejection (unanalysed nights count in full). */
+  acceptedSeconds?: number;
+  /** Acquired seconds on nights diagnostics has analysed. */
+  analysedSeconds?: number;
 }
 
 export interface Revision {

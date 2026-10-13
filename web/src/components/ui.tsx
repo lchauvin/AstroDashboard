@@ -56,9 +56,21 @@ export function FilterChip({ filter, long = false }: { filter: string | null; lo
 }
 
 /** Hover / focus tooltip. Content is plain markup; the trigger is keyboard-focusable. */
-export function Tip({ children, tip, block = false }: { children: React.ReactNode; tip: React.ReactNode; block?: boolean }) {
+export function Tip({
+  children,
+  tip,
+  block = false,
+  side = "top",
+}: {
+  children: React.ReactNode;
+  tip: React.ReactNode;
+  block?: boolean;
+  /** "left" for tall tips inside a clipping (scrolling) container, where there is no room above. */
+  side?: "top" | "left";
+}) {
+  const cls = [styles.tip, block ? styles.tipBlock : null, side === "left" ? styles.tipLeft : null].filter(Boolean).join(" ");
   return (
-    <span className={block ? `${styles.tip} ${styles.tipBlock}` : styles.tip} tabIndex={0}>
+    <span className={cls} tabIndex={0}>
       {children}
       <span className={styles.tipBox} role="tooltip">
         {tip}

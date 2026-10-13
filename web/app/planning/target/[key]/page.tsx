@@ -10,7 +10,7 @@ import { HalphaButton } from "@/components/planning/HalphaButton";
 import { PlanControls } from "@/components/planning/PlanControls";
 import { SnrChart } from "@/components/planning/SnrChart";
 import styles from "@/components/planning/planning.module.css";
-import { Badge, FilterChip, Marks } from "@/components/ui";
+import { Badge, FilterChip, Marks, Tip } from "@/components/ui";
 import { stageLabel } from "@/lib/format";
 import { formatDec, formatRa } from "@/lib/astro/coordinates";
 import { snr2PerHour } from "@/lib/planning/evaluate";
@@ -156,7 +156,9 @@ export default async function TargetPlanPage({ params, searchParams }: { params:
                     </td>
                     <td>
                       <span className="num">{sig.zenithRate > 0 ? rate(sig.zenithRate) : "—"}</span>
-                      <div className={styles.sub}>{sig.basis}</div>
+                      <div className={styles.sub}>
+                        <Tip tip={sig.explain}>{sig.basis}</Tip>
+                      </div>
                     </td>
                     <td className="num">
                       {fs ? rate(fs.darkRate) : "—"}

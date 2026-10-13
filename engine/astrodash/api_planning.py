@@ -274,38 +274,14 @@ def register(app: FastAPI, state) -> None:
 
     # ------------------------------------------------------------------ planning context
 
-    def _good_seconds(rev: dict[str, Any]) -> dict[str, dict[str, float]]:
-        """Per filter: all ok seconds, and 'good' seconds where diagnostics kept/rejected frames."""
-        stored = {(r["revisionId"], r["session"]): r for r in cache.diagnostic_summaries() if r["revisionId"] == rev["id"]}
-        out: dict[str, dict[str, float]] = defaultdict(lambda: {"seconds": 0.0, "goodSeconds": 0.0, "analysedSeconds": 0.0})
-        for s in rev["sessions"]:
-            raw: dict[str, float] = defaultdict(float)
-            for g in s["lightGroups"]:
-                if g["frames"]:
-                    raw[g["filter"]] += g["seconds"]
-            diag = stored.get((rev["id"], s["folder"]))
-            kept: dict[str, float] = defaultdict(float)
-            if diag:
-                for g in diag["summary"].get("lights", []):
-                    filt = cfg.filter_aliases.get(str(g.get("filter", "")).casefold(), g.get("filter"))
-                    kept[filt] += g.get("keptSeconds") or 0
-            for filt, secs in raw.items():
-                o = out[filt]
-                o["seconds"] += secs
-                if diag and filt in kept:
-                    o["goodSeconds"] += min(secs, kept[filt])
-                    o["analysedSeconds"] += secs
-                else:
-                    o["goodSeconds"] += secs
-        return dict(out)
-
     @app.get("/api/planning/context")
     def planning_context() -> dict[str, Any]:
         lib = state.require_library()
         stored_goals = cache.goals()
+        summaries = cache.diagnostic_summaries()
         targets = []
         for rev in lib.revisions.values():
-            per_filter = _good_seconds(rev)
+            per_filter, _ = planning.accepted_seconds(rev, summaries, cfg.filter_aliases)
             targets.append({
                 "id": rev["id"], "folder": rev["folder"], "catalogId": rev["catalogId"], "name": rev["name"],
                 "revision": rev["revision"], "groupId": rev["groupId"], "stage": rev["stage"]["value"],

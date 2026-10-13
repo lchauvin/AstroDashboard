@@ -17,6 +17,7 @@
 }
 
 .track {
+  position: relative;
   display: block;
   width: 100%;
   height: 14px;
@@ -24,8 +25,16 @@
 }
 
 .bar {
+  position: relative;
   display: block;
   height: 14px;
+}
+
+/* Acquired length behind the usable bar, once diagnostics has run. */
+.barAcquired {
+  position: absolute;
+  inset: 0 auto 0 0;
+  opacity: 0.3;
 }
 
 .value {
@@ -71,5 +80,15 @@
 
 .foot span:nth-child(3) {
   grid-column: 5;
+  text-align: right;
+}
+
+.row.withUsable,
+.foot.withUsable {
+  grid-template-columns: 44px minmax(0, 1fr) 66px 66px 58px 62px;
+}
+
+.foot.withUsable span:nth-child(4) {
+  grid-column: 6;
   text-align: right;
 }
