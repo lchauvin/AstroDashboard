@@ -2,7 +2,9 @@ import "server-only";
 
 import { engineGet, engineSend, type EngineResult } from "@/lib/engine";
 import { calibrateSites, type SiteCalibration } from "@/lib/planning/calibrate";
-import { halphaKey, plan, type PlanResult } from "@/lib/planning/plan";
+import { nightForecast, type Forecast, type ForecastPayload, type NightForecast } from "@/lib/planning/forecast";
+import { halphaKey, plan, type CalendarNight, type PlanResult } from "@/lib/planning/plan";
+import { nightQuality, type NightQuality } from "@/lib/planning/quality";
 import { buildRig, type PlanRig } from "@/lib/planning/rig";
 import type { CatalogInfo } from "@/lib/planning/signal";
 import { defaultSite } from "@/lib/planning/sites";
@@ -66,12 +68,18 @@ export async function loadPlanningData(): Promise<EngineResult<PlanningData>> {
   };
 }
 
+/** The site a page asked for, else the default one. */
+export const siteFor = (data: PlanningData, siteId: string | null | undefined) =>
+  data.context.sites.find((s) => s.id === siteId) ?? defaultSite(data.context.sites) ?? null;
+
+/** Cuts a forecast to one night, for plan(): nights it covers use the sky rules (skyrule.ts). */
+const forecastCutter = (f: Forecast | null | undefined) => (f ? (dusk: number | null, dawn: number | null) => nightForecast(f, dusk, dawn) : undefined);
+
 export function planFor(
   data: PlanningData,
-  opts: { siteId?: string | null; date: string; includeFinished?: boolean; seasonDays?: number; calendarDays?: number },
+  opts: { siteId?: string | null; date: string; includeFinished?: boolean; seasonDays?: number; calendarDays?: number; forecast?: Forecast | null },
 ): PlanResult | null {
-  const sites = data.context.sites;
-  const site = sites.find((s) => s.id === opts.siteId) ?? defaultSite(sites);
+  const site = siteFor(data, opts.siteId);
   if (!site) return null;
   return plan({
     site,
@@ -86,13 +94,13 @@ export function planFor(
     includeFinished: opts.includeFinished,
     seasonDays: opts.seasonDays,
     calendarDays: opts.calendarDays,
+    forecastFor: forecastCutter(opts.forecast),
   });
 }
 
 /** One target (library revision id, or "idea:<catalog name>") planned at one site; null when unknown. */
-export function planOne(data: PlanningData, key: string, siteId: string | null | undefined, date: string, seasonDays = 365) {
-  const sites = data.context.sites;
-  const site = sites.find((s) => s.id === siteId) ?? defaultSite(sites);
+export function planOne(data: PlanningData, key: string, siteId: string | null | undefined, date: string, seasonDays = 365, forecast?: Forecast | null) {
+  const site = siteFor(data, siteId);
   if (!site) return null;
   const target = data.context.targets.find((t) => t.id === key) ?? null;
   const idea = !target && key.startsWith("idea:") ? findCatalog(key.slice(5)) : null;
@@ -111,6 +119,7 @@ export function planOne(data: PlanningData, key: string, siteId: string | null |
     calendarDays: 1,
     seasonDays,
     keepAllIdeas: true,
+    forecastFor: forecastCutter(forecast),
   });
   const p = result.yours[0] ?? result.ideas[0] ?? null;
   return p ? { site, result, plan: p, catalog: target ? data.catalogFor(target) : idea } : null;
@@ -134,4 +143,26 @@ export function goalRowsFor(one: NonNullable<ReturnType<typeof planOne>>): GoalR
       basis: sig?.basis ?? "",
     };
   });
+}
+
+/** Astrospheric's forecast for a site, via the engine (which holds the key and caches it); null when the engine is down. */
+export async function loadForecast(siteId: string): Promise<ForecastPayload | null> {
+  const res = await engineGet<ForecastPayload>(`/api/planning/forecast?siteId=${encodeURIComponent(siteId)}`);
+  return res.ok ? res.data : null;
+}
+
+export type RatedNight = { night: CalendarNight; quality: NightQuality; forecast: NightForecast | null };
+
+/** Plan from `date` for `days` nights at a site, each night rated with the forecast (see quality.ts). */
+export async function ratedNights(data: PlanningData, siteId: string | null | undefined, date: string, days: number, includeFinished = false) {
+  const site = siteFor(data, siteId);
+  if (!site) return null;
+  const payload = await loadForecast(site.id);
+  const result = planFor(data, { siteId: site.id, date, calendarDays: days, includeFinished, forecast: payload?.forecast });
+  if (!result) return null;
+  const nights: RatedNight[] = result.calendar.map((night) => {
+    const forecast = nightForecast(payload?.forecast ?? null, night.dusk, night.dawn);
+    return { night, forecast, quality: nightQuality(night, forecast) };
+  });
+  return { result, payload, nights };
 }

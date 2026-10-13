@@ -17,6 +17,7 @@ dependencies = [
     "sep>=1.4.1",
     "xisf>=0.9.7",
     "httpx>=0.28.1",
+    "tzdata>=2026.5",  # zoneinfo on Windows (Astrospheric forecast hours are local time)
 ]
 
 [dependency-groups]

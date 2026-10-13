@@ -31,34 +31,40 @@
   color: var(--color-accent-700);
 }
 
-.ok {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 8px;
-  border: 1px solid var(--color-divider);
-  font-size: 12px;
-  color: var(--text-secondary);
+/* Lint rows stay on one line: a summary per cell, the detail in tooltips. */
+.lintTable td {
   white-space: nowrap;
 }
 
-.conflict {
-  composes: chip;
-  border-color: var(--status-bad);
+.summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.summary > .summary {
+  margin-right: 8px;
+}
+
+.tipList {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  white-space: normal;
+}
+
+.tipBad {
+  color: var(--status-bad);
+}
+
+.actions {
+  text-align: right;
+}
+
+.actions > * + * {
+  margin-left: 8px;
 }
 
 .action {
@@ -73,6 +79,16 @@
 
 .action:hover:not(:disabled) {
   border-color: var(--color-accent);
+}
+
+.iconAction {
+  composes: action;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+  vertical-align: middle;
 }
 
 .plain {
@@ -159,4 +175,43 @@
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.newTarget {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field > span {
+  font: 400 10px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.field > .input {
+  width: 240px;
+  max-width: 100%;
+}
+
+.field > .narrow {
+  width: 90px;
+}
+
+.fields > .action {
+  height: 34px;
 }

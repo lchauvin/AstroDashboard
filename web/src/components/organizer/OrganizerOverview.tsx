@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { FolderPlus } from "lucide-react";
 
 import { stageLabel } from "@/lib/format";
-import { bytes, type OrganizerOverview as Overview } from "@/lib/organizer";
-import { StatusIcon } from "../ui";
+import { OP_LABEL, bytes, type OrganizerOverview as Overview } from "@/lib/organizer";
+import { StatusIcon, Tip } from "../ui";
+import { NewTarget } from "./NewTarget";
 import styles from "./organizer.module.css";
 
 async function post(path: string, body: unknown) {
@@ -26,27 +28,31 @@ const STATUS_TEXT: Record<string, string> = {
   discarded: "discarded",
 };
 
-/** Lint per revision, plans and the trash. Preparing a plan changes nothing on disk. */
+const NEW_TARGET = "new-target";
+
+/** Lint per revision, a new target, plans and the trash. Preparing a plan changes nothing on disk. */
 export function OrganizerOverview({ data }: { data: Overview }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const make = async (path: string, revisionId: string) => {
-    setBusy(revisionId);
+  // The error is shown next to what raised it: the new-target form, or the top of the page.
+  const [error, setError] = useState<{ key: string; text: string } | null>(null);
+  const make = async (path: string, body: unknown, key: string) => {
+    setBusy(key);
     setError(null);
     try {
-      const plan = await post(path, { revisionId });
+      const plan = await post(path, body);
       router.push(`/library/organizer/${encodeURIComponent(plan.id)}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError({ key, text: e instanceof Error ? e.message : String(e) });
       setBusy(null);
     }
   };
   const open = data.revisions.filter((r) => !r.canonical);
+  const known = new Set(data.revisions.map((r) => r.catalogId.toLowerCase()));
 
   return (
     <div className={styles.overview}>
-      {error ? <p className={styles.error}>{error}</p> : null}
+      {error && error.key !== NEW_TARGET ? <p className={styles.error}>{error.text}</p> : null}
       <section>
         <h2 className="section-title">Layout lint</h2>
         <p className={styles.hint}>
@@ -54,7 +60,7 @@ export function OrganizerOverview({ data }: { data: Overview }) {
           a draft: you see every operation before anything moves, and applying needs you to type the plan id.
         </p>
         <div className={styles.scroller}>
-          <table className="table">
+          <table className={`table ${styles.lintTable}`}>
             <thead>
               <tr>
                 <th>Revision</th>
@@ -79,48 +85,78 @@ export function OrganizerOverview({ data }: { data: Overview }) {
                     <td>{stageLabel(r.stage)}</td>
                     <td>
                       {r.canonical ? (
-                        <span className={styles.ok}>
-                          <StatusIcon level="ok" size={13} /> canonical
-                        </span>
+                        <StatusIcon level="ok" size={13} label="Canonical layout" />
                       ) : (
-                        <span className={styles.chips}>
-                          {[...byCode.entries()].map(([code, n]) => (
-                            <span key={code} className={styles.chip} title={r.lint.filter((l) => l.code === code).map((l) => l.text).join("\n")}>
-                              {LINT_LABEL[code] ?? code}
-                              {n > 1 ? ` ×${n}` : ""}
+                        <Tip
+                          tip={
+                            <span className={styles.tipList}>
+                              {[...byCode.entries()].map(([code, n]) => (
+                                <span key={code}>
+                                  {LINT_LABEL[code] ?? code}
+                                  {n > 1 ? ` ×${n}` : ""}
+                                </span>
+                              ))}
+                              {r.conflicts.map((c) => (
+                                <span key={c} className={styles.tipBad}>
+                                  {c}
+                                </span>
+                              ))}
+                              {r.warnings.map((w) => (
+                                <span key={w} className="muted">
+                                  {w}
+                                </span>
+                              ))}
                             </span>
-                          ))}
-                          {r.conflicts.length ? (
-                            <span className={styles.conflict}>
-                              <StatusIcon level="bad" size={12} /> {r.conflicts.length} conflict{r.conflicts.length > 1 ? "s" : ""}
-                            </span>
-                          ) : null}
-                          {r.warnings.length ? (
-                            <span className={styles.chip} title={r.warnings.join("\n")}>
-                              <StatusIcon level="warn" size={12} /> {r.warnings.length} note{r.warnings.length > 1 ? "s" : ""}
-                            </span>
-                          ) : null}
-                        </span>
+                          }
+                        >
+                          <span className={styles.summary}>
+                            {r.conflicts.length ? (
+                              <span className={styles.summary}>
+                                <StatusIcon level="bad" size={13} label="Conflicts" />
+                                <span className="num">{r.conflicts.length}</span>
+                              </span>
+                            ) : null}
+                            <StatusIcon level="warn" size={13} label="Layout findings" />
+                            <span className="num">{byCode.size}</span>
+                            <span className="muted">{byCode.size === 1 ? "issue" : "issues"}</span>
+                          </span>
+                        </Tip>
                       )}
                     </td>
                     <td className="num">
                       {nOps ? (
-                        <span title={Object.entries(r.counts).map(([k, v]) => `${k}: ${v}`).join("\n")}>
-                          {nOps}
-                          {r.counts.trash ? <span className={styles.hint}> · {r.counts.trash} to trash</span> : null}
-                        </span>
+                        <Tip
+                          tip={
+                            <span className={styles.tipList}>
+                              {Object.entries(r.counts).map(([k, v]) => (
+                                <span key={k}>
+                                  {OP_LABEL[k as keyof typeof OP_LABEL] ?? k}: {v}
+                                </span>
+                              ))}
+                            </span>
+                          }
+                        >
+                          <span>{nOps}</span>
+                        </Tip>
                       ) : (
-                        "—"
+                        <span className="muted">—</span>
                       )}
                     </td>
-                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    <td className={styles.actions}>
                       {!r.canonical ? (
-                        <button type="button" className={styles.action} disabled={busy !== null} onClick={() => make("/api/organizer/plans", r.revisionId)}>
+                        <button type="button" className={styles.action} disabled={busy !== null} onClick={() => make("/api/organizer/plans", { revisionId: r.revisionId }, r.revisionId)}>
                           {busy === r.revisionId ? "Preparing…" : "Prepare plan"}
                         </button>
-                      ) : null}{" "}
-                      <button type="button" className={styles.action} disabled={busy !== null} onClick={() => make("/api/organizer/new-revision", r.revisionId)} title="Creates <Target> R<n+1> with an empty .SessionData and a target.json (after approval). Moves nothing.">
-                        New revision…
+                      ) : null}
+                      <button
+                        type="button"
+                        className={styles.iconAction}
+                        disabled={busy !== null}
+                        onClick={() => make("/api/organizer/new-revision", { revisionId: r.revisionId }, r.revisionId)}
+                        title="New revision: creates <Target> R<n+1> with an empty .SessionData and a target.json (after approval). Moves nothing."
+                        aria-label="New revision"
+                      >
+                        <FolderPlus size={13} strokeWidth={1.8} />
                       </button>
                     </td>
                   </tr>
@@ -129,6 +165,16 @@ export function OrganizerOverview({ data }: { data: Overview }) {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section>
+        <h2 className="section-title">New target</h2>
+        <p className={styles.hint}>
+          Creates the canonical folders and a target.json for revision 1, after you approve the plan. Ingest sends frames to it
+          once a NINA object name matches its catalog id or name.
+        </p>
+        <NewTarget known={known} dataRoot={data.dataRoot} busy={busy !== null} onPrepare={(body) => make("/api/organizer/new-target", body, NEW_TARGET)} />
+        {error?.key === NEW_TARGET ? <p className={styles.error}>{error.text}</p> : null}
       </section>
 
       <section>

@@ -36,7 +36,10 @@ npm run dev -- --port 3006
 ```
 
 Open http://localhost:3006. For Live, run AstroController (`uv run astrocontroller` in D:\Python\AstroController,
-or `--fake` to try it in daylight). If it uses a token, set `ASTROCONTROLLER_TOKEN` in the engine's environment. The engine scans on startup (about 8 s cold, under 1 s after that thanks to the
+or `--fake` to try it in daylight). If it uses a token, set `ASTROCONTROLLER_TOKEN` in the engine's environment.
+For the weather forecast on the Planning page, set `ASTROSPHERIC_API_KEY` (an Astrospheric Professional key, from
+My Profile) in `.env` at the project root (copy `.env.example`; git-ignored) or in the engine's environment; forecasts are cached per site for an hour and only cover the RDPS domain
+(North America, Greenland, Iceland, Ireland, UK). The engine scans on startup (about 8 s cold, under 1 s after that thanks to the
 header cache in `var/astrodash.db`); **Rescan** on the Library page picks up new nights.
 
 ## Data safety

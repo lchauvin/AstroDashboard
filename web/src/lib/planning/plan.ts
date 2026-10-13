@@ -23,6 +23,8 @@ import { FILTER_LETTERS, FILTER_NAMES, type FilterLetter, type PlanRig } from ".
 import { classFilters, halphaAnchor, targetSignals, type CatalogInfo, type FilterSignal, type HalphaAnchor } from "./signal";
 import { filterSky, type FilterSky } from "./skymodel";
 import { goalStatus, type GoalStatus } from "./goals";
+import type { NightForecast } from "./forecast";
+import { nightSky, ruleFilter, type RuleChoice } from "./skyrule";
 import type { HalphaMeasurement, PlanTarget, Site } from "./types";
 
 export { goalStatus, type GoalStatus };
@@ -62,6 +64,8 @@ export type TargetPlan = {
   moonDownFraction: number;
   /** Hours to SNR 30 in the easiest relevant filter under a dark sky (ideas' brightness). */
   hoursToSnr30: number | null;
+  /** Your sky rules' choice for tonight (skyrule.ts), when the forecast covers it; it sets `best`. */
+  rule: RuleChoice | null;
 };
 
 /**
@@ -113,10 +117,11 @@ export function siteSkies(rig: PlanRig, site: Site, cal: SiteCalibration | null)
 
 const pct = (x: number) => `${Math.round(x * 100)} %`;
 
-function adviceFor(plan: Pick<TargetPlan, "tonight" | "relevant" | "best" | "tonightHours" | "moonSensitivity">, grid: NightGrid): string {
+function adviceFor(plan: Pick<TargetPlan, "tonight" | "relevant" | "best" | "tonightHours" | "moonSensitivity" | "rule">, grid: NightGrid): string {
   if (!grid.samples.length) return "No astronomical darkness tonight.";
   if (plan.tonightHours <= 0) return "Not above the horizon mask during darkness tonight.";
   if (!plan.best) return "Nothing left to shoot: every goal is met.";
+  if (plan.rule) return plan.rule.note;
   const rel = plan.tonight.filter((f) => plan.relevant.includes(f.letter));
   const worst = [...rel]
     .filter((f) => f.snr2Dark > 0 && f.efficiency < 0.8 && f.letter !== plan.best!.letter)
@@ -149,6 +154,8 @@ export type PlanInput = {
   seasonDays?: number;
   /** Keep every idea (no "already covered" or "not up" filtering) and give it a season strip — for a detail page. */
   keepAllIdeas?: boolean;
+  /** Astrospheric's forecast cut to a night; nights it covers use your sky rules for the filter. */
+  forecastFor?: (dusk: number | null, dawn: number | null) => NightForecast | null;
 };
 
 export const halphaKey = (ra: number, dec: number) => `${ra.toFixed(3)}|${dec.toFixed(3)}`;
@@ -161,6 +168,8 @@ export function plan(input: PlanInput): PlanResult {
   const nights = grids(site, date, calendarDays, 10);
   const tonight = nights[0];
   const coarse90 = grids(site, date, 90, 20, false);
+  const skyOf = (g: NightGrid) => nightSky(input.forecastFor?.(g.dusk, g.dawn) ?? null);
+  const tonightSky = skyOf(tonight);
 
   const build = (kind: TargetPlan["kind"], target: PlanTarget | null, info: CatalogInfo | null, ra: number, dec: number): TargetPlan => {
     const cls: ObjectClass = info?.objectClass ?? "unknown";
@@ -208,6 +217,11 @@ export function plan(input: PlanInput): PlanResult {
       const value = filterValue(f, needOf(f.letter), moonSensitivity[f.letter] ?? 0, moonDownFraction);
       if (value > 0 && (!best || value > best.value)) best = { letter: f.letter, value, efficiency: f.efficiency };
     }
+    const rule = ruleFilter(tonightSky, tonightEval, relevant, needOf);
+    if (rule) {
+      const f = tonightEval.find((x) => x.letter === rule.letter)!;
+      best = { letter: rule.letter, value: filterValue(f, needOf(rule.letter), moonSensitivity[rule.letter] ?? 0, moonDownFraction), efficiency: f.efficiency };
+    }
     // Brightness: hours to SNR 30 in the easiest relevant filter, under this site's dark sky.
     let hoursToSnr30: number | null = null;
     for (const l of relevant) {
@@ -250,6 +264,7 @@ export function plan(input: PlanInput): PlanResult {
       moonSensitivity,
       moonDownFraction,
       hoursToSnr30,
+      rule,
     };
     p.advice = adviceFor(p, tonight);
     return p;
@@ -300,6 +315,7 @@ export function plan(input: PlanInput): PlanResult {
       if (top?.best) best = { key: top.key, title: top.title, letter: top.best.letter, hours: top.tonightHours, efficiency: top.best.efficiency };
     } else {
       let bestValue = 0;
+      const sky = skyOf(g);
       for (const p of yours) {
         const weight = STAGE_WEIGHT[p.target?.stage ?? "acquiring"] ?? 1;
         if (weight === 0) continue;
@@ -307,8 +323,11 @@ export function plan(input: PlanInput): PlanResult {
         if (!samples.length) continue;
         const evals = evaluateNight(samples, g.stepMinutes, g.moonIllum, p.signals.filter((s) => p.relevant.includes(s.letter)), skies, rig);
         const down = samples.filter((s) => s.moonAlt <= 0).length / samples.length;
+        const needOf = (l: FilterLetter) => p.goals.find((x) => x.letter === l)?.need ?? 0.5;
+        const rule = ruleFilter(sky, evals, p.relevant, needOf);
         for (const f of evals) {
-          const need = p.goals.find((x) => x.letter === f.letter)?.need ?? 0.5;
+          if (rule && f.letter !== rule.letter) continue;
+          const need = needOf(f.letter);
           const value = filterValue(f, need, p.moonSensitivity[f.letter] ?? 0, down) * weight;
           if (value > bestValue) {
             bestValue = value;

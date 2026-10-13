@@ -224,6 +224,7 @@ Library → **Organizer** (`/library/organizer`). The machinery follows §2.1, w
 - **Undo** is the inverse of what actually ran, newest step first. It is a new draft that needs its own approval.
 - **Stored Diagnostics follow the frames.** Applying a plan (or its undo) rewrites the stored frame paths and renamed session keys in the dashboard database, so earlier analyses, previews and the learned horizon keep working.
 - **"New revision…"** creates `<Target> R<n+1>\.SessionData` and a `target.json` (create-only). It moves nothing.
+- **"New target"** (2026-10-12) creates revision 1 of a target the library doesn't have yet: `<ID> (<Name>)\` with `.SessionData\`, `.Calibration\`, `.Finished\` and a `target.json` (`status: acquiring`, plus `mosaic.panels` when more than 1). Like every organizer change it is a draft plan, approved by typing its id. The catalog id is looked up in the vendored catalog to fill in the canonical designation and common name. Names with `< > : " / \ | ? * ( ) [ ]`, or ending in ` R<n>`, are refused, and so is a catalog id already in the library, which needs "New revision…" instead.
 - **Dry run on the real tree (2026-10-09, read-only):** no conflicts in any of the 14 targets. The legacy sessions found are exactly the four listed above.
 - **PixInsight projects are re-pointed (2026-10-10).** A plan's last steps (`repoint`, `organizer/pxi.py`) rewrite the paths inside each `<target>\*.pxiproject\project.xosm`:
   - paths follow the plan's moves;

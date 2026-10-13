@@ -1,0 +1,292 @@
+/* ------------------------------------------------------------ verdict badge */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: 600 13px/1.2 var(--font-heading);
+  letter-spacing: 0.02em;
+  --level: var(--text-muted);
+}
+
+.badgeLarge {
+  font-size: 30px;
+  gap: 12px;
+}
+
+.dot {
+  width: 0.62em;
+  height: 0.62em;
+  border-radius: 50%;
+  background: var(--level);
+  flex: none;
+}
+
+.badge[data-level="excellent"],
+.tile[data-level="excellent"] {
+  --level: var(--status-good);
+}
+.badge[data-level="good"],
+.tile[data-level="good"] {
+  --level: color-mix(in srgb, var(--status-good) 60%, var(--status-warn));
+}
+.badge[data-level="moonlit"],
+.tile[data-level="moonlit"],
+.badge[data-level="uncertain"],
+.tile[data-level="uncertain"] {
+  --level: var(--status-warn);
+}
+.badge[data-level="poor"],
+.tile[data-level="poor"] {
+  --level: var(--status-bad);
+}
+.badge[data-level="unknown"],
+.tile[data-level="unknown"] {
+  --level: var(--text-muted);
+}
+
+/* ------------------------------------------------------------ hero cards */
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  margin-bottom: 36px;
+}
+
+@media (max-width: 760px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  border: 1px solid var(--color-divider);
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cardMain {
+  border-color: var(--color-accent);
+}
+
+.cardDate {
+  font: 400 11px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.cardTitle {
+  font: 600 22px/1.2 var(--font-heading);
+}
+
+.summary {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.cardFoot {
+  margin-top: auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+}
+
+.pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------------------ 7 nights */
+
+.week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .week {
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  }
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-divider);
+  border-top: 3px solid var(--level);
+  color: inherit;
+  text-decoration: none;
+  /* The tooltip wrapper is a flex row: fill it, so every tile is as wide as its column. */
+  flex: 1;
+  min-width: 0;
+}
+
+.tile:hover,
+.tile:focus-visible {
+  border-color: var(--color-accent);
+  border-top-color: var(--level);
+}
+
+.tileDay {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font: 400 10.5px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.tileMeta {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.tipList {
+  margin: 6px 0;
+  padding-left: 16px;
+}
+
+/* ------------------------------------------------------------ night page */
+
+.nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  font-size: 13.5px;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 10px 0 30px;
+}
+
+.recs {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border-top: 1px solid var(--color-divider);
+}
+
+.rec {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.recRank {
+  font: 400 11px/1 var(--font-mono);
+  color: var(--text-muted);
+}
+
+.recTitle {
+  font-weight: 600;
+}
+
+.recSub {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+.recFilter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+
+.more {
+  font-size: 13.5px;
+  margin-top: 12px;
+}
+
+.foot {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 36px;
+  line-height: 1.55;
+}
+
+/* ------------------------------------------------------------ night conditions */
+
+.condGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  border: 1px solid var(--color-divider);
+  margin: 12px 0 18px;
+}
+
+.cond {
+  padding: 12px 14px;
+  border-right: 1px solid var(--color-divider);
+  height: 100%;
+  width: 100%;
+}
+
+.condLabel {
+  font: 400 10.5px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.condValue {
+  font: 600 17px/1.2 var(--font-heading);
+  margin-top: 8px;
+}
+
+.condSub {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* ------------------------------------------------------------ dew warning */
+
+.dew {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  padding: 2px 7px;
+  font: 600 11.5px/1.3 var(--font-heading);
+  letter-spacing: 0.02em;
+  color: var(--color-text);
+  border: 1px solid var(--status-warn);
+  background: color-mix(in srgb, var(--status-warn) 14%, transparent);
+}
+
+.dew svg {
+  color: var(--status-warn);
+  flex: none;
+}

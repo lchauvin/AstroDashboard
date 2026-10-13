@@ -9,7 +9,7 @@ import styles from "./planning.module.css";
 const STORAGE_KEY = "astrodash-planner-site";
 
 /** Site selector, start date and options. State lives in the URL; the last site is remembered per browser. */
-export function PlanControls({ sites, siteId, date, showFinished }: { sites: Site[]; siteId: string; date: string; showFinished?: boolean }) {
+export function PlanControls({ sites, siteId, date, showFinished, showDate = true }: { sites: Site[]; siteId: string; date: string; showFinished?: boolean; showDate?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -52,10 +52,12 @@ export function PlanControls({ sites, siteId, date, showFinished }: { sites: Sit
           ))}
         </select>
       </label>
-      <label className={styles.field}>
-        <span className={styles.fieldLabel}>Night of</span>
-        <input type="date" className={styles.input} value={date} onChange={(e) => go({ date: e.target.value || null })} />
-      </label>
+      {showDate ? (
+        <label className={styles.field}>
+          <span className={styles.fieldLabel}>Night of</span>
+          <input type="date" className={styles.input} value={date} onChange={(e) => go({ date: e.target.value || null })} />
+        </label>
+      ) : null}
       {showFinished !== undefined ? (
         <label className={styles.check}>
           <input type="checkbox" checked={showFinished} onChange={(e) => go({ finished: e.target.checked ? "1" : null })} />

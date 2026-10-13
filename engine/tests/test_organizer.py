@@ -1,5 +1,6 @@
 """Organizer (PLAN §2.1, §3.2) on the synthetic data root. Never touches G:\\."""
 
+import json
 import os
 from pathlib import Path
 
@@ -182,6 +183,37 @@ def test_new_revision_creates_folders_and_target_json_only(data_root, tmp_path):
         tj = data_root / "M 31 (Andromeda Galaxy) R3" / "target.json"
         assert '"revision": 3' in tj.read_text(encoding="utf-8")
         assert set(files(data_root)) - set(before) == {"M 31 (Andromeda Galaxy) R3/target.json"}
+
+
+def test_new_target_creates_the_skeleton_only(data_root, tmp_path):
+    before = files(data_root)
+    app = client_for(data_root, tmp_path)
+    with TestClient(app) as client:
+        app.state.engine._run_scan()
+        plan = client.post("/api/organizer/new-target", json={"catalogId": " NGC  7000 ", "name": "North America Nebula", "panels": 2}).json()
+        assert plan["status"] == "draft" and plan["revisionId"] is None
+        assert plan["target"] == "NGC 7000 (North America Nebula)"
+        assert files(data_root) == before  # a draft writes nothing
+        client.post(f"/api/organizer/plans/{plan['id']}/apply", json={"confirm": plan["id"]})
+        top = data_root / "NGC 7000 (North America Nebula)"
+        assert sorted(p.name for p in top.iterdir()) == [".Calibration", ".Finished", ".SessionData", "target.json"]
+        tj = json.loads((top / "target.json").read_text(encoding="utf-8"))
+        assert tj == {"catalog_id": "NGC 7000", "name": "North America Nebula", "revision": 1, "status": "acquiring", "mosaic": {"panels": 2}, "notes": ""}
+        assert set(files(data_root)) - set(before) == {"NGC 7000 (North America Nebula)/target.json"}
+        # the new, empty target is linted as canonical
+        rows = {r["folder"]: r for r in client.get("/api/organizer").json()["revisions"]}
+        assert rows["NGC 7000 (North America Nebula)"]["canonical"]
+
+
+def test_new_target_refuses_known_ids_and_bad_names(data_root, tmp_path):
+    app = client_for(data_root, tmp_path)
+    with TestClient(app) as client:
+        app.state.engine._run_scan()
+        res = client.post("/api/organizer/new-target", json={"catalogId": "m 31", "name": "Andromeda"})
+        assert res.status_code == 409 and "New revision" in res.json()["detail"]
+        for name in ("Bubble (Nebula)", "Wizard R2", "a/b", "Trailing."):
+            plan = client.post("/api/organizer/new-target", json={"catalogId": "NGC 9999", "name": name}).json()
+            assert plan["status"] == "blocked" and plan["conflicts"] and not plan["ops"], name
 
 
 def test_only_the_organizer_api_imports_apply():

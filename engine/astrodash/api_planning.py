@@ -17,7 +17,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from . import halpha, planning
+from . import astrospheric, halpha, planning
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +29,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # AstroController, for Live (its token comes from ASTROCONTROLLER_TOKEN, never from here).
     "liveUrl": "http://127.0.0.1:3005",
 }
+
+# Astrospheric publishes a new model run every 6 h; an hour keeps the page fresh without spending credits.
+FORECAST_TTL_S = 3600
+FORECAST_RETRY_S = 600
 
 
 class GoalBody(BaseModel):
@@ -103,6 +107,7 @@ def register(app: FastAPI, state) -> None:
     cfg = state.cfg
     cache = state.cache
     prefetcher = HalphaPrefetcher(cache)
+    forecast_failures: dict[str, tuple[float, str]] = {}  # cache key → (when, message): no retry on every page load
 
     # ------------------------------------------------------------------ sites
 
@@ -316,6 +321,37 @@ def register(app: FastAPI, state) -> None:
             "settings": _settings(),
             "detectedRig": planning.detect_rig(lib.ok_lights),
         }
+
+    @app.get("/api/planning/forecast")
+    def forecast(siteId: str | None = None, refresh: bool = False) -> dict[str, Any]:  # noqa: N803
+        """Astrospheric's hourly forecast for a site, cached per location (key from ASTROSPHERIC_API_KEY)."""
+        sites = _sites()
+        site = next((s for s in sites if s["id"] == siteId), None) or next((s for s in sites if s.get("isDefault")), None)
+        if site is None:
+            raise HTTPException(404, detail="No such site")
+        if not astrospheric.key_set():
+            return {"keySet": False, "siteId": site["id"], "forecast": None,
+                    "error": f"Set {astrospheric.KEY_ENV} in .env at the project root (or the engine's environment) and restart the engine to get Astrospheric forecasts."}
+        key = f"astrospheric-v5:{site['lat']:.3f}|{site['lon']:.3f}"
+        cached = cache.get_json(key)
+        if cached and not refresh and time.time() - cached["fetchedAt"] < FORECAST_TTL_S:
+            return {"keySet": True, "siteId": site["id"], "cached": True, **cached}
+        failed = forecast_failures.get(key)
+        try:
+            if failed and not refresh and time.time() - failed[0] < FORECAST_RETRY_S:
+                raise astrospheric.ForecastError(failed[1])
+            fresh = {"fetchedAt": time.time(), "forecast": astrospheric.fetch(site["lat"], site["lon"]), "error": None}
+        except astrospheric.ForecastError as exc:
+            if not failed or failed[1] != str(exc) or time.time() - failed[0] >= FORECAST_RETRY_S:
+                log.warning("astrospheric forecast failed: %s", exc)
+                forecast_failures[key] = (time.time(), str(exc))
+            # Keep showing the last forecast we have (marked stale) rather than nothing.
+            return {"keySet": True, "siteId": site["id"], "cached": True, "stale": bool(cached),
+                    "fetchedAt": cached["fetchedAt"] if cached else None,
+                    "forecast": cached["forecast"] if cached else None, "error": str(exc)}
+        forecast_failures.pop(key, None)
+        cache.set_json(key, fresh)
+        return {"keySet": True, "siteId": site["id"], "cached": False, **fresh}
 
     @app.get("/api/planning/sky")
     def measured_sky() -> dict[str, Any]:

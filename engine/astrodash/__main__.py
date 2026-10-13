@@ -9,7 +9,7 @@ from pathlib import Path
 import uvicorn
 
 from .api import create_app
-from .config import load_config
+from .config import load_config, load_env_file
 
 
 def main() -> None:
@@ -21,6 +21,7 @@ def main() -> None:
     parser.add_argument("--no-scan", action="store_true", help="do not scan on startup")
     args = parser.parse_args()
 
+    env_keys = load_env_file()
     cfg = load_config(args.config)
     if args.host:
         cfg.host = args.host
@@ -30,6 +31,8 @@ def main() -> None:
         cfg.data_root = args.data_root
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if env_keys:
+        logging.getLogger(__name__).info("loaded from .env: %s", ", ".join(env_keys))
     app = create_app(cfg, scan_on_start=not args.no_scan)
     uvicorn.run(app, host=cfg.host, port=cfg.port, log_level="info")
 

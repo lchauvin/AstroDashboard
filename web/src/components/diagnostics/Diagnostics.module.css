@@ -32,6 +32,53 @@
   font-size: 12px;
 }
 
+/* Overview rows stay on one line: one summary per cell, detail in the tooltips. */
+.overviewTable td {
+  white-space: nowrap;
+}
+
+.target {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  max-width: 360px;
+}
+
+.targetName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+.keptCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.keptBar {
+  display: inline-block;
+  width: 56px;
+  height: 6px;
+  background: var(--bar-track);
+}
+
+.keptBar > span {
+  display: block;
+  height: 6px;
+}
+
+.tipGrid {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 3px 14px;
+  align-items: center;
+  margin-bottom: 6px;
+  white-space: nowrap;
+}
+
 .progress {
   display: inline-flex;
   align-items: center;

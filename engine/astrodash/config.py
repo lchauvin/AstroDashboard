@@ -1,7 +1,10 @@
-"""astrodashboard.toml loader.
+"""astrodashboard.toml loader, and the .env file for secrets.
 
 Search order: $ASTRODASH_CONFIG, then astrodashboard.toml at the project root
 (one level above engine/). Every key has a default, so the file is optional.
+
+Secrets (ASTROSPHERIC_API_KEY, ASTROCONTROLLER_TOKEN) stay out of the toml:
+they come from the environment, or from a .env file at the project root.
 """
 
 from __future__ import annotations
@@ -53,6 +56,30 @@ class Config:
 
     def gain_ignored(self, readout: str | None) -> bool:
         return readout is not None and readout.casefold() in {r.casefold() for r in self.gain_ignored_readouts}
+
+
+def load_env_file(path: Path = PROJECT_ROOT / ".env") -> list[str]:
+    """KEY=value lines into os.environ; a variable already set in the real environment wins.
+
+    Blank lines and # comments are skipped, and matching quotes around a value are removed.
+    Returns the names it set (never the values).
+    """
+    if not path.is_file():
+        return []
+    loaded = []
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.removeprefix("export ").strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key and value and key not in os.environ:
+            os.environ[key] = value
+            loaded.append(key)
+    return loaded
 
 
 def load_config(path: Path | None = None) -> Config:

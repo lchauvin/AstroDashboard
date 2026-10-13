@@ -63,7 +63,7 @@ class Op:
 
 @dataclass
 class Plan:
-    revision_id: str
+    revision_id: str | None
     target: str
     title: str
     ops: list[Op] = field(default_factory=list)
@@ -282,7 +282,7 @@ class Planner:
             self.plan.warnings.append(
                 f"PixInsight will say the seal of {', '.join(edited)} has been edited: expected. Open the project, "
                 "check it, and save it once to reseal it. The original project file is kept in "
-                ".Dashboard\backups until you undo or remove it.")
+                ".Dashboard\\backups until you undo or remove it.")
 
     def _night(self, night: str) -> None:
         tree = self.tree
@@ -322,6 +322,44 @@ def new_revision_plan(root: Path, revision_id: str, base_folder: str, catalog_id
     plan.ops += [
         Op("mkdir", dst=folder, why="new revision folder"),
         Op("mkdir", dst=f"{folder}/{SESSION_DATA}", why="where its nights will go"),
+        Op("write_new", dst=f"{folder}/target.json", kind="file", text=text, why="revision metadata"),
+    ]
+    return plan
+
+
+# Characters a target folder name cannot hold: Windows-reserved, plus the parentheses that delimit the
+# common name and the brackets that are wildcards in PowerShell paths (PLAN §3.2).
+_BAD_NAME_RE = re.compile(r'[<>:"/\|?*()\[\]\x00-\x1f]')
+
+
+def target_name_problems(catalog_id: str, name: str) -> list[str]:
+    out = []
+    for label, value in (("Catalog id", catalog_id), ("Name", name)):
+        if not value:
+            out.append(f"{label} is empty")
+        elif _BAD_NAME_RE.search(value):
+            out.append(f'{label} cannot contain < > : " / \\ | ? * ( ) [ ]')
+        elif value != value.strip() or value.endswith("."):
+            out.append(f"{label} cannot start or end with a space, or end with a dot")
+    if re.search(r"\sR\d+$", name):
+        out.append('Name cannot end in " R<n>": that suffix marks a revision')
+    return out
+
+
+def new_target_plan(root: Path, catalog_id: str, name: str, text: str) -> Plan:
+    """Revision 1 of a new target: the canonical skeleton and its target.json. Creates only; moves nothing."""
+    folder = f"{catalog_id} ({name})"
+    plan = Plan(None, folder, f"Create target {folder}")
+    plan.conflicts += target_name_problems(catalog_id, name)
+    if not plan.conflicts and (root / folder).exists():
+        plan.conflicts.append(f"{folder} already exists")
+    if plan.conflicts:
+        return plan
+    plan.ops += [
+        Op("mkdir", dst=folder, why="new target folder"),
+        Op("mkdir", dst=f"{folder}/{SESSION_DATA}", why="where its nights will go"),
+        Op("mkdir", dst=f"{folder}/.Calibration", why="master flats for this target"),
+        Op("mkdir", dst=f"{folder}/.Finished", why="finished images"),
         Op("write_new", dst=f"{folder}/target.json", kind="file", text=text, why="revision metadata"),
     ]
     return plan

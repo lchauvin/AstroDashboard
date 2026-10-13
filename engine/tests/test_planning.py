@@ -144,3 +144,108 @@ def test_halpha_lookup_returns_cached_and_queues_missing(data_root, tmp_path, mo
         _t.sleep(0.1)
         again = client.post("/api/planning/halpha/lookup", json={"items": [item]}).json()
         assert "10.500|41.200" in again["found"] and len(calls) == 1
+
+
+def _astrospheric_payload():
+    """Shaped like a real response (2026-10-12), not like the API docs."""
+    def v(x, color="#112233"):
+        return {"ActualValue": x, "ValueColor": color}
+    hours = [
+        {"UTCForecastHour": "2026-10-13T01:00:00Z", "HourOffset": 1, "Cloud": v(80), "Transparency": v(29),
+         "Seeing": v(0.0), "Temperature": v(282.15), "DewPoint": v(281.15), "Wind": v(4.0), "WindDirection": v(270)},
+        {"UTCForecastHour": "2026-10-13T00:00:00Z", "HourOffset": 0, "Cloud": v(10), "Transparency": v(12),
+         "Seeing": v(3.0), "Temperature": v(283.15), "DewPoint": v(278.15), "Wind": v(2.0),
+         "GFSCloud": v(55.0), "ICONCloud": v(12.0), "Smoke": v(0.0)},
+    ]
+    return {
+        "TimeZone": "America/Toronto", "UTCMinuteOffset": -240, "ModelTime": "2026101218",
+        "HourForecastTime": "2026101222", "Latitude": 45.5, "Longitude": -73.5, "IsNBMAvailable": True,
+        "APICreditCostOfCall": 130, "APICreditsRemaining": 99870, "HourlyForecast": hours,
+    }
+
+
+def test_astrospheric_normalize():
+    from astrodash import astrospheric
+    out = astrospheric.normalize(_astrospheric_payload())
+    # The API's "UTC" hours are local wall time (America/Toronto, UTC−4 in October): shifted to true UTC.
+    assert [h["t"] for h in out["hours"]] == ["2026-10-13T04:00:00Z", "2026-10-13T05:00:00Z"]
+    first = out["hours"][0]
+    first, second = out["hours"]
+    assert first["cloud"] == {"value": 10, "color": "#112233"}
+    assert first["temperature"]["value"] == pytest.approx(10.0)  # kelvin → °C
+    assert first["dewPoint"]["value"] == pytest.approx(5.0) and "windDir" not in first
+    assert "seeing" not in second and second["windDir"]["value"] == 270  # seeing 0 = no forecast under cloud
+    assert out["modelTime"] == "2026-10-12T18:00:00Z"
+    assert first["gfsCloud"]["value"] == 55 and first["iconCloud"]["value"] == 12 and first["smoke"]["value"] == 0
+    assert out["credits"] == {"cost": 130, "remaining": 99870}
+    with pytest.raises(astrospheric.ForecastError, match="only covers"):
+        astrospheric.normalize({"HourlyForecast": None})
+    # Unknown zone: the response's minute offset is used instead.
+    odd = {**_astrospheric_payload(), "TimeZone": "Nowhere/Nothing", "UTCMinuteOffset": -300}
+    assert astrospheric.normalize(odd)["hours"][0]["t"] == "2026-10-13T05:00:00Z"
+
+
+def test_smoke_is_only_requested_in_wildfire_season():
+    from datetime import date
+    from astrodash import astrospheric
+    assert "Smoke" in astrospheric.requested(date(2026, 5, 1)) and "Smoke" in astrospheric.requested(date(2026, 9, 30))
+    assert "Smoke" not in astrospheric.requested(date(2026, 10, 1)) and "Smoke" not in astrospheric.requested(date(2026, 4, 30))
+    assert {"Cloud", "GFSCloud", "ICONCloud", "GDPSExtended"} <= set(astrospheric.requested(date(2026, 10, 12)))
+
+
+def test_astrospheric_extended_rows_follow_the_hourly_ones():
+    from astrodash import astrospheric
+    data = _astrospheric_payload()
+    data["HourlyForecast"] += [
+        {"UTCForecastHour": "2026-10-13T00:00:00Z", "HourOffset": 0, "GDPSExtended": {"ActualValue": 50, "ValueColor": "#888"}},
+        {"UTCForecastHour": "2026-10-13T03:00:00Z", "HourOffset": 1, "GDPSExtended": {"ActualValue": 20.0, "ValueColor": "#333"}},
+    ]
+    out = astrospheric.normalize(data)
+    ext = [h for h in out["hours"] if h.get("extended")]
+    # 00:00 local overlaps the hourly forecast and is dropped; 03:00 local = 07:00 UTC is kept, 3 h wide.
+    assert ext == [{"t": "2026-10-13T07:00:00Z", "step": 3, "extended": True, "cloud": {"value": 20.0, "color": "#333"}}]
+    assert len(out["hours"]) == 3
+
+
+def test_forecast_endpoint_caches_and_never_returns_the_key(data_root, tmp_path, monkeypatch):
+    from astrodash import astrospheric
+    cfg = Config(data_root=data_root, db_path=tmp_path / "var" / "f.db")
+    app = create_app(cfg, scan_on_start=False)
+    calls = []
+
+    class Resp:
+        status_code = 200
+        text = ""
+        def json(self):
+            return _astrospheric_payload()
+
+    def fake_post(url, json, timeout):  # noqa: A002
+        calls.append(json)
+        return Resp()
+
+    with TestClient(app) as client:
+        client.post("/api/sites", json={"name": "Home", "lat": 45.5, "lon": -73.5, "isDefault": True})
+        monkeypatch.delenv(astrospheric.KEY_ENV, raising=False)
+        assert client.get("/api/planning/forecast").json()["keySet"] is False
+        monkeypatch.setenv(astrospheric.KEY_ENV, "secret-key")
+        monkeypatch.setattr(astrospheric.httpx, "post", fake_post)
+        first = client.get("/api/planning/forecast").json()
+        second = client.get("/api/planning/forecast").json()
+        assert first["cached"] is False and second["cached"] is True and len(calls) == 1
+        assert calls[0]["APIKey"] == "secret-key" and "secret-key" not in str(first)
+        assert len(first["forecast"]["hours"]) == 2
+
+
+def test_load_env_file_does_not_override_the_real_environment(tmp_path, monkeypatch):
+    from astrodash.config import load_env_file
+    env = tmp_path / ".env"
+    env.write_text('# comment\nASTRODASH_T1="quoted value"\nexport ASTRODASH_T2=b\nASTRODASH_T3=\nASTRODASH_T4=file\n', encoding="utf-8")
+    for k in ("ASTRODASH_T1", "ASTRODASH_T2", "ASTRODASH_T3"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("ASTRODASH_T4", "real")
+    assert load_env_file(env) == ["ASTRODASH_T1", "ASTRODASH_T2"]
+    import os
+    assert os.environ["ASTRODASH_T1"] == "quoted value" and os.environ["ASTRODASH_T4"] == "real"
+    assert "ASTRODASH_T3" not in os.environ
+    for k in ("ASTRODASH_T1", "ASTRODASH_T2"):
+        monkeypatch.delenv(k)

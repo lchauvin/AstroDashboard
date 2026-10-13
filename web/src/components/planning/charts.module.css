@@ -136,3 +136,46 @@
   fill: var(--color-bg);
   stroke-width: 2;
 }
+
+/* ------------------------------------------------------------ cloud chart (night page) */
+
+.cloudMain {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+/* The second and third opinions: same ink, told apart by dash pattern (and labels), not by hue. */
+.cloudGfs,
+.cloudIcon {
+  fill: none;
+  stroke: var(--text-secondary);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.cloudGfs {
+  stroke-dasharray: 6 4;
+}
+
+.cloudIcon {
+  stroke-dasharray: 1.5 3;
+  stroke-linecap: round;
+}
+
+.keyGfs {
+  border-top: 2px dashed var(--text-secondary);
+}
+
+.keyIcon {
+  border-top: 2px dotted var(--text-secondary);
+}
+
+.laneTrack {
+  fill: var(--bar-track);
+}
+
+.laneMoon {
+  fill: color-mix(in srgb, var(--color-text) 35%, transparent);
+}

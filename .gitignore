@@ -6,3 +6,4 @@ engine/.venv/
 **/__pycache__/
 *.egg-info/
 astrodashboard.toml
+.env

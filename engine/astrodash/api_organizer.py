@@ -17,11 +17,17 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .organizer import apply as applier
-from .organizer.plan import TRASH, canonical_plan, new_revision_plan
+from .organizer.plan import TRASH, canonical_plan, new_revision_plan, new_target_plan
 
 
 class PlanRequest(BaseModel):
     revisionId: str = Field(min_length=1, max_length=300)  # noqa: N815
+
+
+class NewTargetRequest(BaseModel):
+    catalogId: str = Field(min_length=1, max_length=60)  # noqa: N815
+    name: str = Field(min_length=1, max_length=100)
+    panels: int = Field(default=1, ge=1, le=50)
 
 
 class ApplyRequest(BaseModel):
@@ -62,7 +68,7 @@ def register(app: FastAPI, state) -> None:
                 "lint": d["lint"], "counts": d["counts"], "warnings": d["warnings"], "conflicts": d["conflicts"],
                 "canonical": not d["ops"],
             })
-        return {"revisions": rows, "plans": [_summary(p) for p in cache.plans()], "trash": _trash()}
+        return {"revisions": rows, "plans": [_summary(p) for p in cache.plans()], "trash": _trash(), "dataRoot": str(root)}
 
     def _summary(p: dict[str, Any]) -> dict[str, Any]:
         return {k: p[k] for k in ("id", "created", "revisionId", "title", "status", "counts", "result") if k in p}
@@ -108,6 +114,20 @@ def register(app: FastAPI, state) -> None:
         base = re.sub(r"\s+R\d+$", "", rev["folder"])
         text = json.dumps({"catalog_id": rev["catalogId"], "name": rev["name"], "revision": n, "status": "acquiring", "notes": ""}, indent=2) + "\n"
         return _store(new_revision_plan(root, rev["id"], base, rev["catalogId"], rev["name"], n, text))
+
+    @app.post("/api/organizer/new-target")
+    def new_target(body: NewTargetRequest) -> dict[str, Any]:
+        """Revision 1 of a target the library does not have yet. A catalog id it has needs New revision instead."""
+        lib = state.require_library()
+        catalog_id, name = (" ".join(v.split()) for v in (body.catalogId, body.name))
+        known = sorted(r["folder"] for r in lib.revisions.values() if r["catalogId"].casefold() == catalog_id.casefold())
+        if known:
+            raise HTTPException(409, detail=f"{catalog_id} is already in the library ({', '.join(known)}); use New revision on it instead")
+        meta: dict[str, Any] = {"catalog_id": catalog_id, "name": name, "revision": 1, "status": "acquiring"}
+        if body.panels > 1:
+            meta["mosaic"] = {"panels": body.panels}
+        meta["notes"] = ""
+        return _store(new_target_plan(root, catalog_id, name, json.dumps(meta, indent=2) + "\n"))
 
     @app.get("/api/organizer/plans/{plan_id}")
     def get_plan(plan_id: str) -> dict[str, Any]:

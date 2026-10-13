@@ -18,7 +18,7 @@ import { isoDate } from "@/lib/planning/night";
 import { FILTER_NAMES, type FilterLetter } from "@/lib/planning/rig";
 import { nightSeries } from "@/lib/planning/series";
 import { optimalSubSeconds, readNoisePenalty } from "@/lib/snr";
-import { goalRowsFor, loadPlanningData, planOne } from "@/server/planning";
+import { goalRowsFor, loadForecast, loadPlanningData, planOne, siteFor } from "@/server/planning";
 import tableStyles from "@/components/TargetsTable.module.css";
 import pageStyles from "../../../library/library.module.css";
 
@@ -49,7 +49,9 @@ export default async function TargetPlanPage({ params, searchParams }: { params:
   }
   const data = res.data;
   const date = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : isoDate(new Date());
-  const one = planOne(data, key, sp.site, date);
+  const forecastSite = siteFor(data, sp.site);
+  const forecast = forecastSite ? await loadForecast(forecastSite.id) : null;
+  const one = planOne(data, key, sp.site, date, 365, forecast?.forecast);
   if (!one) notFound();
   const { site, result, plan: p, catalog } = one;
   const { rig, skies, tonight } = result;
