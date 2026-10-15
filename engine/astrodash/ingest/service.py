@@ -27,6 +27,12 @@ from .planner import DOWNLOAD, NIGHT_DIR_RE, Plan, TargetRef, plan_ingest, split
 log = logging.getLogger(__name__)
 
 MODES = ("off", "dry-run", "auto")
+KEEP_ASSIGNMENTS = 14  # nights of "tonight's target" choices kept
+
+
+def evening(now: datetime | None = None) -> date:
+    """The night in progress, named after its evening (local noon to noon), as the planner names nights."""
+    return ((now or datetime.now()) - timedelta(hours=12)).date()
 
 
 class IngestService:
@@ -66,15 +72,16 @@ class IngestService:
         closed = set((self.cache.get_json("ingest") or {}).get("closed", []))
         base = self.cfg.data_root / DOWNLOAD
         running = self._sequence_running()
+        now = datetime.now()
+        # Night folders, plus plain dates: frames lying outside any night folder are grouped by their header night.
+        names = {(evening(now) - timedelta(days=i)).isoformat() for i in range(60)}
         if base.is_dir():
-            now = datetime.now()
-            for p in base.iterdir():
-                m = NIGHT_DIR_RE.match(p.name) if p.is_dir() else None
-                if not m:
-                    continue
-                noon_after = datetime.combine(date.fromisoformat(m[1]) + timedelta(days=1), datetime.min.time()) + timedelta(hours=12)
-                if now >= noon_after or running is False:
-                    closed.add(p.name)
+            names |= {p.name for p in base.iterdir() if p.is_dir() and NIGHT_DIR_RE.match(p.name)}
+        for name in names:
+            m = NIGHT_DIR_RE.match(name)
+            noon_after = datetime.combine(date.fromisoformat(m[1]) + timedelta(days=1), datetime.min.time()) + timedelta(hours=12)
+            if now >= noon_after or running is False:
+                closed.add(name)
         return closed
 
     def paused_nights(self) -> set[str]:
@@ -96,6 +103,84 @@ class IngestService:
         st["closed"] = sorted(set(st.get("closed", [])) | {download_night})
         self.cache.set_json("ingest", st)
         self._wake.set()
+
+    # ------------------------------------------------------------------ tonight's target
+
+    def assignments(self) -> dict[str, dict[str, Any]]:
+        return (self.cache.get_json("ingest") or {}).get("assignments", {})
+
+    def assign(self, revision_id: str | None, obj: str | None = None, night: str | None = None) -> dict[str, Any]:
+        """Send a night's lights (all of them, or one NINA object's) to a revision; None clears the choice."""
+        night = night or evening().isoformat()
+        st = self.cache.get_json("ingest") or {}
+        all_nights = dict(st.get("assignments", {}))
+        a = dict(all_nights.get(night) or {"all": None, "objects": {}, "names": {}})
+        objects, names = dict(a.get("objects") or {}), dict(a.get("names") or {})
+        if obj:
+            key = obj.strip().casefold()
+            if revision_id:
+                objects[key], names[key] = revision_id, obj.strip()
+            else:
+                objects.pop(key, None)
+                names.pop(key, None)
+        else:
+            a["all"] = revision_id
+        a.update(objects=objects, names=names, setAt=time.time())
+        if a["all"] or objects:
+            all_nights[night] = a
+        else:
+            all_nights.pop(night, None)
+        st["assignments"] = dict(sorted(all_nights.items())[-KEEP_ASSIGNMENTS:])
+        self.cache.set_json("ingest", st)
+        self._wake.set()
+        return a
+
+    # ------------------------------------------------------------------ following NINA
+
+    def follow(self) -> dict[str, bool]:
+        """Follow NINA's target (default on), and whether that may send frames to finished targets (default off)."""
+        st = self.cache.get_json("ingest") or {}
+        return {"follow": st.get("follow", True), "followFinished": st.get("followFinished", False)}
+
+    def set_follow(self, follow: bool | None = None, finished: bool | None = None) -> dict[str, bool]:
+        st = self.cache.get_json("ingest") or {}
+        if follow is not None:
+            st["follow"] = follow
+        if finished is not None:
+            st["followFinished"] = finished
+        self.cache.set_json("ingest", st)
+        if follow:
+            # Following again replaces tonight's manual "every frame" choice (per-object choices stay).
+            a = self.assignments().get(evening().isoformat())
+            if a and a.get("all"):
+                self.assign(None)
+        self._wake.set()
+        return self.follow()
+
+    def reopened(self) -> list[dict[str, Any]]:
+        return (self.cache.get_json("ingest") or {}).get("reopened", [])
+
+    def set_status(self, revision_id: str, status: str) -> str | None:
+        """Write a revision's status into its target.json (through fileops), log it, and rescan."""
+        library = self._library()
+        rev = library.revisions.get(revision_id) if library else None
+        if rev is None:
+            raise KeyError(revision_id)
+        with self._lock:
+            previous = self._write_status(rev, status)
+        self._on_moved()
+        return previous
+
+    def _write_status(self, rev: dict[str, Any], status: str) -> str | None:
+        defaults = {"catalog_id": rev["catalogId"], "name": rev["name"], "revision": rev["revision"]}
+        before = rev["stage"]["value"]
+        fileops.set_status(self.cfg.data_root, rev["folder"], status, defaults)
+        st = self.cache.get_json("ingest") or {}
+        st["reopened"] = (st.get("reopened", []) + [{"ts": time.time(), "revisionId": rev["id"], "folder": rev["folder"],
+                                                     "from": before, "to": status}])[-50:]
+        self.cache.set_json("ingest", st)
+        log.info("status of %s: %s → %s", rev["folder"], before, status)
+        return before
 
     # ------------------------------------------------------------------ mapping
 
@@ -142,6 +227,8 @@ class IngestService:
         return plan_ingest(
             self.cfg.data_root, self.targets(library), self.object_map(library), self.cfg.filter_aliases,
             stable_s=self.stable_s, closed_nights=self.closed_nights(), moved_lights=self.moved_lights(),
+            assignments=self.assignments(),
+            follow=self.follow()["follow"], follow_finished=self.follow()["followFinished"],
         )
 
     def run_once(self) -> dict[str, Any]:
@@ -158,8 +245,24 @@ class IngestService:
             if plan is not None and mode == "auto":
                 rows = []
                 paused = self.paused_nights()
+                # Finished targets NINA is imaging again ("also switch to finished targets" on): mark them
+                # acquiring before their frames arrive. A target that cannot be reopened gets no frames.
+                library = self._library()
+                blocked: set[str] = set()
+                for r in plan.reopen:
+                    rev = library.revisions.get(r["revisionId"]) if library else None
+                    try:
+                        if rev is None:
+                            raise KeyError(r["revisionId"])
+                        self._write_status(rev, "acquiring")
+                    except Exception as exc:  # noqa: BLE001
+                        blocked.add(r["revisionId"])
+                        self.last_error = f"Could not reopen {r['target']}: {type(exc).__name__}: {exc}"
+                        log.warning("reopen %s failed: %s", r["target"], exc)
+                if plan.reopen and len(blocked) < len(plan.reopen):
+                    self._on_moved()  # rescan so the Library shows the new status
                 for a in plan.actions:
-                    if a.download_night in paused:
+                    if a.download_night in paused or a.revision_id in blocked:
                         continue
                     row = {"ts": time.time(), "download_night": a.download_night, "op": a.op, "src": a.src, "dst": a.dst,
                            "size": a.size, "revision": a.revision_id, "kind": a.kind, "filter": a.filter, "error": None}
@@ -203,6 +306,25 @@ class IngestService:
             if undone:
                 self._on_moved()
             return {"movedBack": len(undone), "copiesLeft": kept_copies, "failed": failed}
+
+    def remove_ingested_copies(self, download_night: str) -> dict[str, Any]:
+        """Remove a night's copies in .Download whose frame is already ingested (each compared byte for byte first)."""
+        with self._lock:
+            plan = self.plan()
+            holds = [h for h in (plan.holds if plan else []) if h.reason == "ingested" and h.download_night == download_night and h.dst]
+            removed, kept = [], []
+            for h in holds:
+                try:
+                    fileops.remove_duplicate(self.cfg.data_root, h.src, h.dst)
+                    removed.append({"ts": time.time(), "src": h.src, "kept": h.dst})
+                except Exception as exc:  # noqa: BLE001 — anything not provably identical stays
+                    kept.append({"src": h.src, "error": f"{type(exc).__name__}: {exc}"})
+            if removed:
+                st = self.cache.get_json("ingest") or {}
+                st["removedCopies"] = (st.get("removedCopies", []) + removed)[-5000:]
+                self.cache.set_json("ingest", st)
+            self.last_plan = self.plan()
+        return {"removed": len(removed), "kept": kept}
 
     def empty_dirs(self, download_night: str) -> list[str]:
         top = self.cfg.data_root / DOWNLOAD / download_night
@@ -260,4 +382,8 @@ class IngestService:
             "plan": plan.as_dict() if plan else None,
             "closed": sorted(self.closed_nights()),
             "paused": sorted(self.paused_nights()),
+            "tonight": evening().isoformat(),
+            "assignments": self.assignments(),
+            **self.follow(),
+            "reopened": self.reopened(),
         }

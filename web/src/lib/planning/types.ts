@@ -75,8 +75,14 @@ export type RigSettings = {
 export type DashSettings = {
   goalCapHours: number;
   rig: RigSettings | null;
-  liveUrl?: string;
+  /** Live: where NINA (Advanced API) and PHD2 (event server) run. */
+  observatory?: ObservatorySettings;
+  /** Live → Guiding: the AI advisor. Its API key is read from the engine's .env, never stored here. */
+  advisor?: AdvisorSettings;
 };
+
+export type ObservatorySettings = { ninaHost: string; ninaPort: number; phd2Host: string; phd2Instance: number };
+export type AdvisorSettings = { enabled: boolean; model: string; ollamaUrl: string; intervalMin: number; targetRms: number };
 
 export type PlanningContext = {
   targets: PlanTarget[];

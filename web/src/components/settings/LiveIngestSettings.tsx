@@ -4,7 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { IngestStatus } from "@/lib/live";
+import type { AdvisorSettings, ObservatorySettings } from "@/lib/planning/types";
 import styles from "./settings.module.css";
+
+export type LiveConn = { nina: boolean; ninaError: string | null; phd2: boolean; phd2Error: string | null; simulated: boolean; key: { ok: boolean; message: string } };
 
 async function send(path: string, method: string, body?: unknown) {
   const res = await fetch(`/engine${path}`, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -13,10 +16,11 @@ async function send(path: string, method: string, body?: unknown) {
   return data;
 }
 
-/** Settings → Data · Ingest · Live: AstroController address and the NINA object → target table. */
-export function LiveIngestSettings({ liveUrl, tokenSet, online, ingest }: { liveUrl: string; tokenSet: boolean; online: boolean; ingest: IngestStatus | null }) {
+/** Settings → Live · Ingest: where NINA and PHD2 run, the AI advisor's model, and the NINA object → target table. */
+export function LiveIngestSettings({ observatory, advisor, conn, ingest }: { observatory: ObservatorySettings; advisor: AdvisorSettings; conn: LiveConn | null; ingest: IngestStatus | null }) {
   const router = useRouter();
-  const [url, setUrl] = useState(liveUrl);
+  const [obs, setObs] = useState(observatory);
+  const [adv, setAdv] = useState(advisor);
   const [object, setObject] = useState("");
   const [rev, setRev] = useState(ingest?.targets.find((t) => t.stage === "acquiring")?.id ?? "");
   const [msg, setMsg] = useState<string | null>(null);
@@ -35,19 +39,78 @@ export function LiveIngestSettings({ liveUrl, tokenSet, online, ingest }: { live
 
   return (
     <div className={styles.rig}>
-      <h3 className="eyebrow">AstroController (Live)</h3>
-      <div className={styles.rowActions} style={{ marginTop: 8 }}>
-        <label className={styles.field} style={{ minWidth: 320 }}>
-          <span>Address</span>
-          <input className={styles.input} value={url} onChange={(e) => setUrl(e.target.value)} />
+      <h3 className="eyebrow">Observatory (Live)</h3>
+      <p className={styles.hint} style={{ marginTop: 6 }}>
+        The engine connects to NINA and PHD2 itself. In NINA, install the <b>Advanced API</b> plugin and enable its server; in PHD2, switch on{" "}
+        <b>Tools → Enable Server</b>. Neither has a password, so keep them on your local network.
+      </p>
+      <div className={styles.rowActions} style={{ marginTop: 10 }}>
+        <label className={styles.field} style={{ minWidth: 200 }}>
+          <span>NINA host</span>
+          <input className={styles.input} value={obs.ninaHost} onChange={(e) => setObs({ ...obs, ninaHost: e.target.value })} placeholder="192.168.1.20" />
         </label>
-        <button type="button" className="button button-primary" onClick={() => run(() => send("/api/settings", "PUT", { liveUrl: url.trim() }), "Saved.")}>
+        <label className={styles.field} style={{ width: 110 }}>
+          <span>Port</span>
+          <input className={styles.input} type="number" value={obs.ninaPort} onChange={(e) => setObs({ ...obs, ninaPort: Number(e.target.value) })} />
+        </label>
+        <label className={styles.field} style={{ minWidth: 200 }}>
+          <span>PHD2 host</span>
+          <input className={styles.input} value={obs.phd2Host} onChange={(e) => setObs({ ...obs, phd2Host: e.target.value })} placeholder="192.168.1.20" />
+        </label>
+        <label className={styles.field} style={{ width: 110 }}>
+          <span>Instance</span>
+          <input className={styles.input} type="number" min={1} max={9} value={obs.phd2Instance} onChange={(e) => setObs({ ...obs, phd2Instance: Number(e.target.value) })} />
+        </label>
+        <button type="button" className="button button-primary" onClick={() => run(() => send("/api/settings", "PUT", { observatory: obs }), "Saved — reconnecting.")}>
           Save
         </button>
       </div>
       <p className={styles.hint}>
-        {online ? "Reachable now." : "Not reachable right now."} Token: {tokenSet ? "set for the engine (ASTROCONTROLLER_TOKEN)" : "none — only needed if AstroController runs with one"}. The token is read from
-        the engine&apos;s environment, never stored or shown here.
+        {conn?.simulated
+          ? "The engine runs with --fake-observatory: these addresses are saved but the simulator is used."
+          : conn
+            ? `NINA: ${conn.nina ? "connected" : `not connected${conn.ninaError ? ` (${conn.ninaError})` : ""}`} · PHD2: ${conn.phd2 ? "connected" : `not connected${conn.phd2Error ? ` (${conn.phd2Error})` : ""}`}.`
+            : "Connection state unknown (engine offline)."}{" "}
+        PHD2 listens on port 4400 + instance − 1.
+      </p>
+
+      <h3 className="eyebrow" style={{ marginTop: 28 }}>AI guiding advisor</h3>
+      <p className={styles.hint} style={{ marginTop: 6 }}>
+        Model as <span className="mono">provider/model-id</span>: <span className="mono">ollama/llama3.1:8b</span> (local, no key),{" "}
+        <span className="mono">ollama_cloud/…</span> (OLLAMA_API_KEY), <span className="mono">openrouter/…</span> (OPENROUTER_API_KEY),{" "}
+        <span className="mono">openai/…</span> (OPENAI_API_KEY) or <span className="mono">anthropic/claude-sonnet-5-5</span> (ANTHROPIC_API_KEY). Keys go in{" "}
+        <span className="mono">.env</span> next to astrodashboard.toml and are never shown or stored here. Turn the advisor on or off on the Guiding page.
+      </p>
+      <div className={styles.rowActions} style={{ marginTop: 10 }}>
+        <label className={styles.field} style={{ minWidth: 320 }}>
+          <span>Model</span>
+          <input className={styles.input} value={adv.model} onChange={(e) => setAdv({ ...adv, model: e.target.value })} />
+        </label>
+        <label className={styles.field} style={{ width: 130 }}>
+          <span>Every (min)</span>
+          <input className={styles.input} type="number" min={2} max={120} value={adv.intervalMin} onChange={(e) => setAdv({ ...adv, intervalMin: Number(e.target.value) })} />
+        </label>
+        <label className={styles.field} style={{ width: 150 }}>
+          <span>Target RMS (″)</span>
+          <input className={styles.input} type="number" step={0.05} min={0.2} max={5} value={adv.targetRms} onChange={(e) => setAdv({ ...adv, targetRms: Number(e.target.value) })} />
+        </label>
+        {adv.model.startsWith("ollama/") ? (
+          <label className={styles.field} style={{ minWidth: 240 }}>
+            <span>Ollama URL</span>
+            <input className={styles.input} value={adv.ollamaUrl} onChange={(e) => setAdv({ ...adv, ollamaUrl: e.target.value })} />
+          </label>
+        ) : null}
+        <button
+          type="button"
+          className="button button-primary"
+          onClick={() => run(() => send("/api/settings", "PUT", { advisor: { model: adv.model.trim(), intervalMin: adv.intervalMin, targetRms: adv.targetRms, ollamaUrl: adv.ollamaUrl.trim() } }), "Saved.")}
+        >
+          Save
+        </button>
+      </div>
+      <p className={styles.hint}>
+        {conn ? (conn.key.ok ? `Key: ${conn.key.message}.` : `${conn.key.message}.`) : null} The target RMS also sets the green/amber levels on the
+        Guiding page; the automatic check does not ask the model while both axes are within it.
       </p>
 
       <h3 className="eyebrow" style={{ marginTop: 28 }}>NINA object → target</h3>

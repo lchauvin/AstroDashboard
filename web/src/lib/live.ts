@@ -1,52 +1,148 @@
-/** AstroController state (as proxied by the engine) and auto-ingest payloads. Loose: AstroController owns the shape. */
+/** Live payloads: the engine's own NINA + PHD2 connection (PLAN §5.3), and auto-ingest. */
 
-export type AcStep = { id: string; name: string; status: string; depth: number; is_container: boolean; parent_id: string | null };
+import type { Level } from "./types";
+export type { Level };
 
-export type AcFrame = {
-  index: number;
-  date: string;
-  filename: string;
+export type DeviceFact = { label: string; value: string; advanced: boolean; level?: Level };
+export type DeviceCard = { key: string; label: string; name: string | null; status: string; level: Level | null; facts: DeviceFact[] };
+
+export type SeqStep = {
+  id: string;
+  name: string;
+  status: string;
+  depth: number;
+  container: boolean;
+  parent: string | null;
+  info: { ExposureTime?: number; ExposureCount?: number; Iterations?: number; CompletedIterations?: number; Filter?: string; Gain?: number; Offset?: number; ImageType?: string; Binning?: string };
+};
+
+export type Sequence = {
+  available: boolean;
+  status: "running" | "finished" | "idle" | "none";
+  steps: SeqStep[];
+  path: string[];
+  current: SeqStep | null;
   target: string | null;
-  image_type: string;
+  done: number;
+  total: number;
+  error?: string;
+};
+
+export type Frame = {
+  index: number;
+  date: string | null;
+  filename: string | null;
+  target: string | null;
+  type: string | null;
   filter: string | null;
-  exposure_s: number | null;
+  exposure: number | null;
   hfr: number | null;
   stars: number | null;
   temperature: number | null;
-  flags?: { saturated?: boolean; cloud_suspect?: boolean; tracking_suspect?: boolean; star_drop_pct?: number | null; hfr_excursion_pct?: number | null; notes?: string[] };
+  gain: number | null;
+  median: number | null;
+  rms: string | null;
+  flags: string[];
 };
 
-export type AcState = {
-  nina?: {
-    connected?: boolean;
-    equipment?: {
-      camera?: { Connected?: boolean; Name?: string; Temperature?: number; CoolerOn?: boolean; CoolerPower?: number; TemperatureSetPoint?: number; IsExposing?: boolean };
-      mount?: { Connected?: boolean; Name?: string; Altitude?: number; Azimuth?: number; SideOfPier?: string; TimeToMeridianFlip?: number; TrackingEnabled?: boolean; AtPark?: boolean };
-      focuser?: { Connected?: boolean; Position?: number; Temperature?: number };
-      filterwheel?: { Connected?: boolean; SelectedFilter?: { Name?: string } };
-      guider?: { State?: string };
-    };
-  };
-  phd2?: { connected?: boolean; app_state?: string; settling?: boolean; pixel_scale?: number; guiding_for_s?: number; last_alert?: unknown };
-  sequence?: { available?: boolean; error?: string | null; steps?: AcStep[] };
-  guiding?: {
-    rms?: { rms_ra?: number; rms_dec?: number; rms_total?: number; peak_ra?: number; peak_dec?: number; n?: number; snr_med?: number };
-    graph?: { t: number[]; ra: number[]; dec: number[] };
-  };
-  frames?: AcFrame[];
-  preview?: { available?: boolean; filename?: string; token?: string; source?: string };
-  guide_image?: { token?: string };
-  weather?: {
-    error?: string | null;
-    current?: { cloud_total?: number; humidity?: number; temp_c?: number; dewpoint_c?: number; dewpoint_spread?: number; wind_ms?: number; gust_ms?: number; precip_prob?: number };
-    summary?: { clear_hours?: number; dew_risk?: boolean; rain_risk?: boolean; max_gust_ms?: number };
-  };
-  sky?: { illumination?: number; phase_name?: string; altitude_deg?: number; separation_deg?: number | null; up?: boolean };
-  advisor?: { mode?: string; enabled?: boolean; last?: { summary?: string; decision?: string } | null };
-  server_time?: number;
+export type AxisStats = { rms: number; peak: number; mean: number; lag1: number; idle: number; flips: number; pulseMs: number; limited: number; pulsesKnown: boolean };
+export type GuideStats = { n: number; seconds: number; total: number; se: number; ra: AxisStats; dec: AxisStats; snr: number; mass: number; hfdPx: number; oscillation: number };
+export type AxisVerdict = { axis: "ra" | "dec"; verdict: string; title: string; hint: string; evidence: string };
+export type Diagnosis = { axes: AxisVerdict[]; caveats: string[]; actionable: boolean; axisTarget?: number };
+
+export type GuideGraph = {
+  t: number[];
+  ra: number[];
+  dec: number[];
+  raMs: number[];
+  decMs: number[];
+  snr: number[];
+  excluded: boolean[];
+  events: { t: number; label: string }[];
 };
 
-export type LivePayload = { online: boolean; url: string; state?: AcState; error?: string; lastOk?: number | null; tokenSet: boolean };
+export type Phd2 = {
+  connected: boolean;
+  address: string;
+  error: string | null;
+  version?: string | null;
+  appState?: string;
+  pixelScale?: number | null;
+  exposureMs?: number | null;
+  exposureChoices?: number[];
+  decGuideMode?: string | null;
+  calibrated?: boolean | null;
+  calibration?: { xAngle?: number; yAngle?: number; xRate?: number; yRate?: number; declination?: number } | null;
+  profile?: string | null;
+  equipment?: Record<string, { name?: string; connected?: boolean }>;
+  algorithms?: Record<string, string>;
+  params?: Record<string, Record<string, number>>;
+  settling?: boolean;
+  paused?: boolean;
+  guidingForS?: number | null;
+  lastAlert?: { type?: string; msg?: string; at?: number } | null;
+};
+
+export type Suggestion = { id: string; axis: "ra" | "dec"; param: string; current: number; value: number; why: string; note: string | null; status: "open" | "applied" | "dismissed" | "stale" };
+export type Brief = { total: number; ra: number; dec: number; n: number; se: number; hfdPx: number };
+export type Analysis = {
+  id: string;
+  t: number;
+  model: string;
+  manual: boolean;
+  latencyMs?: number;
+  assessment?: string;
+  suggestions: Suggestion[];
+  notes: string[];
+  diagnosis: Diagnosis;
+  stats: Brief | null;
+  error?: string;
+};
+export type Change = {
+  id: string;
+  t: number;
+  axis: string;
+  param: string;
+  old: number;
+  new: number;
+  source: "manual" | "ai" | "revert";
+  before: Brief | null;
+  after: Brief | null;
+  verdict: "pending" | "better" | "worse" | "neutral" | "void";
+  outcome: string;
+  measureAt: number;
+};
+
+export type LiveState = {
+  simulated: boolean;
+  serverTime: number;
+  /** clockOffset: the observatory PC's clock minus this machine's, in seconds (NINA's times are corrected for it). */
+  nina: { connected: boolean; error: string | null; lastOk: number | null; url: string | null; websocket: boolean; clockOffset: number };
+  phd2: Phd2;
+  equipment: DeviceCard[];
+  lost: { key: string; label: string; name: string | null; since: number }[];
+  sequence: Sequence;
+  frames: Frame[];
+  latest: { source: "file" | "nina"; name: string | null; token: string; index?: number; record: Frame | null } | null;
+  /** While the camera is connected: seconds left of the exposure in progress (null between frames) and the camera's state. */
+  exposure: { left: number | null; total: number | null; state: string } | null;
+  guiding: { stats: GuideStats | null; diagnosis: Diagnosis; graph: GuideGraph; active: string[]; scale: number | null };
+  advisor: {
+    enabled: boolean;
+    model: string;
+    intervalMin: number;
+    targetRms: number;
+    key: { ok: boolean; message: string };
+    busy: boolean;
+    lastError: string | null;
+    check: { t: number; message: string } | null;
+    analyses: Analysis[];
+    changes: Change[];
+  };
+  paramInfo: Record<string, { label: string; help: string; basic: boolean }>;
+};
+
+// ---------------------------------------------------------------- auto-ingest
 
 export type IngestAction = {
   op: "move" | "copy";
@@ -72,7 +168,17 @@ export type IngestHold = {
   prompt: boolean;
 };
 
-export type IngestNightPlan = { lights: number; flats: number; closed: boolean; newestLight: string | null; emptyDirs?: number };
+/** folder: false when the night's frames lie directly under .Download (grouped by their header night). */
+/** ingested: copies in .Download of frames already in their session (re-synced, e.g. by robocopy). */
+export type IngestNightPlan = { lights: number; flats: number; ingested?: number; closed: boolean; newestLight: string | null; emptyDirs?: number; folder?: boolean };
+
+/** Where the lights of one NINA object, still in .Download, would go (per header night). */
+export type IngestObject = { object: string | null; frames: number; revisionId: string | null; target: string | null; stage: string | null; how: "tonight" | "follow" | "mapping" | "name" | ""; problem: string };
+
+/** Tonight's target chosen in Live: every light of the night, and/or per NINA object (keys are casefolded). */
+export type IngestAssignment = { all: string | null; objects: Record<string, string>; names: Record<string, string>; setAt?: number };
+
+export type IngestTarget = { id: string; folder: string; catalogId: string; name: string; stage: string; revision: number };
 
 export type IngestJournalNight = { moved: number; copied: number; undone: number; errors: number; targets: Record<string, number>; last: number; emptyDirs: number };
 
@@ -82,14 +188,35 @@ export type IngestStatus = {
   error: string | null;
   downloadRoot: string;
   downloadExists: boolean;
-  plan: { actions: IngestAction[]; holds: IngestHold[]; skipped: IngestHold[]; nights: Record<string, IngestNightPlan>; scannedAt: number } | null;
+  plan: {
+    actions: IngestAction[];
+    holds: IngestHold[];
+    skipped: IngestHold[];
+    nights: Record<string, IngestNightPlan>;
+    objects: Record<string, Record<string, IngestObject>>;
+    /** Finished targets about to receive frames (following NINA with "also finished" on): reopened first. */
+    reopen: { revisionId: string; target: string; stage: string }[];
+    scannedAt: number;
+  } | null;
+  /** Follow NINA's target (each NINA target → its library target), and whether finished targets are allowed (and reopened). */
+  follow: boolean;
+  followFinished: boolean;
+  /** What NINA is imaging now and where following it sends frames; blockedBy names a finished target not switched to. */
+  nina: { object: string; revisionId: string | null; blockedBy: string | null; target: string | null; stage: string | null; problem: string; running: boolean } | null;
+  /** Status changes written to target.json (reopened finished targets, "mark finished again"). */
+  reopened: { ts: number; revisionId: string; folder: string; from: string; to: string }[];
+  /** The night in progress (evening date, noon to noon), and the targets chosen per night. */
+  tonight: string;
+  assignments: Record<string, IngestAssignment>;
+  /** Lights already moved into tonight's NIGHT_ folders, per revision id. */
+  tonightMoved: Record<string, number>;
   closed: string[];
   /** Nights you undid: Auto leaves them alone until resumed. */
   paused: string[];
   journal: Record<string, IngestJournalNight>;
   recent: { id: number; ts: number; downloadNight: string; op: string; src: string; dst: string; revision: string; kind: string; filter: string | null; undone: number | null; error: string | null }[];
   objectMap: { object: string; catalogId: string | null; revisionId: string | null; learned: boolean; frames?: number }[];
-  targets: { id: string; folder: string; catalogId: string; stage: string; revision: number }[];
+  targets: IngestTarget[];
 };
 
 export const fileName = (p: string) => p.split(/[\\/]/).pop() ?? p;
@@ -101,3 +228,30 @@ const FILTER_NAME_TO_LETTER: Record<string, string> = {
 
 /** NINA filter name ("Ha", "OIII", "Lum") → the dashboard's letter, so colours match the Library. */
 export const filterLetterOf = (name: string | null | undefined) => (name ? FILTER_NAME_TO_LETTER[name.trim().toLowerCase()] ?? name : null);
+
+export const fmt = (v: number | null | undefined, d = 1, unit = "") => (v == null || !Number.isFinite(v) ? "—" : `${v.toFixed(d)}${unit}`);
+
+export function duration(s: number | null | undefined): string {
+  if (s == null) return "—";
+  const m = Math.floor(s / 60);
+  if (m < 1) return `${Math.round(s)} s`;
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`;
+}
+
+export function ago(t: number | null | undefined, now = Date.now() / 1000): string {
+  if (!t) return "—";
+  const s = Math.max(0, now - t);
+  return s < 60 ? `${Math.round(s)} s ago` : `${duration(s)} ago`;
+}
+
+export const clock = (t: number | string | null | undefined) =>
+  t == null ? "—" : new Date(typeof t === "number" ? t * 1000 : t).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit", hour12: false });
+
+/** POST JSON to the engine; throws with the engine's own message. */
+export async function enginePost<T = unknown>(path: string, body?: unknown, method = "POST"): Promise<T> {
+  const res = await fetch(`/engine${path}`, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(typeof data?.detail === "string" ? data.detail : `Engine error ${res.status}`);
+  return data as T;
+}

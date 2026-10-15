@@ -5,7 +5,7 @@ Library, diagnostics, live monitoring and planning for the observatory. Design a
 **Status:** Phases 0–4 are done: scaffold, indexer + Library, Diagnostics (astro-eval measurements plus the dashboard's
 own detectors and learned horizon), and Planning (sites with a map, sky calibrated from your own subs, tonight's
 ranking with a moon-aware filter suggestion, a 30-night calendar, new target ideas, SNR curves and goals per filter).
-Phase 5 adds Live (a read-only view of AstroController) and auto-ingest from `G:\Astro\.Download`,
+Phase 5 adds Live (its own connection to NINA and PHD2: sequence, last image, equipment, guiding with an optional AI advisor) and auto-ingest from `G:\Astro\.Download`,
 which runs in **Dry-run** until you switch it to Auto on the Live page (PLAN.md §5.2). Phase 6 adds the Organizer (Library → Organizer): a lint of every target against the canonical layout, and
 migration plans you read operation by operation and approve by typing the plan id. Moves only (legacy sessions go to
 `.Trash\<plan>`), journaled in `G:\Astro\.Dashboard\journal.jsonl`, and undoable. Nothing has been applied to
@@ -22,7 +22,9 @@ is used — its report writers are never called, so nothing is written next to y
 
 ## Run
 
-Two services (registered in `project-dashboard.json`):
+Two services (registered in `project-dashboard.json`). `.\start.ps1` (or double-click `start.cmd`) starts both,
+opens the browser, and stops the engine when you Ctrl+C the web UI (`-NoBrowser`, `-EnginePort`, `-WebPort` to
+override). By hand:
 
 ```powershell
 # Engine — indexes G:\Astro (read-only) and serves the API on :3007
@@ -35,11 +37,15 @@ npm install   # once
 npm run dev -- --port 3006
 ```
 
-Open http://localhost:3006. For Live, run AstroController (`uv run astrocontroller` in D:\Python\AstroController,
-or `--fake` to try it in daylight). If it uses a token, set `ASTROCONTROLLER_TOKEN` in the engine's environment.
+Open http://localhost:3006. For Live, enable NINA's Advanced API plugin and PHD2's server (Tools → Enable Server)
+and set their addresses in Settings → Live · Ingest. To try Live in daylight, start the engine with
+`uv run astrodash-engine --fake-observatory` (simulated NINA and PHD2; the guiding reacts to its parameters).
+The Guiding page's AI advisor uses the model set in the same Settings tab; API keys go in `.env` (see `.env.example`).
 For the weather forecast on the Planning page, set `ASTROSPHERIC_API_KEY` (an Astrospheric Professional key, from
 My Profile) in `.env` at the project root (copy `.env.example`; git-ignored) or in the engine's environment; forecasts are cached per site for an hour and only cover the RDPS domain
-(North America, Greenland, Iceland, Ireland, UK). The engine scans on startup (about 8 s cold, under 1 s after that thanks to the
+(North America, Greenland, Iceland, Ireland, UK). Optionally set `TELESCOPIUS_API_KEY` (Telescopius → account settings →
+API Keys; patrons and sponsors) the same way: target pages then show the object's reference image, catalogue IDs, size and
+surface brightness, Planning lists your Telescopius target lists and the month's sky events. Everything is cached in the engine. The engine scans on startup (about 8 s cold, under 1 s after that thanks to the
 header cache in `var/astrodash.db`); **Rescan** on the Library page picks up new nights.
 
 ## Data safety

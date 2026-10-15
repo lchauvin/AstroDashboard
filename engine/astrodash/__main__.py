@@ -1,4 +1,4 @@
-"""`uv run astrodash-engine [--port 3007] [--data-root G:/Astro]`"""
+"""`uv run astrodash-engine [--port 3007] [--data-root G:/Astro] [--fake-observatory]`"""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ def main() -> None:
     parser.add_argument("--data-root", type=Path, help="astro data root (default G:/Astro)")
     parser.add_argument("--config", type=Path, help="astrodashboard.toml path")
     parser.add_argument("--no-scan", action="store_true", help="do not scan on startup")
+    parser.add_argument("--fake-observatory", action="store_true", help="simulate NINA and PHD2 for the Live pages")
     args = parser.parse_args()
 
     env_keys = load_env_file()
@@ -31,9 +32,10 @@ def main() -> None:
         cfg.data_root = args.data_root
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # the Live poll would log ~3 requests a second
     if env_keys:
         logging.getLogger(__name__).info("loaded from .env: %s", ", ".join(env_keys))
-    app = create_app(cfg, scan_on_start=not args.no_scan)
+    app = create_app(cfg, scan_on_start=not args.no_scan, observatory=True, fake_observatory=args.fake_observatory)
     uvicorn.run(app, host=cfg.host, port=cfg.port, log_level="info")
 
 

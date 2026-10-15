@@ -7,6 +7,7 @@ is reserved for approved organizer plans (PLAN.md §6.4, Phase 6 exports them).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import threading
@@ -18,6 +19,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from . import astrospheric, halpha, planning
+from .observatory.llm import LlmError, split_model
+from .observatory.runtime import DEFAULTS as OBS_DEFAULTS
 
 log = logging.getLogger(__name__)
 
@@ -26,9 +29,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "goalCapHours": 40,
     # Rig used by the SNR model; null fields are filled from the headers in the web app.
     "rig": None,
-    # AstroController, for Live (its token comes from ASTROCONTROLLER_TOKEN, never from here).
-    "liveUrl": "http://127.0.0.1:3005",
+    # Live: where NINA (Advanced API plugin) and PHD2 (event server) run.
+    "observatory": dict(OBS_DEFAULTS["observatory"]),
+    # Live → Guiding: the AI advisor (suggests guiding changes; its API key comes from .env, never from here).
+    "advisor": dict(OBS_DEFAULTS["advisor"]),
 }
+# Settings that are no longer used (AstroController's address); dropped on the next save.
+RETIRED_SETTINGS = {"liveUrl"}
 
 # Astrospheric publishes a new model run every 6 h; an hour keeps the page fresh without spending credits.
 FORECAST_TTL_S = 3600
@@ -226,7 +233,41 @@ def register(app: FastAPI, state) -> None:
     # ------------------------------------------------------------------ settings
 
     def _settings() -> dict[str, Any]:
-        return {**DEFAULT_SETTINGS, **(cache.get_json("settings") or {})}
+        stored = {k: v for k, v in (cache.get_json("settings") or {}).items() if k not in RETIRED_SETTINGS}
+        out = {**DEFAULT_SETTINGS, **stored}
+        for key in ("observatory", "advisor"):  # partial objects keep the defaults for missing fields
+            out[key] = {**DEFAULT_SETTINGS[key], **(stored.get(key) or {})}
+        return out
+
+    def _check_observatory(o: Any) -> dict[str, Any]:
+        if not isinstance(o, dict) or set(o) - set(DEFAULT_SETTINGS["observatory"]):
+            raise HTTPException(422, detail="observatory: unknown fields")
+        for key in ("ninaHost", "phd2Host"):
+            if key in o and not (isinstance(o[key], str) and 0 < len(o[key].strip()) <= 253 and " " not in o[key].strip()):
+                raise HTTPException(422, detail=f"observatory.{key} must be a host name or IP address")
+        if "ninaPort" in o and not (isinstance(o["ninaPort"], int) and 1 <= o["ninaPort"] <= 65535):
+            raise HTTPException(422, detail="observatory.ninaPort must be a port number")
+        if "phd2Instance" in o and not (isinstance(o["phd2Instance"], int) and 1 <= o["phd2Instance"] <= 9):
+            raise HTTPException(422, detail="observatory.phd2Instance must be 1–9")
+        return {k: v.strip() if isinstance(v, str) else v for k, v in o.items()}
+
+    def _check_advisor(a: Any) -> dict[str, Any]:
+        if not isinstance(a, dict) or set(a) - set(DEFAULT_SETTINGS["advisor"]):
+            raise HTTPException(422, detail="advisor: unknown fields")
+        if "enabled" in a and not isinstance(a["enabled"], bool):
+            raise HTTPException(422, detail="advisor.enabled must be true or false")
+        if "model" in a:
+            try:
+                split_model(a["model"])
+            except (LlmError, AttributeError) as exc:
+                raise HTTPException(422, detail=f"advisor.model: {exc}") from exc
+        if "ollamaUrl" in a and not (isinstance(a["ollamaUrl"], str) and a["ollamaUrl"].startswith(("http://", "https://"))):
+            raise HTTPException(422, detail="advisor.ollamaUrl must be an http(s) URL")
+        if "intervalMin" in a and not (isinstance(a["intervalMin"], (int, float)) and 2 <= a["intervalMin"] <= 120):
+            raise HTTPException(422, detail="advisor.intervalMin must be 2–120 minutes")
+        if "targetRms" in a and not (isinstance(a["targetRms"], (int, float)) and 0.2 <= a["targetRms"] <= 5):
+            raise HTTPException(422, detail="advisor.targetRms must be 0.2–5 arcsec")
+        return a
 
     @app.get("/api/settings")
     def settings() -> dict[str, Any]:
@@ -244,10 +285,16 @@ def register(app: FastAPI, state) -> None:
             cap = body["goalCapHours"]
             if not isinstance(cap, (int, float)) or not 1 <= cap <= 500:
                 raise HTTPException(422, detail="goalCapHours must be between 1 and 500")
-        if "liveUrl" in body and not (isinstance(body["liveUrl"], str) and body["liveUrl"].startswith(("http://", "https://"))):
-            raise HTTPException(422, detail="liveUrl must be an http(s) URL")
-        merged = {**(cache.get_json("settings") or {}), **body}
-        cache.set_json("settings", merged)
+        stored = {k: v for k, v in (cache.get_json("settings") or {}).items() if k not in RETIRED_SETTINGS}
+        if "observatory" in body:
+            body["observatory"] = {**(stored.get("observatory") or {}), **_check_observatory(body["observatory"])}
+        if "advisor" in body:
+            body["advisor"] = {**(stored.get("advisor") or {}), **_check_advisor(body["advisor"])}
+        reconnect = "observatory" in body and body["observatory"] != (stored.get("observatory") or {})
+        cache.set_json("settings", {**stored, **body})
+        obs, loop = getattr(state, "observatory", None), getattr(state, "loop", None)
+        if reconnect and obs is not None and loop is not None and obs.tasks:
+            asyncio.run_coroutine_threadsafe(obs.reconfigure(), loop)
         return {"settings": _settings()}
 
     # ------------------------------------------------------------------ goals

@@ -1,18 +1,47 @@
-"""Live (AstroController proxy) and auto-ingest endpoints."""
+"""Live (direct NINA + PHD2, PLAN §5.3) and auto-ingest endpoints."""
 
 from __future__ import annotations
 
+import asyncio
 import os
-from collections import defaultdict
+from collections import Counter, defaultdict
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
-from .ingest.planner import NIGHT_DIR_RE
+from .frames import canonical_filter
+from .ingest.planner import DOWNLOAD, NIGHT_DIR_RE, match_target
 from .ingest.service import IngestService
-from .live import AstroControllerClient
+from .observatory import frames as obs_frames
+from .observatory.llm import LlmError
+from .observatory.nina import NinaError, NinaUnavailable
+from .observatory.phd2 import Phd2Disconnected, Phd2Error
+from .observatory.runtime import Observatory
+from .preview import preview as frame_preview
+
+PHD2_ERRORS = (Phd2Error, Phd2Disconnected, asyncio.TimeoutError)
+
+
+class ParamBody(BaseModel):
+    axis: Literal["ra", "dec"]
+    param: str = Field(min_length=1, max_length=60)
+    value: float = Field(ge=0, le=100)
+
+
+class ExposureBody(BaseModel):
+    ms: int = Field(ge=50, le=60_000)
+
+
+class DecModeBody(BaseModel):
+    mode: Literal["Off", "Auto", "North", "South"]
+
+
+class ControlBody(BaseModel):
+    action: Literal["guide", "stop", "pause", "resume", "dither"]
+    recalibrate: bool = False
 
 
 class ModeBody(BaseModel):
@@ -28,6 +57,24 @@ class CleanupBody(NightBody):
     confirm: bool = False
 
 
+class TonightBody(BaseModel):
+    revisionId: str | None = Field(default=None, max_length=300)  # noqa: N815 — None clears the choice
+    object: str | None = Field(default=None, max_length=200)  # one NINA object; omit for every light of the night
+    night: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")  # default: the night in progress
+    # Sending frames to a revision that is not "acquiring" (finished, processed) must be confirmed.
+    confirm: bool = False
+
+
+class FollowBody(BaseModel):
+    follow: bool | None = None  # follow NINA's target
+    finished: bool | None = None  # …also onto finished targets (they are reopened as acquiring)
+
+
+class StatusBody(BaseModel):
+    revisionId: str = Field(min_length=1, max_length=300)  # noqa: N815
+    status: Literal["acquiring", "finished"]
+
+
 class MapBody(BaseModel):
     object: str = Field(min_length=1, max_length=200)
     revisionId: str | None = Field(default=None, max_length=300)  # noqa: N815
@@ -36,17 +83,13 @@ class MapBody(BaseModel):
 
 def register(app: FastAPI, state) -> None:
     cache = state.cache
-    live = AstroControllerClient(lambda: (cache.get_json("settings") or {}).get("liveUrl"))
-    state.live = live
+    obs = Observatory(lambda: cache.get_json("settings") or {}, cache, state.cfg.data_root / DOWNLOAD)
+    state.observatory = obs
 
     def on_moved() -> None:
         state.start_scan()  # pick up the new nights in the Library
 
-    def sequence_running() -> bool | None:
-        live.refresh_if_stale()
-        return live.sequence_running()
-
-    service = IngestService(state.cfg, cache, lambda: state.library, on_moved, sequence_running)
+    service = IngestService(state.cfg, cache, lambda: state.library, on_moved, obs.sequence_running)
     state.ingest = service
 
     def _night(n: str) -> str:
@@ -57,22 +100,127 @@ def register(app: FastAPI, state) -> None:
     # ------------------------------------------------------------------ live
 
     @app.get("/api/live/state")
-    def live_state() -> dict[str, Any]:
-        return live.state()
+    def live_state(graph: float = 180) -> dict[str, Any]:
+        return obs.snapshot(graph_s=min(max(graph, 30), 3600))
 
-    @app.get("/api/live/frame.png")
-    def live_frame(v: str | None = None):  # noqa: ARG001 — cache buster
-        got = live.image("/api/frame/latest.png")
-        if not got:
-            raise HTTPException(404, detail="No frame preview")
-        return Response(got[0], media_type=got[1], headers={"Cache-Control": "no-store"})
+    @app.get("/api/live/frames")
+    def live_frames(filter: str | None = None, all: bool = False, limit: int = 100) -> dict[str, Any]:  # noqa: A002
+        """Tonight's frames: counts per filter over the whole night, and the newest `limit` of one filter (or all)."""
+        rows = obs.frames if all else [f for f in obs.frames if f.get("type") == "LIGHT"]
+
+        def key(f: dict) -> str:
+            return canonical_filter(f.get("filter"), state.cfg.filter_aliases) or "—"
+
+        selected = [f for f in rows if not filter or key(f) == filter]
+        return {
+            "total": len(rows),
+            "counts": dict(Counter(key(f) for f in rows)),
+            "selected": len(selected),
+            "frames": [{**f, "filterKey": key(f)} for f in selected[: max(1, min(limit, 5000))]],
+        }
+
+    @app.get("/api/live/frame.jpg")
+    async def live_frame(v: str | None = None):  # noqa: ARG001 — cache buster: the URL changes with the frame
+        latest = obs.latest_frame()
+        if latest is None:
+            raise HTTPException(404, detail="No frame yet")
+        cache_hdr = {"Cache-Control": "max-age=86400"}
+        if latest["source"] == "file":
+            try:
+                jpg = await asyncio.to_thread(frame_preview, Path(latest["path"]), state.cfg.db_path.parent / "previews")
+            except Exception as exc:  # noqa: BLE001 — a frame still landing or an odd file
+                raise HTTPException(404, detail=f"Could not render {latest['name']}: {exc}") from exc
+            return FileResponse(jpg, media_type="image/jpeg", headers=cache_hdr)
+        try:
+            if obs.nina is None:
+                raise NinaUnavailable("NINA is not connected")
+            data, ctype = await obs.nina.image_jpeg(int(latest["index"]))
+        except (NinaError, NinaUnavailable) as exc:
+            # NINA could not render it: show the last complete file from .Download rather than nothing.
+            if latest.get("fallback"):
+                jpg = await asyncio.to_thread(frame_preview, Path(latest["fallback"]), state.cfg.db_path.parent / "previews")
+                return FileResponse(jpg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+            raise HTTPException(502, detail=str(exc)) from exc
+        return Response(data, media_type=ctype, headers=cache_hdr)
 
     @app.get("/api/live/guide-star.png")
-    def live_guide(v: str | None = None):  # noqa: ARG001
-        got = live.image("/api/guide-star.png")
-        if not got:
-            raise HTTPException(404, detail="No guide star image")
-        return Response(got[0], media_type=got[1], headers={"Cache-Control": "no-store"})
+    async def live_guide_star(size: int = 31, v: str | None = None):  # noqa: ARG001
+        if not obs.phd2 or not obs.phd2.connected:
+            raise HTTPException(404, detail="PHD2 is not connected")
+        try:
+            png = await asyncio.to_thread(obs_frames.star_png, await obs.phd2.star_image(min(max(size, 15), 63)))
+        except (*PHD2_ERRORS, ValueError) as exc:  # "no star selected" is a state, not a fault
+            raise HTTPException(404, detail=str(exc)) from exc
+        return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+    async def _phd2(coro) -> dict[str, Any]:
+        try:
+            result = await coro
+        except PHD2_ERRORS as exc:
+            raise HTTPException(502, detail=str(exc)) from exc
+        return {"ok": True, **(result if isinstance(result, dict) else {})}
+
+    @app.post("/api/live/guiding/param")
+    async def guiding_param(body: ParamBody) -> dict[str, Any]:
+        return await _phd2(obs.set_param(body.axis, body.param, body.value))
+
+    @app.post("/api/live/guiding/exposure")
+    async def guiding_exposure(body: ExposureBody) -> dict[str, Any]:
+        return await _phd2(obs.set_exposure(body.ms))
+
+    @app.post("/api/live/guiding/dec-mode")
+    async def guiding_dec_mode(body: DecModeBody) -> dict[str, Any]:
+        return await _phd2(obs.set_dec_mode(body.mode))
+
+    @app.post("/api/live/guiding/control")
+    async def guiding_control(body: ControlBody) -> dict[str, Any]:
+        if not obs.phd2 or not obs.phd2.connected:
+            raise HTTPException(502, detail="PHD2 is not connected")
+        p = obs.phd2
+        action = {
+            "guide": lambda: p.guide(body.recalibrate),
+            "stop": p.stop,
+            "pause": lambda: p.set_paused(True),
+            "resume": lambda: p.set_paused(False),
+            "dither": p.dither,
+        }[body.action]
+        return await _phd2(action())
+
+    @app.post("/api/live/advisor/analyze")
+    async def advisor_analyze() -> dict[str, Any]:
+        if not obs.adv_settings()["enabled"]:
+            raise HTTPException(409, detail="The AI advisor is off")
+        try:
+            return await obs.analyze(manual=True)
+        except RuntimeError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+        except LlmError as exc:
+            raise HTTPException(502, detail=str(exc)) from exc
+
+    @app.post("/api/live/advisor/suggestions/{sid}/apply")
+    async def advisor_apply(sid: str) -> dict[str, Any]:
+        s = obs.advisor.suggestion(sid)
+        if s is None:
+            raise HTTPException(404, detail="No such suggestion")
+        if s["status"] != "open":
+            raise HTTPException(409, detail=f"This suggestion is {s['status']}")
+        current = ((obs.phd2.state.params if obs.phd2 else {}).get(s["axis"]) or {}).get(s["param"])
+        if current is None or abs(current - s["current"]) > 1e-6:
+            s["status"] = "stale"
+            obs.advisor.save()
+            raise HTTPException(409, detail="The parameter changed since this suggestion was made; ask again")
+        return await _phd2(obs.set_param(s["axis"], s["param"], s["value"], source="ai", suggestion=sid))
+
+    @app.post("/api/live/advisor/suggestions/{sid}/dismiss")
+    def advisor_dismiss(sid: str) -> dict[str, Any]:
+        return {"ok": obs.advisor.dismiss(sid)}
+
+    @app.post("/api/live/advisor/changes/{cid}/revert")
+    async def advisor_revert(cid: str) -> dict[str, Any]:
+        c = next((c for c in obs.advisor.changes if c["id"] == cid), None)
+        if c is None or c["axis"] not in ("ra", "dec"):
+            raise HTTPException(404, detail="No such parameter change")
+        return await _phd2(obs.set_param(c["axis"], c["param"], c["old"], source="revert"))
 
     # ------------------------------------------------------------------ ingest
 
@@ -98,13 +246,20 @@ def register(app: FastAPI, state) -> None:
             for name in st["plan"]["nights"]:
                 st["plan"]["nights"][name]["emptyDirs"] = len(service.empty_dirs(name))
         lib = state.library
+        # Lights already moved into tonight's NIGHT_ folders, per revision (the journal keeps the destination).
+        tonight_moved: dict[str, int] = defaultdict(int)
+        for r in journal:
+            if r["kind"] == "LIGHT" and not r["undone"] and not r["error"] and f"NIGHT_{st['tonight']}" in r["dst"]:
+                tonight_moved[r["revision"]] += 1
         return {
             **st,
+            "nina": _nina_target(lib, st),
+            "tonightMoved": dict(tonight_moved),
             "journal": {k: dict(v) for k, v in sorted(nights.items(), reverse=True)},
             "recent": journal[:200],
             "objectMap": sorted(service.object_map(lib).values(), key=lambda m: m["object"].casefold()) if lib else [],
             "targets": [
-                {"id": r["id"], "folder": r["folder"], "catalogId": r["catalogId"], "stage": r["stage"]["value"], "revision": r["revision"]}
+                {"id": r["id"], "folder": r["folder"], "catalogId": r["catalogId"], "name": r["name"], "stage": r["stage"]["value"], "revision": r["revision"]}
                 for r in sorted(lib.revisions.values(), key=lambda r: r["folder"].casefold())
             ] if lib else [],
         }
@@ -139,6 +294,58 @@ def register(app: FastAPI, state) -> None:
         if not body.confirm:
             raise HTTPException(422, detail="Removing empty folders needs confirm: true")
         return {"removed": service.cleanup(_night(body.night))}
+
+    def _nina_target(lib, st: dict[str, Any]) -> dict[str, Any] | None:
+        """NINA's current target and where following it sends frames (or why it does not)."""
+        name = obs.sequence.get("target") or next((f["target"] for f in obs.frames if f.get("target")), None)
+        if not name or lib is None:
+            return None
+        target, problem = match_target(name, service.targets(lib), service.object_map(lib), st["followFinished"])
+        if target is None and not st["followFinished"]:
+            # Say which finished revision it would have been, so the warning can name it.
+            target_any, _ = match_target(name, service.targets(lib), service.object_map(lib), True)
+            return {"object": name, "revisionId": None, "blockedBy": target_any.revision_id if target_any else None,
+                    "target": target_any.target if target_any else None, "stage": target_any.stage if target_any else None,
+                    "problem": problem, "running": obs.sequence.get("status") == "running"}
+        return {"object": name, "revisionId": target.revision_id if target else None, "blockedBy": None,
+                "target": target.target if target else None, "stage": target.stage if target else None,
+                "problem": problem, "running": obs.sequence.get("status") == "running"}
+
+    @app.post("/api/ingest/follow")
+    def ingest_follow(body: FollowBody) -> dict[str, Any]:
+        return service.set_follow(body.follow, body.finished)
+
+    @app.post("/api/ingest/status")
+    def ingest_status_set(body: StatusBody) -> dict[str, Any]:
+        """Mark a target acquiring or finished in its target.json (e.g. "mark finished again" after a reopen)."""
+        state.require_library()
+        try:
+            previous = service.set_status(body.revisionId, body.status)
+        except KeyError as exc:
+            raise HTTPException(404, detail="No such target revision") from exc
+        return {"ok": True, "previous": previous}
+
+    @app.post("/api/ingest/tonight")
+    def ingest_tonight(body: TonightBody) -> dict[str, Any]:
+        """Tonight's target: the night's lights (or one object's) go to this revision, whatever the OBJECT mapping says."""
+        if body.revisionId:
+            lib = state.require_library()
+            rev = lib.revisions.get(body.revisionId)
+            if rev is None:
+                raise HTTPException(404, detail="No such target revision")
+            stage = rev["stage"]["value"]
+            if stage != "acquiring" and not body.confirm:
+                raise HTTPException(409, detail=f"{rev['folder']} is marked \"{stage}\"; send confirm: true to use it anyway")
+        a = service.assign(body.revisionId, body.object, body.night)
+        return {"ok": True, "assignment": a}
+
+    @app.post("/api/ingest/remove-copies")
+    def ingest_remove_copies(body: CleanupBody) -> dict[str, Any]:
+        """Remove copies in .Download of frames already ingested (re-synced by robocopy); each is byte-compared first."""
+        if not body.confirm:
+            raise HTTPException(422, detail="Removing files needs confirm: true")
+        state.require_library()
+        return service.remove_ingested_copies(_night(body.night))
 
     @app.put("/api/ingest/map")
     def ingest_map(body: MapBody) -> dict[str, Any]:

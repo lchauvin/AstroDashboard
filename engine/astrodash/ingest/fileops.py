@@ -13,7 +13,16 @@ Every operation re-checks its paths, whatever the caller believes:
 - `rmdir_empty`: removes *empty* directories below `.Download\\<night>`, only
   when you ask for it. `os.rmdir` itself refuses a directory with anything in it.
 
-Nothing here deletes a frame. `tests/test_safety.py` allows file-mutating
+- `set_status`: changes the `status` field of one target folder's own `target.json`
+  (reopening a finished target that NINA is imaging again). Every other field is
+  kept; written to a temporary file, then swapped in.
+
+- `remove_duplicate`: removes a file from `.Download` only when a byte-for-byte
+  identical file is already in a revision's `.SessionData\\NIGHT_` folder (a copy
+  re-synced into `.Download` after its frame was moved, e.g. by robocopy), and only
+  when you ask for it. The frame itself always survives: one copy stays in the session.
+
+Nothing here deletes a frame's only copy. `tests/test_safety.py` allows file-mutating
 calls in this module only.
 """
 
@@ -120,3 +129,65 @@ def rmdir_empty(root: Path, night_dir: str) -> list[str]:
         except OSError:
             continue
     return removed
+
+
+def identical(a: Path, b: Path, chunk: int = 4 * 1024 * 1024) -> bool:
+    """Byte-for-byte comparison (sizes first)."""
+    if a.stat().st_size != b.stat().st_size:
+        return False
+    with open(a, "rb") as fa, open(b, "rb") as fb:
+        while True:
+            x, y = fa.read(chunk), fb.read(chunk)
+            if x != y:
+                return False
+            if not x:
+                return True
+
+
+def remove_duplicate(root: Path, src: str, kept: str) -> None:
+    """Remove `src` (in .Download) because `kept` (in a session) is the very same frame, byte for byte."""
+    root, s, k = _resolve(root), _resolve(src), _resolve(kept)
+    _check_download_src(root, s)
+    _check_session_dst(root, k)
+    if s == k:
+        raise UnsafeOperation("source and kept file are the same path")
+    if not s.is_file() or not k.is_file():
+        raise FileNotFoundError(s if not s.is_file() else k)
+    if not identical(s, k):
+        raise UnsafeOperation(f"not identical to the ingested frame, left in place: {s}")
+    os.remove(s)  # the session copy remains
+
+
+STATUSES = ("acquiring", "processed", "finished")
+
+
+def set_status(root: Path, target_folder: str, status: str, defaults: dict | None = None) -> str | None:
+    """Set `status` in `<root>/<target_folder>/target.json`; returns the previous status (None if there was none).
+
+    Only a target folder directly under the data root (not `.Download`, `.Calibration` or any dot-folder),
+    only its `target.json`, only the `status` key. A missing file is created from `defaults`
+    (catalog_id, name, revision) so the target keeps its identity.
+    """
+    import json
+
+    if status not in STATUSES:
+        raise UnsafeOperation(f"unknown status {status!r}")
+    root = _resolve(root)
+    folder = _resolve(root / target_folder)
+    if folder.parent != root or folder.name.startswith(".") or not folder.is_dir():
+        raise UnsafeOperation(f"not a target folder directly under {root}: {folder}")
+    path = folder / "target.json"
+    if path.is_file():
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            raise UnsafeOperation(f"{path} is not a JSON object")
+    else:
+        data = {k: v for k, v in (defaults or {}).items() if k in ("catalog_id", "name", "revision")}
+    previous = data.get("status")
+    data["status"] = status
+    tmp = path.with_name(f".target.json.{uuid.uuid4().hex[:8]}.part")
+    with open(tmp, "x", encoding="utf-8") as fh:
+        fh.write(json.dumps(data, indent=2) + "\n")
+    os.replace(tmp, path)
+    return previous

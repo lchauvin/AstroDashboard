@@ -7,7 +7,7 @@ One place to answer four questions about the hobby:
 3. **Live** — how is tonight's session going?
 4. **Planning** — what should I shoot next, with which filter, and for how long?
 
-Status: **Phases 0–6 implemented (2026-10-09)** — scaffold, header indexer, Library (targets, target pages, calibration library), Diagnostics v1 (astro-eval jobs, timeline, frame table, previews) and v2 (findings: clouds, obstruction, twilight, moon, dew, focus drift, tracking, mispointing/rotation, flat↔light check; learned horizon), Planning (sites, sky calibrated from your subs, ranking, moon-aware filter suggestion, calendar, ideas, SNR curves, goals; see §6.5 for what was built and how it differs), Live (AstroController client) and auto-ingest from `.Download` in Dry-run by default (§5.2), and the Organizer (§3.3): lint, dry-run plans, typed approval, journal, undo, trash. No plan has been applied to `G:\Astro`.
+Status: **Phases 0–6 implemented (2026-10-09)** — scaffold, header indexer, Library (targets, target pages, calibration library), Diagnostics v1 (astro-eval jobs, timeline, frame table, previews) and v2 (findings: clouds, obstruction, twilight, moon, dew, focus drift, tracking, mispointing/rotation, flat↔light check; learned horizon), Planning (sites, sky calibrated from your subs, ranking, moon-aware filter suggestion, calendar, ideas, SNR curves, goals; see §6.5 for what was built and how it differs), Live (direct NINA + PHD2 since 2026-10-14, §5.3) and auto-ingest from `.Download` in Dry-run by default (§5.2), and the Organizer (§3.3): lint, dry-run plans, typed approval, journal, undo, trash. No plan has been applied to `G:\Astro`.
 
 ---
 
@@ -16,11 +16,11 @@ Status: **Phases 0–6 implemented (2026-10-09)** — scaffold, header indexer, 
 | Topic | Decision |
 |---|---|
 | File safety | **Read-only by default.** Any reorganization (move / rename / quarantine) is shown as a dry-run plan and applied only after explicit approval in the UI. **The dashboard never deletes anything** — "remove" always means "move to a quarantine folder". |
-| Live | **Client of AstroController** (`:3005`). AstroController keeps owning the NINA/PHD2 connections, the advisor and the controls; the dashboard consumes `/api/state` + `/api/stream` (SSE) and the image endpoints. |
+| Live | **Self-sufficient** (decided 2026-10-14, §5.3): the engine connects to NINA's Advanced API and PHD2's event server itself. AstroController is no longer needed. |
 | Stack | **Next.js 15 (TypeScript) UI + Python FastAPI "engine"** — two local services. |
 | Sites | **Home + dark-site trips** → a site selector with per-site sky brightness. |
 | Auto-ingest | The engine runs on the machine with `G:\` and auto-moves finished frames from `G:\Astro\.Download\` into the right target's `.SessionData\NIGHT_<date>\` (§5.1). This is the only automatic write, and it's bounded: moves only, never overwrites or deletes, journaled and undoable, with a dry-run mode. |
-| Data layout | No year level; a revision is its own target folder (`<Target> R2`); sessions are `NIGHT_<date>`; mosaics use `PANEL_<n>` (§3.2). |
+| Data layout | No year level; a revision is its own target folder (`<Target> R2`); sessions are `NIGHT_<date>`; mosaics use `<ID>_Panel_<n>` (e.g. `M31_Panel_1`) (§3.2). |
 | Design | AstroBlog's **"Industry"** design system (tokens ported from `AstroBlog/src/styles/tokens.css`). |
 
 ---
@@ -93,7 +93,7 @@ Special prefixes seen: `[GARBAGE] 2025-12-27`, `.OLDCAMERA-2025-07-26`, `.OLDCAM
                      │                                  │  ├─ indexer  → SQLite cache (headers, sessions, results)
                      │                                  │  ├─ diagnostics jobs (astro-eval + new checks)
                      │                                  │  ├─ organizer (dry-run plans → approved moves, journaled)
-                     │                                  │  └─ live proxy  ──► AstroController :3005 ──► NINA / PHD2
+                     │                                  │  └─ observatory ──► NINA :1888 (REST + websocket), PHD2 :4400 (JSON-RPC)
                      └── SNR + ephemeris run in the browser/server (vendored TS from AstroPlanner)
 ```
 
@@ -101,7 +101,7 @@ Special prefixes seen: `[GARBAGE] 2025-12-27`, `.OLDCAMERA-2025-07-26`, `.OLDCAM
 - **Engine — `engine/`**: Python 3.12, `uv`, FastAPI, `astropy`, `numpy`, `sqlite3`. It depends on **astro-eval through a `uv` path source** (`../AstroSubQualityEvaluation`, editable), the same way AstroController already does.
 - **Vendoring vs. linking**: AstroPlanner's `src/lib/snr/*`, `ephemeris.ts` and `coordinates.ts` are **vendored once** with provenance headers, following AstroPlanner's own self-containment rule. astro-eval stays a *package dependency* because it's a library with tests, and copying it would fork it.
 - **Ports**: UI `3006` (from `next-port`), engine from the next `next-port` call. Both go in `project-dashboard.json`, then run `project_registry.py validate`.
-- **Config**: `astrodashboard.toml` (`data_root = "G:/Astro"`, path patterns, filter aliases, sites, AstroController URL/token env var, astro-eval overrides). Secrets come only from environment variables.
+- **Config**: `astrodashboard.toml` (`data_root = "G:/Astro"`, path patterns, filter aliases, sites, astro-eval overrides; NINA/PHD2 addresses and the advisor model are in Settings). Secrets come only from environment variables.
 
 ### 2.1 Data safety — enforced in code, not by convention
 
@@ -159,8 +159,8 @@ G:\Astro\
 │   ├── target.json                           ← revision metadata (see below)
 │   ├── .SessionData\
 │   │   ├── NIGHT_2026-08-20\
-│   │   │   ├── PANEL_1\LIGHT\<F>\*.fits      ← mosaic: one PANEL_<n> per panel
-│   │   │   ├── PANEL_2\LIGHT\<F>\*.fits
+│   │   │   ├── M31_Panel_1\LIGHT\<F>\*.fits  ← mosaic: one <ID>_Panel_<n> per panel
+│   │   │   ├── M31_Panel_2\LIGHT\<F>\*.fits
 │   │   │   └── FLAT\<F>\*.fits               ← flats belong to the night, shared by all panels
 │   │   └── NIGHT_2026-08-21\…
 │   ├── .Calibration\  .Finished\  WBPP\     (+ legacy 1.–7. folders only where they hold files)
@@ -176,7 +176,7 @@ G:\Astro\
 Rules:
 
 - **Session folder = `NIGHT_<YYYY-MM-DD>`** (evening date), used for *every* session. WBPP grouping keywords are a single fixed name, so `NIGHT_` and `SESSION_` should not be mixed. `NIGHT_` is already the majority in the data. Use `NIGHT` as the WBPP keyword so that each night's lights calibrate with that night's flats.
-- **Mosaic panel folder = `PANEL_<n>`**, directly under the night. Use `PANEL` as a second WBPP keyword so that panels are calibrated and integrated separately. This replaces NINA's `M 31 Panel 1` object folder.
+- **Mosaic panel folder = `<ID>_Panel_<n>`** (catalog ID without spaces, e.g. `M31_Panel_1`; bare `PANEL_<n>` folders are renamed), directly under the night. Use `Panel` as a second WBPP keyword so that panels are calibrated and integrated separately. This replaces NINA's `M 31 Panel 1` object folder.
 - **Flats**: `FLAT\<F>` directly under the night, replacing NINA's `FlatWizard\FLAT\<F>`.
 - **Revision suffix**: none for revision 1, then ` R2`, ` R3`… appended to the folder name. Square brackets and extra parentheses are avoided on purpose: `[…]` is a wildcard in PowerShell paths, and parentheses already break `cmd.exe` scripts (see the AstroIntegration README).
 - **`target.json`** at the revision root:
@@ -204,7 +204,7 @@ Migration of the existing tree (organizer plan, applied per target after approva
 | `<Target>\<YEAR>\…` | `<Target>\…` (year level flattened; each target currently holds a single year, so it becomes revision 1) |
 | `2025-09-26`, `SESSION_2025-08-08` | `NIGHT_2025-09-26`, `NIGHT_2025-08-08` |
 | `NIGHT_x\<NINA object>\LIGHT\` | `NIGHT_x\LIGHT\` |
-| `NIGHT_x\M 31 Panel 1\LIGHT\` | `NIGHT_x\PANEL_1\LIGHT\` |
+| `NIGHT_x\M 31 Panel 1\LIGHT\` | `NIGHT_x\M31_Panel_1\LIGHT\` |
 | `NIGHT_x\FlatWizard\FLAT\` | `NIGHT_x\FLAT\` |
 | `.OLDCAMERA-…` and `[GARBAGE] …` sessions | **removed** (legacy, confirmed unused): IC 1848 `[GARBAGE] 2025-12-27`, `[GARBAGE] 2026-01-04`; IC 5070 `.OLDCAMERA-2025-07-26`; NGC 281 `.OLDCAMERA-SESSION_2025-08-01`. Any other match the scan finds is added to the list. |
 | Empty `1.`–`7.` folders | removed; non-empty ones are kept |
@@ -275,7 +275,7 @@ The dashboard calls the library API (`compute_metrics`, `scan_session`, `group_s
 
 ## 5. Section 3 — Live
 
-A dashboard-styled view over AstroController (which must be running; otherwise the page shows a clear "AstroController offline at :3005" state).
+*(Original design, superseded by §5.3: Live now talks to NINA and PHD2 directly.)* A dashboard-styled view over AstroController (which must be running; otherwise the page shows a clear "AstroController offline at :3005" state).
 
 - **Now**: sequence step, target, filter, exposure progress, last frame preview (`/api/frame/latest.png`), and the guide star (`/api/guide-star.png`).
 - **Guiding**: RA/Dec/total RMS in arcsec as a scrolling chart, with dithers, settles and star-loss markers. Shows the advisor's last decision.
@@ -308,18 +308,21 @@ This is the **one standing exception** to "every move needs approval". You appro
 | From `.Download\<YYYY-MM-DD>\…` | Resolved by | To `<Revision>\.SessionData\NIGHT_<date>\…` |
 |---|---|---|
 | `<NINA object>\LIGHT\<F>\x.fits` | `OBJECT` header → target mapping | `LIGHT\<F>\x.fits` |
-| `M 31 Panel 2\LIGHT\<F>\x.fits` | object + `Panel (\d+)` pattern | `PANEL_2\LIGHT\<F>\x.fits` |
+| `M 31 Panel 2\LIGHT\<F>\x.fits` | object + `Panel (\d+)` pattern | `M31_Panel_2\LIGHT\<F>\x.fits` |
 | `FlatWizard\FLAT\<F>\x.fits` | the night's target(s) | `FLAT\<F>\x.fits` |
 | `Snapshot\`, PHD2 guide images, DARK/BIAS | — | **left in place**. DARK/BIAS are offered to the calibration library as a normal approved plan. |
 
 - **Night**: computed from each frame's `DATE-LOC` (local noon to noon → the *evening* date). The `.Download` folder date is only a cross-check. Depending on NINA's path pattern (`$$DATE$$` vs `$$DATEMINUS12$$`), frames shot after midnight may land in a folder dated the next day. Using the header keeps a whole night in one `NIGHT_<evening date>` folder either way. If the folder and header dates disagree by more than a day, the frame is held and you get an alert.
 - **Filter alias normalization** follows the config (e.g. `Ha` → `H`) for the *folder name only*. File names and headers are never rewritten.
+- **Tonight's target** chosen in Live, when set, wins over the mapping for that night (§5.3).
+- **Copies re-synced into `.Download`** (found 2026-10-15): NINA's *Robocopy Start* step keeps `.Download` in step with the observatory PC's image folder, so every frame auto-ingest moves comes back as a copy (original timestamps). A file whose destination already exists with the same size and timestamp is held as **already ingested** (not waiting, not a conflict). Each night offers *Remove N copies already ingested…* (confirmation; `fileops.remove_duplicate` compares each byte for byte with the ingested frame and removes only identical ones; logged). Never automatic.
+- **No night folder** (found 2026-10-14: NINA's file pattern wrote `.Download\IC 405\LIGHT\Ha\…`): frames lying directly under `.Download` are grouped by their header night, which stands in for the folder name (journal, undo, close). Empty-folder cleanup is offered only for real night folders.
 - **Target mapping**: a table `NINA object name → catalog target`, e.g. `"Soul Nebula" → IC 1848`. It's pre-filled from the existing data, since every current session already pairs a NINA object folder with a target folder, and it's editable in the UI. Frames go to the target's **latest revision whose status is `acquiring`**.
 - **Unknown object, or the latest revision is `finished`**: the frames **stay in `.Download\`**, and the Live page shows a prompt: map to an existing target, start a new revision, or create a new target. Once you choose, ingest continues automatically, and the choice is remembered.
 - **Flats shared by several targets on one night**: flats are moved to the first target and **copied** to the others. A copy never removes anything. The Library notes "flats shared with <target>" so you can check that the rotation and focus match.
 - **Conflicts** (destination file already exists, header/folder disagreement such as a `FILTER` header that differs from the folder): the file is held in place and raised as an alert. It is never guessed.
 
-**Closing the night.** Once the sequence has ended (from AstroController) or after local noon, the last held frame is moved. Directories left empty in `.Download\<YYYY-MM-DD>\` are then removed with `rmdir_empty`. Live then shows a night summary: frames ingested per target/filter, anything held back and why, and a link to run diagnostics on the new session.
+**Closing the night.** Once the sequence has ended (from NINA) or after local noon, the last held frame is moved. Directories left empty in `.Download\<YYYY-MM-DD>\` are then removed with `rmdir_empty`. Live then shows a night summary: frames ingested per target/filter, anything held back and why, and a link to run diagnostics on the new session.
 
 **Tie-in with Live diagnostics.** The cheap checks in §4.2 (obstruction, dawn creep, clouds, mispointing) run on each frame as it is ingested. The results are on the Live page within a minute of the frame being saved.
 
@@ -334,11 +337,33 @@ This is the **one standing exception** to "every move needs approval". You appro
 - **Undo pauses the night.** Otherwise Auto re-ingests it on the next pass (found while testing). A paused night shows what would move and has a Resume button.
 - **Empty `.Download` folders are never removed automatically.** Removing them is a deletion, so each night has a "Remove N empty folders…" button with a confirmation, and the API refuses without `confirm: true`. `os.rmdir` itself refuses a folder with anything in it.
 - **Flat copies are not deleted by undo.** They are reported instead, because removing a copy is a deletion.
-- **A night is closed** by your click, after the next local noon, or when AstroController reports no running step. Until then the newest light stays for the preview.
+- **A night is closed** by your click, after the next local noon, or when NINA reports no running step. Until then the newest light stays for the preview.
 - **The object → target table** is learned from the OBJECT headers already in the Library (e.g. "Bubble Nebula" → NGC 7635). Your own rows win and can name a specific revision, including a finished one.
 - **Tested end to end** with a scratch data root (the throwaway fixture used while building), never `G:\`: dry-run plan, mapping prompt, Auto moves and the flat copy, close night, undo + pause, and cleanup.
 
 **Not built (yet):** incremental per-frame diagnostics on ingest (the night's summary links to Diagnostics instead); offering DARK/BIAS frames to the calibration library (they stay in `.Download` for the organizer, Phase 6); push alerts for held files (they show on the Live page); and the real-night dry-run check, which is yours to do before switching Auto on.
+
+### 5.3 Self-sufficient Live (2026-10-14)
+
+AstroController is no longer in the loop. `engine/astrodash/observatory/` owns the connections (logic ported from AstroController, trimmed):
+
+- **NINA** (`nina.py`): Advanced API REST for truth (equipment every 4 s, `/sequence/json` flattened into a step tree, image history), the `/v2/socket` websocket for change events (IMAGE-SAVE, flips, autofocus, sequence start/end). A websocket reconnect re-reads REST.
+- **PHD2** (`phd2.py`): one TCP socket demultiplexing events and id-matched JSON-RPC; state seeded on every connect (app state, pixel scale, exposure, Dec mode, calibration, algorithm and parameters per axis).
+- **Runtime** (`runtime.py`): asyncio tasks on the engine's loop, each reconnecting with backoff. Addresses come from Settings (`observatory`) and a change reconnects at once. Auto-ingest's night closing reads the sequence state from here.
+
+**Live › Overview** shows only connected devices (one card each, key facts; more in Advanced mode), a warning when a device that was connected drops out, the sequence (target, running step, exposure *n/m*, countdown; the full tree in Advanced), the last image (the newest file in `.Download` when it is NINA's newest frame, else NINA's own JPEG), a guiding summary, and tonight's frames with HFR/star flags against the same filter's recent frames.
+
+**Live › Guiding**: RMS tiles (about zero, over the last 5 clean minutes; dithers, settling, star loss, flips, autofocus and parameter changes are masked), the RA/Dec trace with masked spans and event markers, the guide star (PHD2 `get_star_image`), a scatter, a deterministic per-axis **diagnosis** from the shape of the error (lag-1, offset, idle, reversals → overcorrecting / deadband too wide / undercorrecting / chasing seeing / seeing-limited / healthy), the parameters (edit any numeric PHD2 parameter, guide exposure, Dec mode) and **Changes tonight**, where every change is measured 5 min before vs 5 min after (± 1.5 combined standard errors = no clear change; guide-star HFD moving > 20 % = void) and can be reverted. Guide/Stop/Pause/Dither and the shape table, pulse chart and calibration are Advanced-only.
+
+**AI advisor** (off by default, toggled on the Guiding page): every N minutes of steady guiding (or on "Analyze now") it sends the numbers, the diagnosis, conditions (seeing from the guide-star HFD, SNR, altitude, pier side, NINA weather device), setup (algorithms, exposure, scale, Dec mode, calibration), the parameters with safe ranges and tonight's measured changes to the model, and gets at most two suggestions back. **It only suggests**: you click Apply. Suggestions are validated (whitelisted parameter the algorithm exposes, inside the range, step ≤ max step; far-out values dropped). The periodic run skips the model when nothing is actionable. Unlike AstroController there is no auto-apply and no cross-night learning store — a deliberate cut; the change log in the dashboard DB keeps the evidence if that is wanted later. Providers: `ollama`, `ollama_cloud`, `openrouter`, `openai`, `anthropic`, called over plain HTTP; keys from `.env`.
+
+**Tonight's target** (Live › Overview): pick the revision tonight's frames belong to, and auto-ingest sends every light of the night in progress (noon to noon, from the frames' own DATE-LOC, so after-midnight frames count) to that revision's `.SessionData\NIGHT_<date>\LIGHT\<filter>\`, whatever NINA calls the object; flats follow as before. It beats the OBJECT mapping, and one NINA object can be pointed elsewhere when a night has several. A revision that is not *acquiring* (finished, processed) is allowed only after a warning (the API refuses without `confirm: true`), with a pointer to the organizer's New revision. The card suggests the revision matching NINA's running target, lists tonight's objects with where each would go and why a frame is held, and offers to switch ingest to Auto (with the usual confirmation) since nothing moves in Dry-run. Choices are stored per night in the ingest state (last 14 nights); undo per night is unchanged.
+
+**Following NINA** (default on, the card's first switch): NINA's target name comes from `/sequence/state` (each target container's `Target.TargetName`; `/sequence/json` lacks it), and it is also what NINA writes into OBJECT. Each OBJECT is matched to its library target — the mapping table first, then catalog id or name ignoring case, spaces, dashes and underscores — so a night with several targets sends each one's frames to its own revision (per object, so a target's last held frame never follows NINA to the next one). The newest acquiring revision wins. When every match is finished or processed, nothing is switched and the card says why, unless **"Also switch to finished targets"** is on (asks first): then the frames go to the newest finished revision, and in Auto mode, before its first frame moves, `fileops.set_status` writes `"status": "acquiring"` into that target folder's own `target.json` (only that key; other fields kept; written to a temp file and swapped in; nothing else in the data root). Every status change is logged on the card with **Mark finished again** (`POST /api/ingest/status`). Note that with the switch still on and NINA still on that target, it is reopened again at the next frame. Choosing a target yourself (every frame of the night) pauses following; "Follow NINA instead" resumes it.
+
+**Simulator**: `astrodash-engine --fake-observatory` runs a fake PHD2 (real wire protocol, mount that responds to the parameters: RA starts overcorrecting, Dec with a deadband too wide) and a fake NINA mounted on the engine at `/fake-nina`. Nothing is written to disk.
+
+**Dropped from the old page:** Open-Meteo weather and moon (NINA's weather device shows when connected; Planning has the forecast). Not ported: polar alignment (TPPA), sequence start/stop, the guide-camera full-frame dump.
 
 ---
 
@@ -471,6 +496,16 @@ Where the build follows §6.1–6.4 it is not repeated here; these are the decis
 
 **Not built (yet):** elevation estimated from coordinates (a DEM lookup; the field says "type it in"), the light-pollution map layer, picking an individual Library frame for a site (the "Suggest sites from my data" clusters cover frames already in the Library), timezones per site (times show in the dashboard machine's local time; night boundaries are computed from the sun, so they are right at any site), and preference weights beyond the stage weighting.
 
+### 6.6 Telescopius (2026-10-14)
+
+Optional, with `TELESCOPIUS_API_KEY` in `.env` (API v2.2, non-commercial use only). `astrodash/telescopius.py` is the client, and `api_telescopius.py` serves `/api/telescopius/{status,object,lists,events}`. The key stays in the engine.
+
+- **Object card** on the Library and Planning target pages: reference thumbnail, every catalogue ID and name, size, surface brightness, magnitude, PA, morphology, and a link to Telescopius. It is looked up by catalog ID, then by name. A found object is cached for good; an unknown name is retried after 30 days.
+- **Your target lists** (cached 6 h) join the Planning idea pool. They are ranked like the catalog ideas, and shown in their own "From your Telescopius list" section even when out of season; targets already in the library are left out. A list target the vendored catalog knows uses the catalog entry; otherwise it is built from the list's position, size and PA, with an unknown object class.
+- **Sky events** (`/events/highlights`, cached 6 h per site) appear on the Planning overview (next 30 days) and on each night page. Not shown: Moon phases, apogee/perigee, inferior conjunctions, perihelia, and occultations not visible from the site.
+- **API limits:** 60 requests/minute, and a search costs 2, so calls are spaced 2.1 s apart. A failed call is not retried for 10 minutes, and the last good answer is served meanwhile. Results come under `page_results` (not the spec's `objects`). RA is in hours, sizes are in arcseconds (list `size_deg` in degrees), and event times are UTC.
+- **Not used:** the yearly ephemeris (one point per day at midnight, worse than ours), the weather forecast (Astrospheric is the source; the Telescopius one could become a second opinion), equipment (the rig comes from the headers), news.
+
 ---
 
 ## 7. Design
@@ -493,7 +528,7 @@ Navigation: a top bar with **Library · Diagnostics · Live · Planning**, plus 
 - **Auto-ingest**: mode (`Off` / `Dry-run` / `Auto`), and the NINA-object → target mapping table (§5.1).
 - **Rig**: telescope, camera and filter set used by the SNR model (pre-filled from the headers).
 - **Goals**: the cap for flagging unrealistic SNR-derived hours (§6.4).
-- **Live**: AstroController URL. Its token is read from an environment variable and never shown or stored.
+- **Live**: NINA host/port, PHD2 host/instance, the AI advisor's model, interval and target RMS. API keys come from `.env` and are never shown or stored.
 
 ---
 
@@ -550,7 +585,7 @@ Phases 1–2 deliver the most value. Planning and Live are independent of each o
 
 ## 11. Open questions — all settled (2026-10-08)
 
-1. ~~**Canonical layout**~~ — **decided** (§3.2): no year level; revisions are separate target folders (` R2` suffix); sessions are `NIGHT_<date>`; mosaics use `PANEL_<n>`; flats go in `NIGHT_x\FLAT\<F>`.
+1. ~~**Canonical layout**~~ — **decided** (§3.2): no year level; revisions are separate target folders (` R2` suffix); sessions are `NIGHT_<date>`; mosaics use `<ID>_Panel_<n>` (e.g. `M31_Panel_1`); flats go in `NIGHT_x\FLAT\<F>`.
 2. ~~**Session flags**~~ — **decided**: no flag convention. The legacy `[GARBAGE]` / `.OLDCAMERA` sessions are removed during migration (to `.Trash`, after approval). `1.`–`7.` folders are dropped for new targets; non-empty existing ones are kept.
 3. ~~**Where does the dashboard run?**~~ — **decided**: on the machine with `G:\` (local disk, so the file watcher is reliable). `.Download\` is auto-ingested (§5.1).
 4. ~~**Goals**~~ — **decided** (§6.4): per filter, choose **hours**, **SNR** or **none**. SNR-derived hours that look unrealistic are flagged, with a one-click switch to hours.

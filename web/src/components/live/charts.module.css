@@ -1,0 +1,173 @@
+.chart {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.chart svg {
+  display: block;
+  touch-action: pan-y;
+}
+
+.grid {
+  stroke: var(--color-divider);
+  stroke-width: 1;
+  fill: none;
+  opacity: 0.7;
+}
+
+.zero {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+
+.ring {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  fill: none;
+}
+
+.axis {
+  font: 400 9.5px var(--font-mono);
+  fill: var(--text-muted);
+}
+
+.line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.endLabel {
+  font: 500 10px var(--font-mono);
+  fill: var(--text-secondary);
+}
+
+.band {
+  opacity: 0.9;
+}
+
+.hatchLine {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  opacity: 0.35;
+}
+
+.event {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+.eventText {
+  font: 400 9px var(--font-mono);
+  fill: var(--text-muted);
+}
+
+.crosshair {
+  stroke: var(--text-secondary);
+  stroke-width: 1;
+}
+
+.dot {
+  stroke: var(--color-bg);
+  stroke-width: 2;
+}
+
+.dotRing {
+  fill: none;
+  stroke: var(--color-text);
+  stroke-width: 1.5;
+}
+
+.scatterDot {
+  fill: var(--color-accent);
+}
+
+.scatterNew {
+  fill: var(--color-text);
+  stroke: var(--color-bg);
+  stroke-width: 2;
+}
+
+.tooltip {
+  position: absolute;
+  top: 18px;
+  z-index: 5;
+  pointer-events: none;
+  min-width: 150px;
+  padding: 8px 10px;
+  background: var(--color-surface, var(--color-bg));
+  border: 1px solid var(--color-divider);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ttHead {
+  font: 400 10px var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.ttRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.ttRow i {
+  width: 8px;
+  height: 8px;
+  display: inline-block;
+}
+
+.ttRow b {
+  margin-left: auto;
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.ttNote {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.keyLine {
+  display: inline-block;
+  width: 16px;
+  border-top: 2px solid;
+}
+
+.keyHatch {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--text-muted) 45%, transparent) 0 1px, transparent 1px 4px);
+}
+
+.keyEvent {
+  display: inline-block;
+  height: 12px;
+  border-left: 1px dashed var(--text-muted);
+}

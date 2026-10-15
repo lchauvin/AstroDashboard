@@ -48,7 +48,8 @@ class EngineState:
         self.last_error: str | None = None
         self._scan_thread: threading.Thread | None = None
         self._lock = threading.Lock()
-        resolve = lambda rev, sess: self.library.session(rev, sess) if self.library else None  # noqa: E731
+        self.loop = None  # the server's event loop (set in lifespan), for sync handlers that touch the observatory
+        resolve =lambda rev, sess: self.library.session(rev, sess) if self.library else None  # noqa: E731
         self.jobs = DiagnosticsJobs(cfg, self.cache, resolve, **({"runner": runner} if runner else {}))
 
     def start_scan(self) -> bool:
@@ -83,16 +84,43 @@ class EngineState:
         return self.library
 
 
-def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None) -> FastAPI:
+def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None, observatory: bool | None = None,
+               fake_observatory: bool = False) -> FastAPI:
+    """`observatory` (default: same as scan_on_start) connects to NINA and PHD2; `fake_observatory` simulates both."""
     state = EngineState(cfg, diagnostics_runner)
+    run_observatory = scan_on_start if observatory is None else observatory
+    sim_router = None
+    if fake_observatory:
+        from .observatory import fake
+
+        sim = fake.Sim()
+        sim_router = fake.nina_router(sim)
+        sim_phd2 = fake.FakePhd2(sim)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        import asyncio
+
         if scan_on_start:
             state.start_scan()
             # The ingest watcher runs whether or not the Live page is open (it only plans unless mode is Auto).
             state.ingest.start()
+        state.loop = asyncio.get_running_loop()
+        sim_tasks = []
+        if fake_observatory:
+            port = await sim_phd2.start()
+            sim_tasks.append(asyncio.create_task(sim_router.emit()))
+            state.observatory._nina_override = f"http://127.0.0.1:{cfg.port}/fake-nina"
+            state.observatory._phd2_override = ("127.0.0.1", port)
+        if run_observatory or fake_observatory:
+            await state.observatory.start()
         yield
+        if run_observatory or fake_observatory:
+            await state.observatory.stop()
+        for t in sim_tasks:
+            t.cancel()
+        if fake_observatory:
+            await sim_phd2.stop()
         if scan_on_start:
             state.ingest.stop()
 
@@ -301,6 +329,8 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None)
 
     api_planning.register(app, state)
     api_live.register(app, state)
+    if sim_router is not None:
+        app.include_router(sim_router)
     api_organizer.register(app, state)
     api_telescopius.register(app, state)
     return app

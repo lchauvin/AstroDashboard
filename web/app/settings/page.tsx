@@ -1,13 +1,13 @@
 import Link from "next/link";
 
 import { EngineNotice } from "@/components/EngineNotice";
-import { LiveIngestSettings } from "@/components/settings/LiveIngestSettings";
+import { LiveIngestSettings, type LiveConn } from "@/components/settings/LiveIngestSettings";
 import { GoalCapForm, RigForm } from "@/components/settings/RigForm";
 import { SitesManager, type LearnedBin, type SiteSky } from "@/components/settings/SitesManager";
 import type { Suggestion } from "@/components/settings/SitesMap";
 import styles from "@/components/settings/settings.module.css";
 import { engineGet } from "@/lib/engine";
-import type { IngestStatus, LivePayload } from "@/lib/live";
+import type { IngestStatus, LiveState } from "@/lib/live";
 import { loadPlanningData } from "@/server/planning";
 import pageStyles from "../library/library.module.css";
 
@@ -30,7 +30,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     engineGet<{ bins: LearnedBin[] }>("/api/horizon"),
   ]);
   const [live, ingest] =
-    tab === "live" ? await Promise.all([engineGet<LivePayload>("/api/live/state"), engineGet<IngestStatus>("/api/ingest")]) : [null, null];
+    tab === "live" ? await Promise.all([engineGet<LiveState>("/api/live/state?graph=30"), engineGet<IngestStatus>("/api/ingest")]) : [null, null];
 
   return (
     <main className="page">
@@ -82,12 +82,16 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </div>
       ) : (
         <LiveIngestSettings
-          liveUrl={data.data.context.settings.liveUrl ?? "http://127.0.0.1:3005"}
-          tokenSet={live?.ok ? live.data.tokenSet : false}
-          online={live?.ok ? live.data.online : false}
+          observatory={data.data.context.settings.observatory ?? { ninaHost: "127.0.0.1", ninaPort: 1888, phd2Host: "127.0.0.1", phd2Instance: 1 }}
+          advisor={data.data.context.settings.advisor ?? { enabled: false, model: "ollama/llama3.1:8b", ollamaUrl: "http://localhost:11434", intervalMin: 10, targetRms: 0.8 }}
+          conn={live?.ok ? liveConn(live.data) : null}
           ingest={ingest?.ok ? ingest.data : null}
         />
       )}
     </main>
   );
+}
+
+function liveConn(s: LiveState): LiveConn {
+  return { nina: s.nina.connected, ninaError: s.nina.error, phd2: s.phd2.connected, phd2Error: s.phd2.error, simulated: s.simulated, key: s.advisor.key };
 }

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "astrodash-engine"
 version = "0.1.0"
-description = "AstroDashboard engine: indexes G:\\Astro, serves the Library, diagnostics and live proxy"
+description = "AstroDashboard engine: indexes G:\\Astro, serves the Library, diagnostics, planning and Live (NINA + PHD2)"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

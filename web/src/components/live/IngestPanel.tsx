@@ -25,7 +25,7 @@ async function post(path: string, body?: unknown, method = "POST") {
 export function IngestPanel({ initial }: { initial: IngestStatus | null }) {
   const [st, setSt] = useState<IngestStatus | null>(initial);
   const [confirmAuto, setConfirmAuto] = useState(false);
-  const [confirm, setConfirm] = useState<string | null>(null); // "undo:<night>" | "cleanup:<night>"
+  const [confirm, setConfirm] = useState<string | null>(null); // "undo:<night>" | "cleanup:<night>" | "copies:<night>"
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -181,16 +181,24 @@ function Night({
   const byReason = new Map<string, IngestHold[]>();
   for (const h of holds) if (!h.prompt) byReason.set(h.reason, [...(byReason.get(h.reason) ?? []), h]);
   const emptyDirs = info?.emptyDirs ?? j?.emptyDirs ?? 0;
+  const ingested = info?.ingested ?? 0;
 
   return (
     <section className={`framed ${styles.night}`}>
       <Marks />
       <div className={styles.nightHead}>
         <h3 className={styles.nightTitle}>
-          <span className="mono">.Download\{name}</span>
+          {info && info.folder === false ? (
+            <>
+              Night of {name} <span className={styles.hint}>· frames directly under .Download (no night folder)</span>
+            </>
+          ) : (
+            <span className="mono">.Download\{name}</span>
+          )}
         </h3>
         <span className={styles.hint}>
-          {info ? `${info.lights} lights · ${info.flats} flats waiting` : "folder empty or gone"} · {closed ? "night closed" : "night open (newest light kept for the preview)"}
+          {info ? `${info.lights + info.flats - ingested ? `${info.lights + info.flats - ingested} waiting` : "nothing waiting"}${ingested ? ` · ${ingested} already ingested` : ""}` : "nothing left waiting"} ·{" "}
+          {closed ? "night closed" : "night open (newest light kept for the preview)"}
         </span>
         <div className={styles.row}>
           {!closed && info ? (
@@ -215,6 +223,27 @@ function Night({
             ) : (
               <button type="button" className="button" disabled={busy} onClick={() => setConfirm(`undo:${name}`)}>
                 Undo night
+              </button>
+            )
+          ) : null}
+          {ingested > 0 ? (
+            confirm === `copies:${name}` ? (
+              <span className={styles.confirmInline}>
+                Remove the {ingested} cop{ingested === 1 ? "y" : "ies"} in .Download of frames already in their session? Each is compared byte for byte
+                with the ingested frame first; anything that differs stays.{" "}
+                <button type="button" className={styles.link} onClick={() => act(() => post("/api/ingest/remove-copies", { night: name, confirm: true }), (r) => {
+                  const x = r as { removed: number; kept: { src: string; error: string }[] };
+                  return `Removed ${x.removed} cop${x.removed === 1 ? "y" : "ies"}.${x.kept.length ? ` ${x.kept.length} kept (not identical or not found): e.g. ${fileName(x.kept[0].src)}.` : ""}`;
+                })}>
+                  Yes, remove
+                </button>{" "}
+                <button type="button" className={styles.link} onClick={() => setConfirm(null)}>
+                  Keep
+                </button>
+              </span>
+            ) : (
+              <button type="button" className="button" disabled={busy} onClick={() => setConfirm(`copies:${name}`)}>
+                Remove {ingested} cop{ingested === 1 ? "y" : "ies"} already ingested…
               </button>
             )
           ) : null}
@@ -286,9 +315,12 @@ function Night({
           <ul className={styles.holds}>
             {[...byReason.entries()].map(([reason, hs]) => (
               <li key={reason}>
-                <StatusIcon level={reason === "newest" || reason === "settling" ? "ok" : "warn"} size={13} />
+                <StatusIcon level={reason === "newest" || reason === "settling" ? "ok" : reason === "ingested" ? "info" : "warn"} size={13} />
                 <span>
-                  <b>{hs.length}</b> · {hs[0].message}
+                  <b>{hs.length}</b> ·{" "}
+                  {reason === "ingested"
+                    ? "already ingested: a copy came back into .Download after the frame was moved (robocopy re-syncing the observatory PC). The frame is safe in its session."
+                    : hs[0].message}
                   {hs.length > 1 ? <span className={styles.hint}> (e.g. {fileName(hs[0].src)})</span> : <span className={styles.hint}> {fileName(hs[0].src)}</span>}
                 </span>
               </li>

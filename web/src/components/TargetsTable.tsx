@@ -68,7 +68,8 @@ export function TargetsTable({ rows }: { rows: TargetRow[] }) {
 
   return (
     <section>
-      <div className={styles.controls}>
+      {/* Password-manager extensions (Proton Pass) tag the search box's container before hydration. */}
+      <div className={styles.controls} suppressHydrationWarning>
         <label className={styles.search}>
           <Search size={14} strokeWidth={1.8} aria-hidden="true" />
           <input
