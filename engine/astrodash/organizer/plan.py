@@ -36,6 +36,8 @@ from ..layout import (
     SESSION_EXCLUDED_RE,
     SESSION_LEGACY_RE,
     YEAR_RE,
+    panel_folder,
+    parse_target_folder,
 )
 
 LEGACY_STAGE_RE = re.compile(r"^[1-7]\.\s")
@@ -149,6 +151,7 @@ class Planner:
         self.root = root
         self.tree = VirtualTree(root, target)
         self.plan = Plan(revision_id, target, title)
+        self.catalog_id = parse_target_folder(target).catalog_id
 
     # -------------------------------------------------------------- primitives
 
@@ -288,7 +291,7 @@ class Planner:
         tree = self.tree
         for child in tree.children(night):
             path = f"{night}/{child}"
-            if not tree.is_dir(path) or child.upper() in TYPE_FOLDERS or PANEL_RE.match(child) or child.casefold() in KEEP_AT_NIGHT:
+            if not tree.is_dir(path) or child.upper() in TYPE_FOLDERS or child.casefold() in KEEP_AT_NIGHT:
                 continue
             if child.casefold() == "flatwizard":
                 self.plan.lint.append({"code": "flatwizard", "level": "info", "text": f"{night.rsplit('/', 1)[1]}: FlatWizard\\FLAT → FLAT"})
@@ -296,10 +299,12 @@ class Planner:
                     self.merge(f"{path}/{sub}", f"{night}/{sub}", "FlatWizard\\FLAT → FLAT")
                 self.rmdir_empty(path, "FlatWizard emptied")
                 continue
-            m = LEGACY_PANEL_RE.search(child)
+            m = PANEL_RE.match(child) or LEGACY_PANEL_RE.search(child)
             if m:
-                self.plan.lint.append({"code": "panel", "level": "info", "text": f"{night.rsplit('/', 1)[1]}: {child} → PANEL_{m[1]}"})
-                self.merge(path, f"{night}/PANEL_{m[1]}", "mosaic panel folder named PANEL_<n>")
+                panel = panel_folder(self.catalog_id, m[1])
+                if child != panel:
+                    self.plan.lint.append({"code": "panel", "level": "info", "text": f"{night.rsplit('/', 1)[1]}: {child} → {panel}"})
+                    self.merge(path, f"{night}/{panel}", "mosaic panel folder named <ID>_Panel_<n>")
                 continue
             # A NINA object folder above LIGHT/FLAT: its contents move up to the night.
             if any(c.upper() in TYPE_FOLDERS for c in tree.children(path)):

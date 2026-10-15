@@ -3,11 +3,14 @@ import Link from "next/link";
 import { EngineNotice } from "@/components/EngineNotice";
 import { BestPick, DewWarning, NightDetails, NightTile, QualityBadge, dayLabel, nightHref } from "@/components/planning/Nights";
 import { PlanControls } from "@/components/planning/PlanControls";
+import { SkyEvents } from "@/components/planning/SkyEvents";
 import styles from "@/components/planning/overview.module.css";
 import { Tip } from "@/components/ui";
 import { isoDate } from "@/lib/planning/night";
 import { isGood, nextGoodNight } from "@/lib/planning/quality";
+import { relevantEvents } from "@/lib/telescopius";
 import { loadPlanningData, ratedNights } from "@/server/planning";
+import { loadSkyEvents } from "@/server/telescopius";
 import pageStyles from "../library/library.module.css";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +46,8 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
   }
   const { result, payload, nights } = rated;
   const site = result.site;
+  const skyEvents = await loadSkyEvents(site.id);
+  const events = relevantEvents(skyEvents?.events ?? []);
   const tonight = nights[0];
   const next = nextGoodNight(nights);
   const week = nights.slice(1, 8);
@@ -109,6 +114,14 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
           ))}
         </div>
       </section>
+
+      {skyEvents?.keySet && (events.length || skyEvents.error) ? (
+        <section style={{ marginTop: 36 }}>
+          <h2 className="section-title">Sky events · next 30 days</h2>
+          {events.length ? <SkyEvents events={events} siteId={site.id} /> : null}
+          {skyEvents.error ? <p className={styles.muted}>Telescopius: {skyEvents.error}</p> : null}
+        </section>
+      ) : null}
 
       <p className={styles.foot}>
         <Link href={`/planning/targets?site=${site.id}`}>All targets and new ideas →</Link>

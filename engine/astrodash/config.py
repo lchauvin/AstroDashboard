@@ -3,7 +3,7 @@
 Search order: $ASTRODASH_CONFIG, then astrodashboard.toml at the project root
 (one level above engine/). Every key has a default, so the file is optional.
 
-Secrets (ASTROSPHERIC_API_KEY, ASTROCONTROLLER_TOKEN) stay out of the toml:
+Secrets (ASTROSPHERIC_API_KEY, TELESCOPIUS_API_KEY, ASTROCONTROLLER_TOKEN) stay out of the toml:
 they come from the environment, or from a .env file at the project root.
 """
 

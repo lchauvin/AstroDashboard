@@ -16,7 +16,7 @@ export default async function OrganizerPage() {
           <div className="eyebrow">Library · canonical layout</div>
           <h1 className={styles.title}>Organizer</h1>
           <p className={styles.summary}>
-            Brings target folders to the canonical layout: no year level, NIGHT_ sessions, PANEL_ mosaics, FLAT under the
+            Brings target folders to the canonical layout: no year level, NIGHT_ sessions, M31_Panel_1-style mosaics, FLAT under the
             night. Every change is a plan you read and approve; moves only, nothing is deleted, and every plan can be undone.
           </p>
         </div>

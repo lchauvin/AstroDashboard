@@ -9,6 +9,7 @@ import { GoalsEditor } from "@/components/planning/GoalsEditor";
 import { HalphaButton } from "@/components/planning/HalphaButton";
 import { PlanControls } from "@/components/planning/PlanControls";
 import { SnrChart } from "@/components/planning/SnrChart";
+import { TelescopiusCard } from "@/components/TelescopiusCard";
 import styles from "@/components/planning/planning.module.css";
 import { Badge, FilterChip, Marks, Tip } from "@/components/ui";
 import { stageLabel } from "@/lib/format";
@@ -19,6 +20,7 @@ import { FILTER_NAMES, type FilterLetter } from "@/lib/planning/rig";
 import { nightSeries } from "@/lib/planning/series";
 import { optimalSubSeconds, readNoisePenalty } from "@/lib/snr";
 import { goalRowsFor, loadForecast, loadPlanningData, planOne, siteFor } from "@/server/planning";
+import { loadTelescopiusObject } from "@/server/telescopius";
 import tableStyles from "@/components/TargetsTable.module.css";
 import pageStyles from "../../../library/library.module.css";
 
@@ -54,6 +56,7 @@ export default async function TargetPlanPage({ params, searchParams }: { params:
   const one = planOne(data, key, sp.site, date, 365, forecast?.forecast);
   if (!one) notFound();
   const { site, result, plan: p, catalog } = one;
+  const telescopius = await loadTelescopiusObject(p.target?.catalogId ?? catalog?.name, p.target?.name ?? catalog?.commonName);
   const { rig, skies, tonight } = result;
   const cal = result.calibration;
   const series = nightSeries(site, tonight, p.ra, p.dec);
@@ -103,6 +106,12 @@ export default async function TargetPlanPage({ params, searchParams }: { params:
         </div>
         <PlanControls sites={data.context.sites} siteId={site.id} date={date} />
       </div>
+
+      {telescopius?.keySet ? (
+        <section className={styles.section}>
+          <TelescopiusCard payload={telescopius} />
+        </section>
+      ) : null}
 
       <section className={styles.section}>
         <div className={styles.sectionHead}>

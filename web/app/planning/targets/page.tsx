@@ -125,6 +125,31 @@ export default async function PlanningTargetsPage({ searchParams }: { searchPara
         <YourTargets plans={result.yours} q={q} start={date} />
       </section>
 
+      {data.lists.length || data.listsError ? (
+        <section className={styles.section}>
+          <div className={styles.sectionHead}>
+            <h2 className="section-title">From your Telescopius list{data.lists.length > 1 ? "s" : ""}</h2>
+            <p className={styles.sectionNote}>
+              {data.lists.map((l) => (
+                <span key={l.id}>
+                  {l.url ? (
+                    <a href={l.url} target="_blank" rel="noreferrer">
+                      {l.name}
+                    </a>
+                  ) : (
+                    l.name
+                  )}{" "}
+                  ({l.targets.length}){" "}
+                </span>
+              ))}
+              — ranked the same way, out-of-season ones included. Targets already in your library are left out.
+              {data.listsError ? ` Telescopius: ${data.listsError}` : ""}
+            </p>
+          </div>
+          <Ideas plans={result.ideas.filter((p) => p.listed)} q={q} empty="Every listed target is already in your library." />
+        </section>
+      ) : null}
+
       <section className={styles.section}>
         <div className={styles.sectionHead}>
           <h2 className="section-title">New ideas</h2>
@@ -134,7 +159,7 @@ export default async function PlanningTargetsPage({ searchParams }: { searchPara
             {data.halphaPending ? ` ${data.halphaPending} Hα survey values are still being fetched in the background.` : ""}
           </p>
         </div>
-        <Ideas plans={result.ideas.slice(0, 25)} q={q} />
+        <Ideas plans={result.ideas.filter((p) => !p.listed).slice(0, 25)} q={q} />
       </section>
 
       <p className={styles.foot}>
@@ -208,8 +233,8 @@ function YourTargets({ plans, q, start }: { plans: TargetPlan[]; q: string; star
   );
 }
 
-function Ideas({ plans, q }: { plans: TargetPlan[]; q: string }) {
-  if (!plans.length) return <p className="muted">Nothing suitable is up at this site in the next 90 nights.</p>;
+function Ideas({ plans, q, empty = "Nothing suitable is up at this site in the next 90 nights." }: { plans: TargetPlan[]; q: string; empty?: string }) {
+  if (!plans.length) return <p className="muted">{empty}</p>;
   return (
     <div className={tableStyles.scroller}>
       <table className="table">

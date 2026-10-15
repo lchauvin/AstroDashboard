@@ -6,12 +6,12 @@ panel, and whether it is excluded, rejected or quarantined.
 
 Canonical layout (PLAN.md §3.2):
 
-    <ID> (<Name>)[ R<n>]\\.SessionData\\NIGHT_<YYYY-MM-DD>\\[PANEL_<n>\\]LIGHT\\<F>\\
+    <ID> (<Name>)[ R<n>]\\.SessionData\\NIGHT_<YYYY-MM-DD>\\[<ID>_Panel_<n>\\]LIGHT\\<F>\\
     <ID> (<Name>)[ R<n>]\\.SessionData\\NIGHT_<YYYY-MM-DD>\\FLAT\\<F>\\
 
 Legacy shapes still parsed: a <YEAR> level under the target, session folders
 named `YYYY-MM-DD` / `SESSION_YYYY-MM-DD`, NINA object folders and
-`<Object> Panel <n>` folders above LIGHT, `FlatWizard\\FLAT`.
+`<Object> Panel <n>` and bare `PANEL_<n>` folders above LIGHT, `FlatWizard\\FLAT`.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from datetime import date
 TARGET_RE = re.compile(r"^(?P<id>.+?)\s*\((?P<name>[^()]*)\)(?:\s+R(?P<rev>\d+))?\s*$")
 REVISION_SUFFIX_RE = re.compile(r"^(?P<base>.+?)\s+R(?P<rev>\d+)$")
 YEAR_RE = re.compile(r"^\d{4}$")
-PANEL_RE = re.compile(r"^PANEL_(\d+)$", re.IGNORECASE)
+PANEL_RE = re.compile(r"^(?:.+_)?PANEL_(\d+)$", re.IGNORECASE)   # M31_Panel_2, legacy PANEL_2
 LEGACY_PANEL_RE = re.compile(r"\bPanel\s*(\d+)$", re.IGNORECASE)
 
 SESSION_CANONICAL_RE = re.compile(r"^NIGHT_(\d{4}-\d{2}-\d{2})$")
@@ -36,6 +36,11 @@ QUARANTINE_PREFIX = ".MispointedFrames_Quarantine"
 REJECTED_DIRS = {"_rejected", "rejected"}
 COPY_DIRS = {"accepted"}               # astro-eval writes copies of kept frames here
 IGNORED_SESSION_DIRS = {"snapshot"}
+
+
+def panel_folder(catalog_id: str, panel: str | int) -> str:
+    """Mosaic panel folder: "M 31", 2 → "M31_Panel_2"."""
+    return re.sub(r"[^\w-]+", "", catalog_id) + f"_Panel_{panel}"
 
 
 @dataclass(frozen=True)

@@ -6,11 +6,13 @@ import { Checklist } from "@/components/Checklist";
 import { EngineNotice } from "@/components/EngineNotice";
 import { FilterIntegration } from "@/components/FilterIntegration";
 import { SessionMatrix } from "@/components/SessionMatrix";
+import { TelescopiusCard } from "@/components/TelescopiusCard";
 import { Badge, Marks, StatTile } from "@/components/ui";
 import { GoalsEditor } from "@/components/planning/GoalsEditor";
 import { engineGet } from "@/lib/engine";
 import { isoDate } from "@/lib/planning/night";
 import { goalRowsFor, loadPlanningData, planOne } from "@/server/planning";
+import { loadTelescopiusObject } from "@/server/telescopius";
 import { hours, shortDate, stageLabel } from "@/lib/format";
 import type { Revision } from "@/lib/types";
 import styles from "./target.module.css";
@@ -41,7 +43,7 @@ export default async function TargetPage({ params }: { params: Promise<{ rev: st
   const analysed = t.analysedSeconds ?? 0;
   const accepted = t.acceptedSeconds ?? t.seconds;
   // Goals: the same model and editor as Planning, at the default site.
-  const planning = await loadPlanningData();
+  const [planning, telescopius] = await Promise.all([loadPlanningData(), loadTelescopiusObject(rev.catalogId, rev.name)]);
   const one = planning.ok ? planOne(planning.data, rev.id, null, isoDate(new Date()), 0) : null;
 
   return (
@@ -130,6 +132,13 @@ export default async function TargetPage({ params }: { params: Promise<{ rev: st
           <Checklist checks={rev.checks} />
         </section>
       </div>
+
+      {telescopius?.keySet ? (
+        <section className={styles.block}>
+          <h2 className="section-title">The object</h2>
+          <TelescopiusCard payload={telescopius} />
+        </section>
+      ) : null}
 
       {one && planning.ok ? (
         <section className={styles.block}>

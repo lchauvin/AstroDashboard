@@ -63,10 +63,10 @@ def test_apply_migrates_m31_without_losing_a_frame_and_undo_restores_it(data_roo
         after = files(data_root)
         assert sorted(after.values()) == sorted(before.values()) and len(after) == len(before)
         m = data_root / "M 31 (Andromeda Galaxy)"
-        assert (m / ".SessionData" / "NIGHT_2026-08-20" / "PANEL_1" / "LIGHT" / "L" / "l1.fits").is_file()
-        assert (m / ".SessionData" / "NIGHT_2026-08-20" / "PANEL_2" / "LIGHT" / "L" / "l2.fits").is_file()
+        assert (m / ".SessionData" / "NIGHT_2026-08-20" / "M31_Panel_1" / "LIGHT" / "L" / "l1.fits").is_file()
+        assert (m / ".SessionData" / "NIGHT_2026-08-20" / "M31_Panel_2" / "LIGHT" / "L" / "l2.fits").is_file()
         assert (m / ".SessionData" / "NIGHT_2026-08-20" / "FLAT" / "L" / "f.fits").is_file()
-        assert (m / ".MispointedFrames_Quarantine" / "NIGHT_2026-08-20" / "PANEL_1" / "LIGHT" / "L" / "q.fits").is_file()
+        assert (m / ".MispointedFrames_Quarantine" / "NIGHT_2026-08-20" / "M31_Panel_1" / "LIGHT" / "L" / "q.fits").is_file()
         assert not (m / "2026").exists()
         journal = (data_root / ".Dashboard" / "journal.jsonl").read_text(encoding="utf-8").splitlines()
         assert len(journal) == len(plan["ops"])
@@ -94,7 +94,7 @@ def test_stored_diagnostics_follow_the_frames(data_root, tmp_path):
         client.post(f"/api/organizer/plans/{plan['id']}/apply", json={"confirm": plan["id"]})
         stored = app.state.engine.cache.diagnostic("m-31-andromeda-galaxy", "NIGHT_2026-08-20")
         new = stored["result"]["lights"][0]["frames"][0]["path"]
-        assert new == "M 31 (Andromeda Galaxy)/.SessionData/NIGHT_2026-08-20/PANEL_1/LIGHT/L/l1.fits"
+        assert new == "M 31 (Andromeda Galaxy)/.SessionData/NIGHT_2026-08-20/M31_Panel_1/LIGHT/L/l1.fits"
         assert (data_root / new).is_file()
 
 
@@ -261,8 +261,8 @@ def test_pixinsight_projects_follow_the_moves_and_undo_restores_them(data_root, 
 
         text = (bundle / "project.xosm").read_text(encoding="utf-8")
         night = "M 31 (Andromeda Galaxy)/.SessionData/NIGHT_2026-08-20"
-        assert f"{root}/{night}/PANEL_1/LIGHT/L/l1.fits" in text
-        assert f"file:///{root}/{night}/PANEL_2/LIGHT/L/l2.fits".replace(" ", "%20") in text
+        assert f"{root}/{night}/M31_Panel_1/LIGHT/L/l1.fits" in text
+        assert f"file:///{root}/{night}/M31_Panel_2/LIGHT/L/l2.fits".replace(" ", "%20") in text
         assert f"{root}/{night}/FLAT/L/f.fits" in text            # E:/Photo/Astro → the data root, and flattened
         assert "F:/Astrophoto/MARS Database/MARS-DR1.xmars" in text and "C:/astro/ALIGNED/a.xisf" in text
         assert "/2026/" not in text and "E:/Photo" not in text
@@ -293,3 +293,16 @@ def test_project_saved_after_planning_is_not_touched(data_root, tmp_path):
         assert done["status"] == "partial" and "changed" in done["result"]["error"]
         assert (bundle / "project.xosm").read_bytes() == saved
         assert not (data_root / ".Dashboard" / "backups").exists()
+
+
+def test_bare_panel_folders_get_the_target_prefix(data_root, tmp_path):
+    app = client_for(data_root, tmp_path)
+    with TestClient(app) as client:
+        app.state.engine._run_scan()
+        r2 = next(r for r in client.get("/api/organizer").json()["revisions"] if r["folder"].endswith(" R2"))
+        assert "panel" in {l["code"] for l in r2["lint"]}
+        plan = client.post("/api/organizer/plans", json={"revisionId": r2["revisionId"]}).json()
+        done = client.post(f"/api/organizer/plans/{plan['id']}/apply", json={"confirm": plan["id"]}).json()
+        assert done["status"] == "applied", done["result"]
+        night = data_root / "M 31 (Andromeda Galaxy) R2" / ".SessionData" / "NIGHT_2027-09-01"
+        assert (night / "M31_Panel_1" / "LIGHT" / "L" / "a.fits").is_file() and not (night / "PANEL_1").exists()

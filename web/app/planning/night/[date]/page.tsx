@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { EngineNotice } from "@/components/EngineNotice";
 import { NightConditions } from "@/components/planning/NightConditions";
+import { SkyEvents } from "@/components/planning/SkyEvents";
 import { DewWarning, NightDetails, QualityBadge, dayLabel, nightHref } from "@/components/planning/Nights";
 import { localTime } from "@/components/planning/bits";
 import styles from "@/components/planning/overview.module.css";
@@ -10,7 +11,9 @@ import { FilterChip, Tip } from "@/components/ui";
 import { isoDate } from "@/lib/planning/night";
 import type { TargetPlan } from "@/lib/planning/plan";
 import { FILTER_NAMES } from "@/lib/planning/rig";
+import { eventNight, relevantEvents } from "@/lib/telescopius";
 import { loadPlanningData, ratedNights } from "@/server/planning";
+import { loadSkyEvents } from "@/server/telescopius";
 import pageStyles from "../../../library/library.module.css";
 
 export const dynamic = "force-dynamic";
@@ -49,6 +52,8 @@ export default async function NightPage({ params, searchParams }: { params: Prom
   const recs = result.yours.filter((p) => p.best && p.score > 0).slice(0, RECOMMENDED);
   const ideas = result.ideas.filter((p) => p.best).slice(0, IDEAS);
   const today = isoDate(new Date());
+  const skyEvents = await loadSkyEvents(site.id);
+  const events = relevantEvents(skyEvents?.events ?? []).filter((e) => eventNight(e) === date);
 
   return (
     <main className="page">
@@ -95,6 +100,13 @@ export default async function NightPage({ params, searchParams }: { params: Prom
         <h2 className="section-title">Conditions</h2>
         <NightConditions n={n} grid={result.tonight} />
       </section>
+
+      {events.length ? (
+        <section style={{ marginBottom: 32 }}>
+          <h2 className="section-title">Sky events</h2>
+          <SkyEvents events={events} siteId={site.id} showNight={false} />
+        </section>
+      ) : null}
 
       {q.level === "poor" ? null : (
         <section>

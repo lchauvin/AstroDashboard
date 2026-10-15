@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from astrodash.headers import parse_value, read_header
-from astrodash.layout import locate_in_session_tree, parse_session_folder, parse_target_folder
+from astrodash.layout import locate_in_session_tree, panel_folder, parse_session_folder, parse_target_folder
 
 from .conftest import write_fits
 
@@ -54,6 +54,9 @@ def test_locate_panels_and_rejections():
     assert (loc.panel, loc.type_hint, loc.filter_hint) == ("2", "LIGHT", "Ha")
     loc = locate_in_session_tree(["NIGHT_x", "PANEL_3", "LIGHT", "L", "f.fits"])
     assert loc.panel == "3"
+    loc = locate_in_session_tree(["NIGHT_x", "M31_Panel_4", "LIGHT", "L", "f.fits"])
+    assert loc.panel == "4"
+    assert panel_folder("M 31", 4) == "M31_Panel_4" and panel_folder("Sh2-101", "1") == "Sh2-101_Panel_1"
     loc = locate_in_session_tree(["NIGHT_x", "FlatWizard", "FLAT", "L", "f.fits"])
     assert (loc.panel, loc.type_hint, loc.filter_hint) == (None, "FLAT", "L")
     loc = locate_in_session_tree(["NIGHT_x", "Soul Nebula", "LIGHT", "S", "_REJECTED", "f.fits"])

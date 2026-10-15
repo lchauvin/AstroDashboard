@@ -10,6 +10,9 @@ import type { CatalogInfo } from "@/lib/planning/signal";
 import { defaultSite } from "@/lib/planning/sites";
 import type { HalphaMeasurement, PlanTarget, PlanningContext, SkyPayload } from "@/lib/planning/types";
 import { findCatalog, ideaCandidates } from "./catalog";
+import { loadTelescopiusLists } from "./telescopius";
+import { classifyType } from "@/lib/snr";
+import type { ListTarget, TargetList } from "@/lib/telescopius";
 import type { GoalRow } from "@/components/planning/GoalsEditor";
 import { snr2PerHour } from "@/lib/planning/evaluate";
 import { FILTER_NAMES } from "@/lib/planning/rig";
@@ -28,15 +31,47 @@ export type PlanningData = {
   halpha: Record<string, HalphaMeasurement | null>;
   halphaPending: number;
   catalogFor: (t: PlanTarget) => CatalogInfo | null;
+  /** Targets from your Telescopius lists, as catalog entries (the vendored catalog's when it knows them). */
+  listed: CatalogInfo[];
+  lists: TargetList[];
+  listsError: string | null;
 };
+
+/** A Telescopius list target as a catalog entry: ours when the vendored catalog knows it, else built from the list. */
+function listInfo(t: ListTarget): CatalogInfo {
+  return (
+    findCatalog(t.id, t.name) ?? {
+      name: t.id,
+      ra: t.ra,
+      dec: t.dec,
+      majAxArcmin: t.sizeArcmin,
+      minAxArcmin: null,
+      paDeg: t.paDeg,
+      type: "",
+      vmag: t.vmag,
+      surfBr: null,
+      commonName: t.name !== t.id ? t.name : null,
+      objectClass: classifyType("", t.id),
+    }
+  );
+}
+
+/** The idea pool: the catalog's candidates plus your listed targets (no duplicates). */
+function ideaPool(data: PlanningData): CatalogInfo[] {
+  const seen = new Set(ideaCandidates().map((i) => i.name.toLowerCase()));
+  return [...ideaCandidates(), ...data.listed.filter((i) => !seen.has(i.name.toLowerCase()))];
+}
+
+const listedNames = (data: PlanningData) => new Set(data.listed.map((i) => i.name.toLowerCase()));
 
 /** Survey values only help objects the ~1° beam can resolve; library targets are always looked up (for context). */
 const SURVEY_MIN_ARCMIN = 60;
 
 export async function loadPlanningData(): Promise<EngineResult<PlanningData>> {
-  const [ctx, sky] = await Promise.all([
+  const [ctx, sky, lists] = await Promise.all([
     engineGet<PlanningContext>("/api/planning/context"),
     engineGet<SkyPayload>("/api/planning/sky"),
+    loadTelescopiusLists(),
   ]);
   if (!ctx.ok) return ctx;
   const context = ctx.data;
@@ -50,7 +85,12 @@ export async function loadPlanningData(): Promise<EngineResult<PlanningData>> {
     const info = catalogFor(t);
     if (info) add(info);
   }
-  for (const i of ideaCandidates()) if ((i.majAxArcmin ?? 0) >= SURVEY_MIN_ARCMIN) add(i);
+  const listed = new Map<string, CatalogInfo>();
+  for (const l of lists?.lists ?? []) for (const t of l.targets) {
+    const info = listInfo(t);
+    listed.set(info.name.toLowerCase(), info);
+  }
+  for (const i of [...ideaCandidates(), ...listed.values()]) if ((i.majAxArcmin ?? 0) >= SURVEY_MIN_ARCMIN) add(i);
   const lookup = await engineSend<{ found: Record<string, HalphaMeasurement>; missing: number; queued: number }>(
     "/api/planning/halpha/lookup",
     { items: [...items.values()], prefetch: true },
@@ -64,6 +104,9 @@ export async function loadPlanningData(): Promise<EngineResult<PlanningData>> {
       halpha: lookup.ok ? lookup.data.found : {},
       halphaPending: lookup.ok ? lookup.data.missing : 0,
       catalogFor,
+      listed: [...listed.values()],
+      lists: lists?.lists ?? [],
+      listsError: lists?.error ?? null,
     },
   };
 }
@@ -87,7 +130,8 @@ export function planFor(
     rig: data.rig,
     targets: data.context.targets,
     catalogFor: data.catalogFor,
-    ideas: ideaCandidates(),
+    ideas: ideaPool(data),
+    listed: listedNames(data),
     halpha: data.halpha,
     calibration: data.calibration[site.id] ?? null,
     goalCapHours: data.context.settings.goalCapHours,
@@ -103,7 +147,8 @@ export function planOne(data: PlanningData, key: string, siteId: string | null |
   const site = siteFor(data, siteId);
   if (!site) return null;
   const target = data.context.targets.find((t) => t.id === key) ?? null;
-  const idea = !target && key.startsWith("idea:") ? findCatalog(key.slice(5)) : null;
+  const ideaName = key.startsWith("idea:") ? key.slice(5) : null;
+  const idea = !target && ideaName ? (findCatalog(ideaName) ?? data.listed.find((i) => i.name === ideaName) ?? null) : null;
   if (!target && !idea) return null;
   const result = plan({
     site,
@@ -112,6 +157,7 @@ export function planOne(data: PlanningData, key: string, siteId: string | null |
     targets: target ? [target] : [],
     catalogFor: data.catalogFor,
     ideas: idea ? [idea] : [],
+    listed: listedNames(data),
     halpha: data.halpha,
     calibration: data.calibration[site.id] ?? null,
     goalCapHours: data.context.settings.goalCapHours,

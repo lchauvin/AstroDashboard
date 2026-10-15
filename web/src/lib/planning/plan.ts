@@ -66,6 +66,8 @@ export type TargetPlan = {
   hoursToSnr30: number | null;
   /** Your sky rules' choice for tonight (skyrule.ts), when the forecast covers it; it sets `best`. */
   rule: RuleChoice | null;
+  /** On one of your Telescopius target lists (ideas only). */
+  listed?: boolean;
 };
 
 /**
@@ -154,6 +156,8 @@ export type PlanInput = {
   seasonDays?: number;
   /** Keep every idea (no "already covered" or "not up" filtering) and give it a season strip — for a detail page. */
   keepAllIdeas?: boolean;
+  /** Lower-cased names of ideas on your Telescopius lists: kept whatever their rank or season. */
+  listed?: Set<string>;
   /** Astrospheric's forecast cut to a night; nights it covers use your sky rules for the filter. */
   forecastFor?: (dusk: number | null, dawn: number | null) => NightForecast | null;
 };
@@ -296,16 +300,23 @@ export function plan(input: PlanInput): PlanResult {
     pointings.some((p) => angularSeparation(p.ra, p.dec, info.ra, info.dec) < Math.max(0.5, rig.fov.height / 2));
   const ideaPlans: TargetPlan[] = [];
   for (const info of input.ideas) {
+    // Targets you listed yourself are kept even out of season (they show 0 h), unless already in your library.
+    const listed = input.listed?.has(info.name.toLowerCase()) ?? false;
     if (!input.keepAllIdeas) {
       if (covered(info)) continue;
-      if (maxDarkAltitude(tonight, info.ra, info.dec) < site.minAlt + 5 && usableHours(coarse90[45] ?? tonight, site, info.ra, info.dec) <= 0) continue;
+      if (!listed && maxDarkAltitude(tonight, info.ra, info.dec) < site.minAlt + 5 && usableHours(coarse90[45] ?? tonight, site, info.ra, info.dec) <= 0) continue;
     }
     const p = build("idea", null, info, info.ra, info.dec);
-    if (p.hours90 <= 0 && !input.keepAllIdeas) continue;
+    p.listed = listed;
+    if (p.hours90 <= 0 && !input.keepAllIdeas && !listed) continue;
     if (input.keepAllIdeas && seasonDays > 0) p.season = grids(site, date, seasonDays, 20, false).map((g) => usableHours(g, site, p.ra, p.dec));
     ideaPlans.push(p);
   }
   ideaPlans.sort((a, b) => b.score - a.score || b.hours90 - a.hours90);
+  // The top new ideas, plus every listed target wherever it ranks.
+  const shownIdeas = [...ideaPlans.filter((p) => !p.listed).slice(0, 60), ...ideaPlans.filter((p) => p.listed)].sort(
+    (a, b) => b.score - a.score || b.hours90 - a.hours90,
+  );
 
   // Calendar: per night, the best of your targets and its filter.
   const calendar: CalendarNight[] = nights.map((g, i) => {
@@ -347,7 +358,7 @@ export function plan(input: PlanInput): PlanResult {
     skies,
     calibration: input.calibration,
     yours,
-    ideas: ideaPlans.slice(0, 60),
+    ideas: shownIdeas,
     calendar,
     computeMs: Date.now() - t0,
   };
