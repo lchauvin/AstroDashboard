@@ -41,7 +41,9 @@ function agoLabel(s: number): string {
 export function TimeChart({ t, series, seconds, unit, digits = 2, limit = "auto", minLimit = 1, excluded, events = [], height = 220, extra, ariaLabel }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(640);
-  const [hover, setHover] = useState<number | null>(null);
+  // Where the pointer is (seconds before now), not a sample index: the data refreshes under a still pointer,
+  // and an index kept from the last move could point past the end of the new arrays.
+  const [pointer, setPointer] = useState<number | null>(null);
 
   useEffect(() => {
     const el = box.current;
@@ -129,18 +131,23 @@ export function TimeChart({ t, series, seconds, unit, digits = 2, limit = "auto"
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const px = ((e.clientX - rect.left) / rect.width) * w;
-    const s = ((px - PAD.l) / iw) * seconds - seconds;
+    setPointer(((px - PAD.l) / iw) * seconds - seconds);
+  };
+
+  // The sample nearest the pointer, found again on every render.
+  const hover = useMemo(() => {
+    if (pointer === null) return null;
     let best: number | null = null;
     let bestD = Infinity;
     for (let i = 0; i < t.length; i++) {
-      const d = Math.abs(t[i] - s);
+      const d = Math.abs(t[i] - pointer);
       if (d < bestD) {
         bestD = d;
         best = i;
       }
     }
-    setHover(best !== null && bestD < Math.max(10, seconds / 40) ? best : null);
-  };
+    return best !== null && bestD < Math.max(10, seconds / 40) ? best : null;
+  }, [pointer, t, seconds]);
 
   const ticks = [-lim, -lim / 2, 0, lim / 2, lim];
   const xticks = seconds >= 600 ? [-seconds, -seconds * 0.75, -seconds / 2, -seconds / 4, 0] : [-seconds, -seconds / 2, 0];
@@ -149,7 +156,7 @@ export function TimeChart({ t, series, seconds, unit, digits = 2, limit = "auto"
 
   return (
     <div className={styles.chart} ref={box}>
-      <svg width={w} height={h} role="img" aria-label={ariaLabel} onPointerMove={onMove} onPointerLeave={() => setHover(null)}>
+      <svg width={w} height={h} role="img" aria-label={ariaLabel} onPointerMove={onMove} onPointerLeave={() => setPointer(null)}>
         <defs>
           <pattern id="hatch-ex" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
             <line x1="0" y1="0" x2="0" y2="6" className={styles.hatchLine} />

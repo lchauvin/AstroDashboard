@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import styles from "./charts.module.css";
 
 /** RA (x) against Dec (y) error, like PHD2's target view. Rings at the target RMS and twice it. */
 export function Scatter({ ra, dec, excluded, ring, size = 240 }: { ra: number[]; dec: number[]; excluded?: boolean[]; ring: number; size?: number }) {
-  const [hover, setHover] = useState<number | null>(null);
+  // The pointer in plot units, not a point index: the data refreshes under a still pointer.
+  const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
   const pts = ra.map((r, i) => ({ r, d: dec[i], i })).filter((p) => !excluded?.[p.i]);
   // Scale to the 95th percentile so one excursion does not shrink the cloud; outliers sit on the edge.
   const mags = pts.map((p) => Math.max(Math.abs(p.r), Math.abs(p.d))).sort((a, b) => a - b);
@@ -19,25 +20,28 @@ export function Scatter({ ra, dec, excluded, ring, size = 240 }: { ra: number[];
 
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const mx = ((e.clientX - rect.left) / rect.width) * size;
-    const my = ((e.clientY - rect.top) / rect.height) * size;
-    let best: number | null = null;
-    let bestD = 14 * 14;
-    pts.forEach((p, j) => {
-      const dx = c + clampV(p.r) * k - mx;
-      const dy = c - clampV(p.d) * k - my;
-      if (dx * dx + dy * dy < bestD) {
-        bestD = dx * dx + dy * dy;
-        best = j;
-      }
-    });
-    setHover(best);
+    setPointer({ x: ((e.clientX - rect.left) / rect.width) * size, y: ((e.clientY - rect.top) / rect.height) * size });
   };
 
-  const hp = hover !== null ? pts[hover] : null;
+  // The point nearest the pointer (within 14 units), found again on every render.
+  const hp = useMemo(() => {
+    if (!pointer) return null;
+    let best: (typeof pts)[number] | null = null;
+    let bestD = 14 * 14;
+    for (const p of pts) {
+      const dx = c + clampV(p.r) * k - pointer.x;
+      const dy = c - clampV(p.d) * k - pointer.y;
+      if (dx * dx + dy * dy < bestD) {
+        bestD = dx * dx + dy * dy;
+        best = p;
+      }
+    }
+    return best;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pointer, ra, dec, excluded, ring, size]);
   return (
     <div className={styles.chart} style={{ width: "100%", maxWidth: size }}>
-      <svg viewBox={`0 0 ${size} ${size}`} width="100%" role="img" aria-label="Guide error scatter, RA against Dec" onPointerMove={onMove} onPointerLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${size} ${size}`} width="100%" role="img" aria-label="Guide error scatter, RA against Dec" onPointerMove={onMove} onPointerLeave={() => setPointer(null)}>
         <line x1={c} x2={c} y1={8} y2={size - 8} className={styles.grid} />
         <line x1={8} x2={size - 8} y1={c} y2={c} className={styles.grid} />
         {[ring, ring * 2].map((r, i) => (
