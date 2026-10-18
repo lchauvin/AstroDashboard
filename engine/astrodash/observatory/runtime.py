@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -25,7 +26,7 @@ from . import equipment as eq
 from . import frames as fr
 from . import guard as gd
 from . import guiding, llm, polar
-from .nina import NinaError, NinaRest, NinaUnavailable, listen, parse_sequence, state_targets
+from .nina import NinaError, NinaRest, NinaUnavailable, listen, parse_sequence, same_filter, state_targets
 from .phd2 import Phd2Client, Phd2Disconnected, Phd2Error
 
 log = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ ADVISOR_TICK_S = 20.0
 GUARD_TICK_S = 5.0
 LOST_KEEP_S = 1800.0
 PHD2_ERRORS = (Phd2Error, Phd2Disconnected, asyncio.TimeoutError)
+CAMERA_BUSY = re.compile(r"expos|in progress|busy", re.IGNORECASE)
 
 
 def _log_failure(task: asyncio.Task) -> None:
@@ -80,6 +82,10 @@ class Observatory:
         self.advisor_check: dict | None = None  # last periodic decision (no model call), for the UI
         self._wake_frames = asyncio.Event()
         self._wake_history = asyncio.Event()
+        self._sky_task: asyncio.Task | None = None
+        self._sky_busy = False  # a test frame (or the filter change before it) is under way: no resume meanwhile
+        self._sky_restore: dict | None = None  # the filter the sequence was using, while the test frames use another
+        self._guard_lock = asyncio.Lock()  # the guard loop and the sky check both tick: one resume, filter first
 
     # ------------------------------------------------------------------ config
 
@@ -535,11 +541,21 @@ class Observatory:
                 log.exception("sequence guard tick failed")
 
     async def guard_tick(self) -> None:
+        async with self._guard_lock:
+            await self._guard_tick()
+
+    async def _guard_tick(self) -> None:
         g, now = self.guard, time.time()
         guiding = bool(self.phd2 and self.phd2.connected and self.phd2.state.app_state == "Guiding")
         s = self.guard_settings()
         action = g.decide(now, s, self.sequence_running(), guiding)
-        if not action or not self.nina:
+        probing = self._sky_task is not None and not self._sky_task.done()
+        if g.paused_at is None:
+            if probing and self._sky_task is not asyncio.current_task():
+                self._sky_task.cancel()  # started by you, the guard turned off, or given up
+        elif g.sky_wanted(s) and not probing and self.nina:
+            self._sky_task = asyncio.create_task(self._sky_check(), name="obs-sky-check")
+        if not action or not self.nina or (action == "start" and self._sky_busy):
             return
         try:
             if action == "stop":
@@ -548,8 +564,9 @@ class Observatory:
                 self.dist.events.append((now, "sequence stopped (guide star lost)"))
                 log.warning("sequence guard: guide star lost, sequence stopped")
             else:
+                await self._restore_filter()
                 await self.nina.sequence_start(skip_validation=True)
-                g.started(now, now - (g.steady_since or now))
+                g.started(now, now - (g.steady_since or now), g.sky_counts(s) if g.sky_wanted(s) else None)
                 self.dist.events.append((now, "sequence resumed"))
                 log.warning("sequence guard: guiding steady again, sequence resumed")
         except NinaError as exc:
@@ -560,6 +577,87 @@ class Observatory:
         except NinaUnavailable as exc:
             g.error = f"Could not {action} the sequence: NINA is not answering ({exc})"
         self._wake_history.set()  # re-read NINA's state now rather than at the next poll
+
+    async def _sky_check(self) -> None:
+        """While the guard holds the sequence stopped: test frames NINA does not save, for its star count.
+
+        A guard tick follows each frame, the only moment a resume may happen (never mid-exposure).
+        Any failure ends the check with `sky_error`; the guard then resumes on guiding alone.
+        """
+        g = self.guard
+        try:
+            while self.sequence_running() is not False:  # NINA's stop takes a moment to show in the polled state
+                await asyncio.sleep(2)
+            self._sky_busy = True
+            await self._sky_filter(self.guard_settings())
+            while g.paused_at is not None and g.sky_wanted(s := self.guard_settings()):
+                stats = await self._sky_frame(float(s["skyExposureS"]))
+                stars, hfr = stats.get("Stars"), stats.get("HFR")
+                if not isinstance(stars, (int, float)) or isinstance(stars, bool):
+                    raise NinaError("NINA gave no star count for the test frame (is star detection on in its imaging options?)")
+                g.sky_add(time.time(), int(stars), round(float(hfr), 2) if isinstance(hfr, (int, float)) and hfr > 0 else None)
+                self._sky_busy = False
+                await self.guard_tick()
+                self._sky_busy = True
+        except asyncio.CancelledError:
+            raise
+        except (NinaError, NinaUnavailable) as exc:
+            g.sky_error = str(exc)
+            log.warning("sequence guard: sky check stopped: %s", exc)
+        except Exception as exc:  # noqa: BLE001 — the guard must keep working on guiding alone
+            g.sky_error = f"{type(exc).__name__}: {exc}"
+            log.exception("sequence guard: sky check failed")
+        finally:
+            self._sky_busy = False
+            if self._sky_restore and self.sequence_running() is not True:  # given up or turned off: the sequence's filter back
+                with contextlib.suppress(Exception):
+                    await asyncio.shield(self._restore_filter())
+
+    async def _sky_filter(self, s: dict) -> None:
+        """Put the sky-check filter in, remembering the sequence's. No wheel, or no such filter: the current one."""
+        assert self.nina is not None
+        fw = await self.nina.filterwheel()
+        if fw is None:
+            self.guard.sky_filter = None
+            return
+        current = fw.get("SelectedFilter") or {}
+        slots = [f for f in fw.get("AvailableFilters") or [] if isinstance(f, dict)]
+        wanted = next((f for f in slots if same_filter(f.get("Name"), s["skyFilter"])), None)
+        if wanted is None or wanted.get("Id") is None or wanted.get("Id") == current.get("Id"):
+            self.guard.sky_filter = current.get("Name")
+            if wanted is None:
+                log.info("sequence guard: no %r filter on the wheel, test frames through %s", s["skyFilter"], current.get("Name"))
+            return
+        self._sky_restore = {"Id": current["Id"], "Name": current.get("Name")} if current.get("Id") is not None else None
+        await self.nina.change_filter(int(wanted["Id"]))
+        self.guard.sky_filter = wanted.get("Name")
+
+    async def _restore_filter(self) -> None:
+        prev, self._sky_restore = self._sky_restore, None
+        if prev and self.nina:
+            try:
+                await self.nina.change_filter(int(prev["Id"]))
+            except (NinaError, NinaUnavailable) as exc:
+                self.guard.note(f"Could not put the {prev.get('Name')} filter back: {exc}")
+
+    async def _sky_frame(self, seconds: float) -> dict:
+        """One test frame and its statistics; waits out a camera still busy with the interrupted exposure."""
+        assert self.nina is not None
+        for _ in range(24):
+            try:
+                answer = await self.nina.capture(seconds)
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
+                    await asyncio.shield(self.nina.abort_exposure())
+                raise
+            except NinaError as exc:
+                if not CAMERA_BUSY.search(str(exc)):
+                    raise
+            else:
+                if not (isinstance(answer, str) and CAMERA_BUSY.search(answer)):
+                    return await self.nina.capture_statistics()
+            await asyncio.sleep(5)
+        raise NinaError("the camera stayed busy for 2 minutes")
 
     # ------------------------------------------------------------------ snapshot
 

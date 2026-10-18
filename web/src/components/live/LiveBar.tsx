@@ -73,10 +73,14 @@ function GuardRow({ g, now }: { g: GuardState; now: number }) {
   };
   let body: React.ReactNode = null;
   if (g.state === "paused" && g.pausedAt) {
+    const sky = g.sky?.active ? g.sky : null;
     body = (
       <>
-        <StatusIcon level="warn" size={13} /> Sequence stopped at {clock(g.pausedAt)}: guide star lost. It resumes after {g.resumeAfterS} s of steady guiding
-        {g.steadyForS !== null ? ` (steady for ${g.steadyForS} s)` : " (PHD2 has not found the star yet)"}; gives up at {clock(g.giveUpAt)}.{" "}
+        <span title={pausedDetail(g)}>
+          <StatusIcon level="warn" size={13} /> Sequence stopped at {clock(g.pausedAt)}: guide star lost.{" "}
+          {sky ? `Valid resuming frames: ${sky.valid}/${g.skySamples}` : `Steady guiding: ${Math.min(g.steadyForS ?? 0, g.resumeAfterS)}/${g.resumeAfterS} s`}
+          {g.sky?.error ? " (sky check off)" : ""}
+        </span>{" "}
         <button type="button" className={styles.link} onClick={() => void cancel()}>
           Don&apos;t resume
         </button>
@@ -106,6 +110,22 @@ function GuardRow({ g, now }: { g: GuardState; now: number }) {
       ) : null}
     </div>
   );
+}
+
+/** The whole resume rule and where it stands, for the paused line's tooltip. */
+function pausedDetail(g: GuardState): string {
+  const steady = g.steadyForS !== null ? `steady for ${g.steadyForS} s` : "PHD2 has not found the star yet";
+  const parts = [`Resumes after ${g.resumeAfterS} s of steady guiding (${steady})`];
+  if (g.sky?.active) {
+    const counts = g.sky.samples.slice(-6).map((x) => x.stars);
+    parts.push(
+      `and ${g.skySamples} test frames (${g.sky.filter ?? "current filter"}, ${g.skyExposureS} s) above ${g.skyMinStars} stars, within 20% of each other` +
+        (counts.length ? `: ${counts.join(" → ")} so far` : ": taking the first"),
+    );
+  } else if (g.sky?.error) {
+    parts.push(`(sky check stopped: ${g.sky.error}; resuming on guiding alone)`);
+  }
+  return `${parts.join(" ")}. Gives up at ${clock(g.giveUpAt)}.`;
 }
 
 function Conn({ ok, name, detail, where }: { ok: boolean; name: string; detail: string; where: string | null }) {

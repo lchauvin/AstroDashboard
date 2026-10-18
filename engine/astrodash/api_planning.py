@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from . import astrospheric, halpha, planning
 from .observatory.llm import EFFORTS, LlmError, split_model
-from .observatory.guard import LIMITS as GUARD_LIMITS
+from .observatory.guard import FLAGS as GUARD_FLAGS, LIMITS as GUARD_LIMITS, TEXTS as GUARD_TEXTS
 from .observatory.runtime import DEFAULTS as OBS_DEFAULTS
 
 log = logging.getLogger(__name__)
@@ -293,8 +293,13 @@ def register(app: FastAPI, state) -> None:
     def _check_guard(g: Any) -> dict[str, Any]:
         if not isinstance(g, dict) or set(g) - set(DEFAULT_SETTINGS["guard"]):
             raise HTTPException(422, detail="guard: unknown fields")
-        if "enabled" in g and not isinstance(g["enabled"], bool):
-            raise HTTPException(422, detail="guard.enabled must be true or false")
+        for key in GUARD_FLAGS:
+            if key in g and not isinstance(g[key], bool):
+                raise HTTPException(422, detail=f"guard.{key} must be true or false")
+        g = {k: v.strip() if isinstance(v, str) else v for k, v in g.items()}
+        for key in GUARD_TEXTS:
+            if key in g and not (isinstance(g[key], str) and 0 < len(g[key]) <= 40):
+                raise HTTPException(422, detail=f"guard.{key} must be a filter name")
         for key, (lo, hi) in GUARD_LIMITS.items():
             if key in g and not (isinstance(g[key], (int, float)) and not isinstance(g[key], bool) and lo <= g[key] <= hi):
                 raise HTTPException(422, detail=f"guard.{key} must be {lo}–{hi}")

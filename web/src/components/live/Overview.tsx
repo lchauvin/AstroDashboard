@@ -185,7 +185,7 @@ function GuardToggle({ g, refresh }: { g: NonNullable<LiveState["guard"]>; refre
         </label>
       </Tip>
       <span className={styles.hint}>
-        stop at {g.stopLostPct}% lost over {g.stopAfterS} s · resume after {g.resumeAfterS} s steady · <Link href="/settings?tab=live">timings</Link>
+        stop at {g.stopLostPct}% lost over {g.stopAfterS} s · resume after {g.resumeAfterS} s steady{g.skyCheck ? ` and ${g.skySamples} clear test frames` : ""} · <Link href="/settings?tab=live">timings</Link>
       </span>
       {error ? <span className={styles.error}>{error}</span> : null}
     </div>

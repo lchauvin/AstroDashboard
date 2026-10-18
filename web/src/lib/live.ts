@@ -1,5 +1,6 @@
 /** Live payloads: the engine's own NINA + PHD2 connection (PLAN §5.3), and auto-ingest. */
 
+import type { GuardSettings } from "./planning/types";
 import type { Level } from "./types";
 export type { Level };
 
@@ -62,12 +63,7 @@ export type GuideGraph = {
 };
 
 /** The sequence guard (engine `guard.py`): stops the NINA sequence while the guide star is lost most of the time, resumes it after steady guiding. */
-export type GuardState = {
-  enabled: boolean;
-  stopAfterS: number;
-  stopLostPct: number;
-  resumeAfterS: number;
-  maxWaitMin: number;
+export type GuardState = GuardSettings & {
   state: "off" | "watching" | "lost" | "paused";
   error: string | null;
   pausedAt: number | null;
@@ -76,6 +72,8 @@ export type GuardState = {
   lostPct: number;
   steadyForS: number | null;
   giveUpAt: number | null;
+  /** The sky check of the current pause (null when not paused). */
+  sky: { active: boolean; filter: string | null; error: string | null; clear: boolean; valid: number; samples: { t: number; stars: number; hfr: number | null }[] } | null;
   log: { t: number; message: string }[];
 };
 

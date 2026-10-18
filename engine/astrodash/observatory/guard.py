@@ -15,6 +15,12 @@ sends GuidingStopped instead, which resets the guard rather than tripping it.
   pre-sequence checklist ("… Continue anyway?"): asked, that dialog would wait for a click on the
   observatory PC (and hold the API call open meanwhile). NINA picks up at the first unfinished
   instruction; the exposure that was interrupted is taken again.
+* sky check (`skyCheck`, on by default): while the sequence is stopped the runtime takes test frames NINA
+  does not save (`skyExposureS` with `skyFilter`, an Imaging-panel snapshot with Save off) and reads NINA's
+  star count. The resume then also waits for the sky: the last `skySamples` counts at least `skyMinStars`
+  and within `SKY_TOLERANCE` of each other, a plateau rather than a rise. PHD2 can hold its one bright star
+  through haze that ruins the subs. Should the check fail (no camera, NINA gives no star count) the guard
+  falls back to guiding alone and says so. The filter the sequence used is put back before the resume.
 * give up: after `maxWaitMin` without steady guiding the guard forgets the pause; the sequence stays stopped.
 
 Starting the sequence yourself in the meantime, or turning the guard off, cancels the pending resume.
@@ -28,8 +34,14 @@ from __future__ import annotations
 import time
 from typing import Any
 
-DEFAULTS: dict[str, Any] = {"enabled": False, "stopAfterS": 60, "stopLostPct": 75, "resumeAfterS": 60, "maxWaitMin": 120}
-LIMITS = {"stopAfterS": (15, 1800), "stopLostPct": (50, 100), "resumeAfterS": (15, 1800), "maxWaitMin": (5, 720)}
+DEFAULTS: dict[str, Any] = {"enabled": False, "stopAfterS": 60, "stopLostPct": 75, "resumeAfterS": 60, "maxWaitMin": 120,
+                            "skyCheck": True, "skyFilter": "L", "skyExposureS": 60, "skyMinStars": 50, "skySamples": 3}
+LIMITS = {"stopAfterS": (15, 1800), "stopLostPct": (50, 100), "resumeAfterS": (15, 1800), "maxWaitMin": (5, 720),
+          "skyExposureS": (5, 600), "skyMinStars": (1, 10000), "skySamples": (2, 10)}
+FLAGS = ("enabled", "skyCheck")
+TEXTS = ("skyFilter",)
+
+SKY_TOLERANCE = 0.20  # the last test frames' star counts within 20 % of the largest: the sky has stopped clearing
 
 STOP_GRACE_S = 30.0  # after a stop, NINA's polled state can still say "running" for a few seconds
 FORGET_AFTER_S = 12 * 3600  # a pause saved before an engine restart is not resumed the next evening
@@ -48,6 +60,9 @@ class SequenceGuard:
         self.marks: list[tuple[float, bool]] = []  # (t, lost) at each switch between losing and guiding, oldest first
         self.steady_since: float | None = None  # first guide step after the last star loss
         self.error: str | None = None
+        self.sky: list[dict] = []  # this pause's test frames: {"t", "stars", "hfr"}
+        self.sky_filter: str | None = None  # what they are taken with
+        self.sky_error: str | None = None  # why the sky check gave up; the resume then rests on guiding alone
 
     def save(self) -> None:
         self.store.set_json("sequence_guard", {"pausedAt": self.paused_at, "log": self.log[-50:]})
@@ -99,19 +114,45 @@ class SequenceGuard:
             self.forget("The sequence was started outside the guard; nothing to resume.", now)
         elif now - self.paused_at > s["maxWaitMin"] * 60:
             self.forget(f"Guiding did not come back within {s['maxWaitMin']} min: gave up, the sequence stays stopped.", now)
-        elif running is False and guiding and self.steady_since and now - self.steady_since >= s["resumeAfterS"]:
+        elif running is False and guiding and self.steady_since and now - self.steady_since >= s["resumeAfterS"]                 and (not self.sky_wanted(s) or self.sky_clear(s)):
             return "start"
         return None
+
+    def sky_wanted(self, s: dict) -> bool:
+        return bool(s["skyCheck"]) and self.sky_error is None
+
+    def sky_add(self, now: float, stars: int, hfr: float | None) -> None:
+        self.sky = [*self.sky[-29:], {"t": now, "stars": stars, "hfr": hfr}]
+
+    def sky_counts(self, s: dict) -> list[int]:
+        return [x["stars"] for x in self.sky[-int(s["skySamples"]):]]
+
+    def sky_valid(self, s: dict) -> int:
+        """How many of the latest test frames (up to `skySamples`) all show enough stars, and about as many as each other."""
+        valid = 0
+        for k in range(1, min(int(s["skySamples"]), len(self.sky)) + 1):
+            last = [x["stars"] for x in self.sky[-k:]]
+            if min(last) < s["skyMinStars"] or min(last) < max(last) * (1 - SKY_TOLERANCE):
+                break
+            valid = k
+        return valid
+
+    def sky_clear(self, s: dict) -> bool:
+        return self.sky_valid(s) == s["skySamples"]
 
     def stopped(self, now: float, lost_s: float, window_s: float) -> None:
         self.paused_at = now
         self.error = None
+        self.sky, self.sky_filter, self.sky_error = [], None, None
         self.note(f"Guide star lost {lost_s:.0f} s of the last {window_s:.0f} s: stopped the sequence.", now)
 
-    def started(self, now: float, steady_for: float) -> None:
+    def started(self, now: float, steady_for: float, stars: list[int] | None = None) -> None:
         self.paused_at = None
         self.error = None
-        self.note(f"Guiding steady for {steady_for:.0f} s: resumed the sequence.", now)
+        why = f"guiding steady for {steady_for:.0f} s"
+        if stars:
+            why = f"sky clear again ({' → '.join(map(str, stars))} stars), {why}"
+        self.note(f"{why[0].upper()}{why[1:]}: resumed the sequence.", now)
 
     def forget(self, message: str, now: float | None = None) -> None:
         self.paused_at = None
@@ -133,5 +174,7 @@ class SequenceGuard:
             "lostS": round(lost), "lostPct": round(100 * lost / s["stopAfterS"]),
             "steadyForS": round(now - self.steady_since) if self.steady_since else None,
             "giveUpAt": self.paused_at + s["maxWaitMin"] * 60 if self.paused_at else None,
+            "sky": {"active": self.sky_wanted(s), "filter": self.sky_filter, "error": self.sky_error,
+                    "clear": self.sky_clear(s), "valid": self.sky_valid(s), "samples": self.sky[-10:]} if self.paused_at is not None else None,
             "log": list(reversed(self.log[-10:])),
         }

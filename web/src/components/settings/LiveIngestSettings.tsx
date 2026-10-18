@@ -154,10 +154,49 @@ export function LiveIngestSettings({ observatory, advisor, guard, conn, ingest }
           <span>Give up after (min)</span>
           <input className={styles.input} type="number" min={5} max={720} step={5} value={grd.maxWaitMin} onChange={(e) => setGrd({ ...grd, maxWaitMin: Number(e.target.value) })} />
         </label>
-        <button type="button" className="button button-primary" onClick={() => run(() => send("/api/settings", "PUT", { guard: { stopAfterS: grd.stopAfterS, stopLostPct: grd.stopLostPct, resumeAfterS: grd.resumeAfterS, maxWaitMin: grd.maxWaitMin } }), "Saved.")}>
+      </div>
+      <div className={styles.rowActions} style={{ marginTop: 10 }}>
+        <label className={styles.switch}>
+          <input type="checkbox" checked={grd.skyCheck} onChange={(e) => setGrd({ ...grd, skyCheck: e.target.checked })} />
+          Check the sky before resuming
+        </label>
+        <label className={styles.field} style={{ width: 90 }}>
+          <span>Filter</span>
+          <input className={styles.input} value={grd.skyFilter} disabled={!grd.skyCheck} onChange={(e) => setGrd({ ...grd, skyFilter: e.target.value })} />
+        </label>
+        <label className={styles.field} style={{ width: 120 }}>
+          <span>Exposure (s)</span>
+          <input className={styles.input} type="number" min={5} max={600} step={5} value={grd.skyExposureS} disabled={!grd.skyCheck} onChange={(e) => setGrd({ ...grd, skyExposureS: Number(e.target.value) })} />
+        </label>
+        <label className={styles.field} style={{ width: 120 }}>
+          <span>Min. stars</span>
+          <input className={styles.input} type="number" min={1} max={10000} step={10} value={grd.skyMinStars} disabled={!grd.skyCheck} onChange={(e) => setGrd({ ...grd, skyMinStars: Number(e.target.value) })} />
+        </label>
+        <label className={styles.field} style={{ width: 110 }}>
+          <span>Frames</span>
+          <input className={styles.input} type="number" min={2} max={10} step={1} value={grd.skySamples} disabled={!grd.skyCheck} onChange={(e) => setGrd({ ...grd, skySamples: Number(e.target.value) })} />
+        </label>
+        <button
+          type="button"
+          className="button button-primary"
+          onClick={() =>
+            run(() => {
+              const { enabled: _enabled, ...timings } = grd;
+              return send("/api/settings", "PUT", { guard: { ...timings, skyFilter: grd.skyFilter.trim() || "L" } });
+            }, "Saved.")
+          }
+        >
           Save
         </button>
       </div>
+      <p className={styles.hint}>
+        Sky check: while the sequence is stopped, the dashboard takes test frames through <b>Filter</b> that NINA does not save (like the
+        Imaging panel with Save off) and reads NINA&apos;s star count. The sequence resumes only once the last <b>Frames</b> counts are all
+        above <b>Min. stars</b> and within 20% of each other, so the sky has stopped clearing; PHD2 can hold its one bright star through haze
+        that would ruin the subs. The sequence&apos;s filter is put back before it resumes. NINA must count stars on captures (HFR / star
+        detection on in its imaging options); without a count the guard says so and resumes on guiding alone. Pick <b>Min. stars</b> from a
+        clear test frame of your field.
+      </p>
       <p className={styles.hint}>
         Give up: if guiding has not been steady again within this time, the sequence stays stopped. Starting the sequence yourself meanwhile
         cancels the resume. Turn it on or off on <Link href="/live">Live › Overview</Link> (Sequence card, off by default{guard.enabled ? "; on now" : ""});
