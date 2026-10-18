@@ -16,7 +16,9 @@ const DEC = "var(--filter-H)";
 const RANGES = [120, 300, 600, 1800];
 const SCALES: (number | "auto")[] = ["auto", 1, 2, 4];
 
-type Act = (fn: () => Promise<unknown>, ok?: string) => Promise<void>;
+/** `where`: the card whose message this is ("page" shows it between the charts and the cards). */
+type Act = (fn: () => Promise<unknown>, ok?: string, where?: "page" | "advisor") => Promise<void>;
+type Notice = { msg: string | null; error: string | null };
 
 export function Guiding({ initial }: { initial: LiveState | null }) {
   const [range, setRange] = useState(300);
@@ -26,11 +28,13 @@ export function Guiding({ initial }: { initial: LiveState | null }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [where, setWhere] = useState<"page" | "advisor">("page");
 
-  const act: Act = async (fn, ok) => {
+  const act: Act = async (fn, ok, at = "page") => {
     setBusy(true);
     setError(null);
     setMsg(null);
+    setWhere(at);
     try {
       await fn();
       if (ok) setMsg(ok);
@@ -154,12 +158,12 @@ export function Guiding({ initial }: { initial: LiveState | null }) {
         </div>
       </div>
 
-      {msg ? <p className={styles.ok}>{msg}</p> : null}
-      {error ? <p className={styles.error}>{error}</p> : null}
+      {where === "page" && msg ? <p className={styles.ok}>{msg}</p> : null}
+      {where === "page" && error ? <p className={styles.error}>{error}</p> : null}
 
       <div className={styles.twoCol}>
         <DiagnosisCard s={s} adv={adv} />
-        <AdvisorCard s={s} act={act} busy={busy} adv={adv} />
+        <AdvisorCard s={s} act={act} busy={busy} adv={adv} notice={where === "advisor" ? { msg, error } : null} />
       </div>
 
       {s.polar ? <PolarCard pol={s.polar} adv={adv} serverTime={s.serverTime} /> : null}
@@ -326,9 +330,11 @@ function DiagnosisCard({ s, adv }: { s: LiveState; adv: boolean }) {
   );
 }
 
-function AdvisorCard({ s, act, busy, adv }: { s: LiveState; act: Act; busy: boolean; adv: boolean }) {
+function AdvisorCard({ s, act: pageAct, busy, adv, notice }: { s: LiveState; act: Act; busy: boolean; adv: boolean; notice: Notice | null }) {
   const a = s.advisor;
   const latest = a.analyses[0];
+  // Everything done from this card (switches, Analyze now, Apply, Dismiss) reports inside it.
+  const act: Act = (fn, ok) => pageAct(fn, ok, "advisor");
   const toggle = (enabled: boolean) => act(() => enginePost("/api/settings", { advisor: { enabled } }, "PUT"), enabled ? "AI advisor on." : "AI advisor off.");
   const toggleAuto = (autoApply: boolean) =>
     act(() => enginePost("/api/settings", { advisor: { autoApply } }, "PUT"), autoApply ? "Auto-apply on: the top suggestion is applied and measured." : "Auto-apply off: suggestions wait for you.");
@@ -352,6 +358,8 @@ function AdvisorCard({ s, act, busy, adv }: { s: LiveState; act: Act; busy: bool
           </label>
         </span>
       </div>
+      {notice?.msg ? <p className={styles.ok}>{notice.msg}</p> : null}
+      {notice?.error ? <p className={styles.error}>{notice.error}</p> : null}
       {!a.enabled ? (
         <p className={styles.hint}>
           When on, every {a.intervalMin} min of steady guiding the AI reads the guiding error, the diagnosis, the conditions and your current

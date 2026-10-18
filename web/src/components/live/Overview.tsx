@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Bot, Lightbulb } from "lucide-react";
 
 import { clock, duration, enginePost, filterLetterOf, fmt, type DeviceCard, type Frame, type IngestStatus, type LiveState, type SeqStep } from "@/lib/live";
 import { FilterChip, Marks, StatusIcon, Tip } from "../ui";
@@ -218,9 +219,12 @@ function GuidingMini({ s }: { s: LiveState }) {
       <Marks />
       <div className={styles.cardHead}>
         <span className="eyebrow">Guiding</span>
-        <Link href="/live/guiding" className={styles.more}>
-          Details →
-        </Link>
+        <span className={styles.headRight}>
+          <AdvisorBadges a={s.advisor} />
+          <Link href="/live/guiding" className={styles.more}>
+            Details →
+          </Link>
+        </span>
       </div>
       {!p.connected ? (
         <p className={styles.hint}>PHD2 not connected ({p.address}).</p>
@@ -263,6 +267,32 @@ function GuidingMini({ s }: { s: LiveState }) {
         </>
       )}
     </section>
+  );
+}
+
+/** The AI advisor at a glance: suggestions waiting for you (auto-apply off), or that auto-apply handles them. */
+function AdvisorBadges({ a }: { a: LiveState["advisor"] }) {
+  if (!a.enabled) return null;
+  if (a.autoApply)
+    return (
+      <Tip tip="AI auto-apply is on: the advisor's top suggestion is applied and measured by itself, and a change that measures worse is put back. Nothing to review.">
+        <span className={styles.advisorBadge}>
+          <Bot size={15} strokeWidth={1.8} color="var(--color-accent)" aria-hidden="true" />
+          <span className="sr-only">AI auto-apply on</span>
+        </span>
+      </Tip>
+    );
+  const open = a.analyses[0]?.suggestions.filter((sg) => sg.status === "open").length ?? 0;
+  if (!open) return null;
+  const what = open === 1 ? "a change" : `${open} changes`;
+  return (
+    <Tip tip={`The AI advisor suggests ${what}: review ${open === 1 ? "it" : "them"} on the Guiding page.`}>
+      <Link href="/live/guiding" className={`${styles.advisorBadge} ${styles.advisorBadgeOpen}`}>
+        <Lightbulb size={15} strokeWidth={1.8} aria-hidden="true" />
+        <span className="num">{open}</span>
+        <span className="sr-only">AI suggestion{open === 1 ? "" : "s"} to review</span>
+      </Link>
+    </Tip>
   );
 }
 

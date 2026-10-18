@@ -67,6 +67,28 @@
   color: var(--color-accent-700);
 }
 
+.headRight {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.advisorBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font: 500 11px/1 var(--font-mono);
+}
+
+.advisorBadgeOpen {
+  color: var(--status-warn);
+  text-decoration: none;
+}
+
+.advisorBadgeOpen:hover {
+  text-decoration: underline;
+}
+
 .guardToggle {
   display: flex;
   flex-wrap: wrap;
