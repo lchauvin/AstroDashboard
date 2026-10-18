@@ -47,14 +47,18 @@ const moonEmoji = (phase: number) => MOONS[Math.round((((phase % 360) + 360) % 3
 /** The nights this setting notifies about: Excellent / Good, and clear-but-moonlit ones unless turned off. */
 export const worthIt = (level: QualityLevel, moonlit: boolean) => level === "excellent" || level === "good" || (moonlit && level === "moonlit");
 
-/** The full night summary: clear window, model agreement, moon, seeing/transparency, dew, best target. */
+/**
+ * The full night summary: clear window, model agreement, moon, seeing/transparency, dew, best target.
+ * Every line starts with an emoji: a collapsed phone notification joins the lines into one, where the
+ * emoji still separate them; expanded, they read as a list.
+ */
 export function nightMessage({ night, quality: q, forecast: f }: RatedNight, siteName: string, link: string | null): Message {
   const lines: string[] = [];
-  if (f?.longestRun) lines.push(`Clear ${clock(f.longestRun.start)} → ${clock(f.longestRun.end)} (${h(f.longestClear)} in a row) · ${siteName}`);
-  else lines.push(`${q.summary} · ${siteName}`);
+  if (f?.longestRun) lines.push(`🌌 Clear ${clock(f.longestRun.start)} → ${clock(f.longestRun.end)} (${h(f.longestClear)} in a row) · ${siteName}`);
+  else lines.push(`🌌 ${q.summary} · ${siteName}`);
   if (q.agreement != null) {
     const runs = [f?.models.gfs ? `GFS ${h(f.models.gfs.longestClear)}` : null, f?.models.icon ? `ICON ${h(f.models.icon.longestClear)}` : null].filter(Boolean).join(", ");
-    lines.push(`Models agree ${Math.round(q.agreement * 100)} %${runs ? ` (${runs})` : ""}`);
+    lines.push(`📊 Models agree ${Math.round(q.agreement * 100)} %${runs ? ` (${runs})` : ""}`);
   }
   const moonShare = night.darkHours ? night.moonFreeHours / night.darkHours : 0;
   const dark = `${h(night.darkHours)} dark`;
@@ -68,10 +72,10 @@ export function nightMessage({ night, quality: q, forecast: f }: RatedNight, sit
     f?.transparency != null ? `Transparency ${Math.round(f.transparency)}${f.transparency > 20 ? " (hazy)" : ""}` : null,
     f?.meanCloud != null ? `Cloud ${Math.round(f.meanCloud)} %` : null,
   ].filter(Boolean);
-  if (sky.length) lines.push(sky.join(" · "));
+  if (sky.length) lines.push(`✨ ${sky.join(" · ")}`);
   if (f?.smoke != null && f.smoke > 0) lines.push("🔥 Wildfire smoke in the forecast");
   if (q.dewFrom != null) lines.push(`💧 Dew risk from ${clock(q.dewFrom)}`);
-  if (night.best) lines.push(`Best target: ${night.best.title} · ${FILTER_NAMES[night.best.letter] ?? night.best.letter} · ${h(night.best.hours)}`);
+  if (night.best) lines.push(`🎯 Best target: ${night.best.title} · ${FILTER_NAMES[night.best.letter] ?? night.best.letter} · ${h(night.best.hours)}`);
   return {
     title: `Tonight: ${q.label}${q.weatherKnown ? ` · ${h(q.hours)} clear` : ""}`,
     message: lines.join("\n"),
@@ -138,7 +142,7 @@ export async function checkTonight(mode: "check" | "test" | "preview"): Promise<
   } else if (!good && prev?.sent) {
     message = {
       title: `Update · Tonight: ${label}`,
-      message: `No longer worth setting up: ${tonight.quality.summary} (was ${prev.label}).\n${full.message}`,
+      message: `⚠️ No longer worth setting up: ${tonight.quality.summary} (was ${prev.label}).\n${full.message}`,
       priority: 3,
       tags: ["cloud"],
       ...(link ? { click: link } : {}),
