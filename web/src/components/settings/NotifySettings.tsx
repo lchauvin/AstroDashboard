@@ -48,7 +48,7 @@ export function NotifySettings({ saved }: { saved: Settings }) {
         <b>ntfy</b> app (Android, iOS), tap <b>+</b> and subscribe to the topic below. No account is needed, but anyone who knows the topic can
         read it, so keep it hard to guess. A later check sends an update only if the verdict changes, including when tonight stops being worth it.
       </p>
-      <div className={styles.rowActions} style={{ marginTop: 10 }}>
+      <div className={styles.rowFields} style={{ marginTop: 10 }}>
         <label className={styles.field} style={{ minWidth: 280 }}>
           <span>Topic</span>
           <input className={styles.input} value={s.ntfyTopic} onChange={(e) => setS({ ...s, ntfyTopic: e.target.value })} placeholder="astrodash-…" />
@@ -61,16 +61,16 @@ export function NotifySettings({ saved }: { saved: Settings }) {
           <input className={styles.input} value={s.ntfyServer} onChange={(e) => setS({ ...s, ntfyServer: e.target.value })} />
         </label>
       </div>
-      <div className={styles.rowActions} style={{ marginTop: 10 }}>
+      <div className={styles.rowFields} style={{ marginTop: 10 }}>
         <label className={styles.field} style={{ minWidth: 280 }}>
           <span>Dashboard link (optional)</span>
           <input className={styles.input} value={s.dashboardUrl} onChange={(e) => setS({ ...s, dashboardUrl: e.target.value })} placeholder="http://192.168.2.10:3006" />
         </label>
-        <label className={styles.check}>
+        <label className={styles.switch}>
           <input type="checkbox" checked={s.moonlit} onChange={(e) => setS({ ...s, moonlit: e.target.checked })} />
           Also clear but moonlit nights
         </label>
-        <label className={styles.check}>
+        <label className={styles.switch}>
           <input type="checkbox" checked={s.enabled} onChange={(e) => setS({ ...s, enabled: e.target.checked })} />
           On
         </label>
