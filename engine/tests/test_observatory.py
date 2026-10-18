@@ -460,10 +460,11 @@ def test_guard_stops_on_a_lost_star_and_resumes_after_steady_guiding():
     g.on_phd2_event("GuideStep", 0)
     for t in range(1, 60):
         g.on_phd2_event("StarLost", t)
-    assert g.decide(59, s, running=True, guiding=True) is None  # 58 s lost
-    assert g.decide(61, s, running=True, guiding=True) == "stop"
-    assert g.decide(61, {**s, "enabled": False}, running=True, guiding=True) is None  # off by default
-    g.stopped(61, 60)
+    assert g.decide(45, s, running=True, guiding=True) is None  # 44 s of the last 60 lost
+    assert g.decide(46, s, running=True, guiding=True) == "stop"  # 45 s: 75 %
+    assert g.decide(46, {**s, "enabled": False}, running=True, guiding=True) is None  # off by default
+    g.stopped(61, 60, 60)
+    assert "lost 60 s of the last 60 s" in g.log[-1]["message"]
     assert g.decide(70, s, running=True, guiding=True) is None  # NINA's state not re-read yet: no false "started by you"
     g.on_phd2_event("GuideStep", 100)
     g.on_phd2_event("StarLost", 130)  # a passing cloud: the steady minute starts again
@@ -472,6 +473,30 @@ def test_guard_stops_on_a_lost_star_and_resumes_after_steady_guiding():
     assert g.decide(201, s, running=False, guiding=True) == "start"
     g.started(201, 61)
     assert g.paused_at is None and "resumed" in g.log[-1]["message"]
+
+
+def test_guard_stops_under_broken_cloud_when_the_star_keeps_coming_back():
+    from astrodash.observatory.guard import DEFAULTS, SequenceGuard
+
+    s = {**DEFAULTS, "enabled": True}
+    g = SequenceGuard(_Store())
+    t = 0.0
+    while t < 120:  # 8 s lost, 2 s guided, over and over: never a minute without a guide step
+        for dt in range(0, 8, 2):
+            g.on_phd2_event("StarLost", t + dt)
+        g.on_phd2_event("GuideStep", t + 8)
+        t += 10
+    assert g.lost_seconds(120, 60) == 48
+    assert g.as_dict(120, s)["lostPct"] == 80 and g.as_dict(120, s)["state"] == "lost"
+    assert g.decide(120, s, running=True, guiding=True) == "stop"
+    assert g.decide(120, {**s, "stopLostPct": 90}, running=True, guiding=True) is None
+
+    g = SequenceGuard(_Store())
+    g.on_phd2_event("GuideStep", 0)
+    for t in range(0, 300, 10):  # a 3 s blip every 10 s: 30 %
+        g.on_phd2_event("StarLost", t + 5)
+        g.on_phd2_event("GuideStep", t + 8)
+    assert g.decide(300, s, running=True, guiding=True) is None
 
 
 def test_guard_ignores_deliberate_stops_and_steps_aside():
@@ -484,15 +509,15 @@ def test_guard_ignores_deliberate_stops_and_steps_aside():
     assert g.decide(300, s, running=True, guiding=False) is None
 
     g.on_phd2_event("StarLost", 300)
-    g.stopped(400, 100)
+    g.stopped(400, 60, 60)
     assert g.decide(500, s, running=True, guiding=True) is None  # you started it yourself
     assert g.paused_at is None and "outside the guard" in g.log[-1]["message"]
 
-    g.stopped(600, 100)
+    g.stopped(600, 60, 60)
     assert g.decide(600 + 121 * 60, s, running=False, guiding=False) is None  # no guiding for 2 h: give up
     assert g.paused_at is None and "gave up" in g.log[-1]["message"]
 
-    g.stopped(10_000, 100)
+    g.stopped(10_000, 60, 60)
     assert g.decide(10_010, {**s, "enabled": False}, running=False, guiding=True) is None
     assert g.paused_at is None and "turned off" in g.log[-1]["message"]
 

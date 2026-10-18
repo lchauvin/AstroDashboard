@@ -82,10 +82,10 @@ function GuardRow({ g, now }: { g: GuardState; now: number }) {
         </button>
       </>
     );
-  } else if (g.state === "lost" && g.lostForS !== null) {
+  } else if (g.state === "lost") {
     body = (
       <>
-        <StatusIcon level="warn" size={13} /> Guide star lost for {g.lostForS} s: the sequence stops at {g.stopAfterS} s unless guiding comes back.
+        <StatusIcon level="warn" size={13} /> Guide star lost {g.lostS} s of the last {g.stopAfterS} s ({g.lostPct}%): the sequence stops at {g.stopLostPct}%.
       </>
     );
   } else if (last && now - last.t < 900) {

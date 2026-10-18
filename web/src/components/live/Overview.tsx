@@ -178,14 +178,14 @@ function GuardToggle({ g, refresh }: { g: NonNullable<LiveState["guard"]>; refre
   };
   return (
     <div className={styles.guardToggle}>
-      <Tip tip="Stops the NINA sequence when the guide star has been lost (clouds) for a while, and starts it again once PHD2 has guided steadily. NINA's pre-sequence checklist is skipped on resume. A meridian flip, autofocus or centering never counts.">
+      <Tip tip="Stops the NINA sequence when the guide star has been lost (clouds) most of the time for a while, even if PHD2 keeps finding it again between clouds, and starts it again once PHD2 has guided steadily. NINA's pre-sequence checklist is skipped on resume. A meridian flip, autofocus or centering never counts.">
         <label className={styles.switch}>
           <input type="checkbox" checked={g.enabled} disabled={busy} onChange={(e) => void toggle(e.target.checked)} />
           <span>Pause when guiding is lost</span>
         </label>
       </Tip>
       <span className={styles.hint}>
-        stop after {g.stopAfterS} s lost · resume after {g.resumeAfterS} s steady · <Link href="/settings?tab=live">timings</Link>
+        stop at {g.stopLostPct}% lost over {g.stopAfterS} s · resume after {g.resumeAfterS} s steady · <Link href="/settings?tab=live">timings</Link>
       </span>
       {error ? <span className={styles.error}>{error}</span> : null}
     </div>

@@ -88,7 +88,7 @@ export type DashSettings = {
 export type NotifySettings = { enabled: boolean; ntfyServer: string; ntfyTopic: string; moonlit: boolean; dashboardUrl: string };
 
 export type ObservatorySettings = { ninaHost: string; ninaPort: number; phd2Host: string; phd2Instance: number };
-export type GuardSettings = { enabled: boolean; stopAfterS: number; resumeAfterS: number; maxWaitMin: number };
+export type GuardSettings = { enabled: boolean; stopAfterS: number; stopLostPct: number; resumeAfterS: number; maxWaitMin: number };
 export type ReasoningEffort = "none" | "low" | "medium" | "high";
 export type AdvisorSettings = { enabled: boolean; model: string; ollamaUrl: string; intervalMin: number; targetRms: number; effort: ReasoningEffort; autoApply: boolean };
 

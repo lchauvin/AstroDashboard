@@ -6,7 +6,10 @@ Only a *lost star* counts. While PHD2 searches for its star it sends StarLost on
 GuideStep again once it has it back. A deliberate stop — a meridian flip, autofocus, centering, you —
 sends GuidingStopped instead, which resets the guard rather than tripping it.
 
-* stop: the sequence is running and the star has been lost, without a single guide step, for `stopAfterS`.
+* stop: the sequence is running and the star has been lost for at least `stopLostPct` of the last `stopAfterS`
+  (75 % of a minute by default). A share rather than an unbroken loss: under broken cloud PHD2 picks the star
+  up for a few frames between two losses, and the subs are ruined all the same. Lost time runs from a StarLost
+  to the next GuideStep; time before guiding started counts as not lost.
 * resume: the guard stopped the sequence, it is still stopped, and PHD2 has guided for `resumeAfterS`
   without losing the star. The Advanced API starts it with `skipValidation`, which skips NINA's
   pre-sequence checklist ("… Continue anyway?"): asked, that dialog would wait for a click on the
@@ -25,8 +28,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-DEFAULTS: dict[str, Any] = {"enabled": False, "stopAfterS": 60, "resumeAfterS": 60, "maxWaitMin": 120}
-LIMITS = {"stopAfterS": (15, 1800), "resumeAfterS": (15, 1800), "maxWaitMin": (5, 720)}
+DEFAULTS: dict[str, Any] = {"enabled": False, "stopAfterS": 60, "stopLostPct": 75, "resumeAfterS": 60, "maxWaitMin": 120}
+LIMITS = {"stopAfterS": (15, 1800), "stopLostPct": (50, 100), "resumeAfterS": (15, 1800), "maxWaitMin": (5, 720)}
 
 STOP_GRACE_S = 30.0  # after a stop, NINA's polled state can still say "running" for a few seconds
 FORGET_AFTER_S = 12 * 3600  # a pause saved before an engine restart is not resumed the next evening
@@ -42,7 +45,7 @@ class SequenceGuard:
         if self.paused_at and time.time() - self.paused_at > FORGET_AFTER_S:
             self.paused_at = None
         self.log: list[dict] = saved.get("log", [])[-50:]
-        self.lost_since: float | None = None  # first StarLost after the last guide step
+        self.marks: list[tuple[float, bool]] = []  # (t, lost) at each switch between losing and guiding, oldest first
         self.steady_since: float | None = None  # first guide step after the last star loss
         self.error: str | None = None
 
@@ -55,22 +58,39 @@ class SequenceGuard:
 
     def on_phd2_event(self, ev: str | None, now: float) -> None:
         if ev == "GuideStep":
-            self.lost_since = None
+            self._mark(now, False)
             self.steady_since = self.steady_since or now
         elif ev == "StarLost":
-            self.lost_since = self.lost_since or now
+            self._mark(now, True)
             self.steady_since = None
         elif ev in ("GuidingStopped", "Paused", "StartCalibration"):
             self.reset_signals()
 
     def reset_signals(self) -> None:
         """Guiding was stopped on purpose, or PHD2 went away: neither a loss nor a steady run."""
-        self.lost_since = self.steady_since = None
+        self.marks = []
+        self.steady_since = None
+
+    def _mark(self, now: float, lost: bool) -> None:
+        if not self.marks or self.marks[-1][1] != lost:
+            self.marks.append((now, lost))
+        while len(self.marks) > 1 and self.marks[1][0] <= now - LIMITS["stopAfterS"][1]:
+            self.marks.pop(0)  # the longest window no longer reaches it
+
+    def lost_seconds(self, now: float, window: float) -> float:
+        """How long the star has been lost within the last `window` seconds."""
+        start, lost = now - window, 0.0
+        for i, (t, is_lost) in enumerate(self.marks):
+            end = self.marks[i + 1][0] if i + 1 < len(self.marks) else now
+            if is_lost:
+                lost += max(0.0, end - max(t, start))
+        return lost
 
     def decide(self, now: float, s: dict, running: bool | None, guiding: bool) -> str | None:
         """"stop", "start" or None. `running`: NINA's sequence (None when unknown); `guiding`: PHD2 is guiding."""
         if self.paused_at is None:
-            if s["enabled"] and running is True and self.lost_since and now - self.lost_since >= s["stopAfterS"]:
+            window = s["stopAfterS"]
+            if s["enabled"] and running is True and self.lost_seconds(now, window) >= window * s["stopLostPct"] / 100:
                 return "stop"
             return None
         if not s["enabled"]:
@@ -83,10 +103,10 @@ class SequenceGuard:
             return "start"
         return None
 
-    def stopped(self, now: float, lost_for: float) -> None:
+    def stopped(self, now: float, lost_s: float, window_s: float) -> None:
         self.paused_at = now
         self.error = None
-        self.note(f"Guide star lost for {lost_for:.0f} s: stopped the sequence.", now)
+        self.note(f"Guide star lost {lost_s:.0f} s of the last {window_s:.0f} s: stopped the sequence.", now)
 
     def started(self, now: float, steady_for: float) -> None:
         self.paused_at = None
@@ -98,18 +118,19 @@ class SequenceGuard:
         self.note(message, now)
 
     def as_dict(self, now: float, s: dict) -> dict:
+        lost = self.lost_seconds(now, s["stopAfterS"])
         if not s["enabled"]:
             state = "off"
         elif self.paused_at is not None:
             state = "paused"
-        elif self.lost_since:
+        elif lost > 0:
             state = "lost"
         else:
             state = "watching"
         return {
             **{k: s[k] for k in DEFAULTS}, "state": state, "error": self.error,
             "pausedAt": self.paused_at,
-            "lostForS": round(now - self.lost_since) if self.lost_since else None,
+            "lostS": round(lost), "lostPct": round(100 * lost / s["stopAfterS"]),
             "steadyForS": round(now - self.steady_since) if self.steady_since else None,
             "giveUpAt": self.paused_at + s["maxWaitMin"] * 60 if self.paused_at else None,
             "log": list(reversed(self.log[-10:])),

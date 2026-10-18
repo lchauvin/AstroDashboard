@@ -129,7 +129,8 @@ export function LiveIngestSettings({ observatory, advisor, guard, conn, ingest }
 
       <h3 className="eyebrow" style={{ marginTop: 28 }}>Pause the sequence when guiding is lost</h3>
       <p className={styles.hint} style={{ marginTop: 6 }}>
-        When the guide star has been lost (clouds, a tree) for longer than <b>Stop after</b>, the dashboard stops the NINA sequence; once PHD2 has
+        When the guide star has been lost (clouds, a tree) for at least <b>Stop at</b> of the last <b>Over</b> seconds, the dashboard stops the
+        NINA sequence; the star does not have to stay lost, so broken cloud that PHD2 keeps losing and finding again counts too. Once PHD2 has
         guided for <b>Resume after</b> without losing it, it starts the sequence again. NINA picks up at the first unfinished instruction and
         retakes the interrupted exposure. Its pre-sequence checklist (“… continue anyway?”, e.g. with the flat panel unplugged) is skipped on
         resume, so it cannot hold up the night. A deliberate guiding stop (meridian flip, autofocus, centering) never counts. PHD2 has to find
@@ -138,7 +139,11 @@ export function LiveIngestSettings({ observatory, advisor, guard, conn, ingest }
       </p>
       <div className={styles.rowActions} style={{ marginTop: 10 }}>
         <label className={styles.field} style={{ width: 130 }}>
-          <span>Stop after (s)</span>
+          <span>Stop at (% lost)</span>
+          <input className={styles.input} type="number" min={50} max={100} step={5} value={grd.stopLostPct} onChange={(e) => setGrd({ ...grd, stopLostPct: Number(e.target.value) })} />
+        </label>
+        <label className={styles.field} style={{ width: 130 }}>
+          <span>Over (s)</span>
           <input className={styles.input} type="number" min={15} max={1800} step={15} value={grd.stopAfterS} onChange={(e) => setGrd({ ...grd, stopAfterS: Number(e.target.value) })} />
         </label>
         <label className={styles.field} style={{ width: 140 }}>
@@ -149,7 +154,7 @@ export function LiveIngestSettings({ observatory, advisor, guard, conn, ingest }
           <span>Give up after (min)</span>
           <input className={styles.input} type="number" min={5} max={720} step={5} value={grd.maxWaitMin} onChange={(e) => setGrd({ ...grd, maxWaitMin: Number(e.target.value) })} />
         </label>
-        <button type="button" className="button button-primary" onClick={() => run(() => send("/api/settings", "PUT", { guard: { stopAfterS: grd.stopAfterS, resumeAfterS: grd.resumeAfterS, maxWaitMin: grd.maxWaitMin } }), "Saved.")}>
+        <button type="button" className="button button-primary" onClick={() => run(() => send("/api/settings", "PUT", { guard: { stopAfterS: grd.stopAfterS, stopLostPct: grd.stopLostPct, resumeAfterS: grd.resumeAfterS, maxWaitMin: grd.maxWaitMin } }), "Saved.")}>
           Save
         </button>
       </div>

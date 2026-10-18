@@ -537,13 +537,14 @@ class Observatory:
     async def guard_tick(self) -> None:
         g, now = self.guard, time.time()
         guiding = bool(self.phd2 and self.phd2.connected and self.phd2.state.app_state == "Guiding")
-        action = g.decide(now, self.guard_settings(), self.sequence_running(), guiding)
+        s = self.guard_settings()
+        action = g.decide(now, s, self.sequence_running(), guiding)
         if not action or not self.nina:
             return
         try:
             if action == "stop":
                 await self.nina.sequence_stop()
-                g.stopped(now, now - (g.lost_since or now))
+                g.stopped(now, g.lost_seconds(now, s["stopAfterS"]), s["stopAfterS"])
                 self.dist.events.append((now, "sequence stopped (guide star lost)"))
                 log.warning("sequence guard: guide star lost, sequence stopped")
             else:
