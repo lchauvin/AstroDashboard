@@ -49,6 +49,10 @@ export function NotifySettings({ saved }: { saved: Settings }) {
         read it, so keep it hard to guess. A later check sends an update only if the verdict changes, including when tonight stops being worth it.
       </p>
       <div className={styles.rowFields} style={{ marginTop: 10 }}>
+        <label className={styles.field} style={{ minWidth: 200 }}>
+          <span>ntfy server</span>
+          <input className={styles.input} value={s.ntfyServer} onChange={(e) => setS({ ...s, ntfyServer: e.target.value })} />
+        </label>
         <label className={styles.field} style={{ minWidth: 280 }}>
           <span>Topic</span>
           <input className={styles.input} value={s.ntfyTopic} onChange={(e) => setS({ ...s, ntfyTopic: e.target.value })} placeholder="astrodash-…" />
@@ -56,10 +60,6 @@ export function NotifySettings({ saved }: { saved: Settings }) {
         <button type="button" className="button" onClick={() => setS({ ...s, ntfyTopic: randomTopic() })}>
           Generate
         </button>
-        <label className={styles.field} style={{ minWidth: 200 }}>
-          <span>ntfy server</span>
-          <input className={styles.input} value={s.ntfyServer} onChange={(e) => setS({ ...s, ntfyServer: e.target.value })} />
-        </label>
       </div>
       <div className={styles.rowFields} style={{ marginTop: 10 }}>
         <label className={styles.field} style={{ minWidth: 280 }}>
