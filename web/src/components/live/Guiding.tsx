@@ -147,22 +147,26 @@ export function Guiding({ initial }: { initial: LiveState | null }) {
             </>
           ) : null}
         </section>
-        <div className={styles.sideCol}>
-          <GuideStar connected={p.connected} />
-          <section className={`framed ${styles.card}`}>
-            <Marks />
-            <span className="eyebrow">Scatter · last {range / 60} min</span>
-            <Scatter ra={g.graph.ra} dec={g.graph.dec} excluded={g.graph.excluded} ring={target / Math.SQRT2} />
-            <p className={styles.hint}>Dashed ring: the per-axis target ({axisT.toFixed(2)}″). A round cloud is seeing; a stretched one points at an axis.</p>
-          </section>
-        </div>
+        <GuideStar connected={p.connected} />
       </div>
 
       {where === "page" && msg ? <p className={styles.ok}>{msg}</p> : null}
       {where === "page" && error ? <p className={styles.error}>{error}</p> : null}
 
       <div className={styles.twoCol}>
-        <DiagnosisCard s={s} adv={adv} />
+        <div className={styles.sideCol}>
+          <DiagnosisCard s={s} adv={adv} />
+          <section className={`framed ${styles.card} ${styles.grow}`}>
+            <Marks />
+            <span className="eyebrow">Scatter · last {range / 60} min</span>
+            <div className={styles.scatterRow}>
+              <div className={styles.scatterPlot}>
+                <Scatter ra={g.graph.ra} dec={g.graph.dec} excluded={g.graph.excluded} ring={target / Math.SQRT2} size={220} />
+              </div>
+              <p className={styles.hint}>Dashed ring: the per-axis target ({axisT.toFixed(2)}″). A round cloud is seeing; a stretched one points at an axis.</p>
+            </div>
+          </section>
+        </div>
         <AdvisorCard s={s} act={act} busy={busy} adv={adv} notice={where === "advisor" ? { msg, error } : null} />
       </div>
 
