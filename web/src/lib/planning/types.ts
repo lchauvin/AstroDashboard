@@ -82,7 +82,8 @@ export type DashSettings = {
 };
 
 export type ObservatorySettings = { ninaHost: string; ninaPort: number; phd2Host: string; phd2Instance: number };
-export type AdvisorSettings = { enabled: boolean; model: string; ollamaUrl: string; intervalMin: number; targetRms: number };
+export type ReasoningEffort = "none" | "low" | "medium" | "high";
+export type AdvisorSettings = { enabled: boolean; model: string; ollamaUrl: string; intervalMin: number; targetRms: number; effort: ReasoningEffort; autoApply: boolean };
 
 export type PlanningContext = {
   targets: PlanTarget[];

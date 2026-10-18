@@ -5,7 +5,7 @@ Tasks (each restarts with backoff when its connection drops):
 * ``phd2``      guide steps, state, RPC
 * ``nina_ws``   websocket events; every (re)connect re-reads REST state
 * ``nina_poll`` equipment + sequence every few seconds (NINA has no per-step event), image history
-* ``advisor``   measures applied changes; asks the model when enabled and worth it
+* ``advisor``   measures applied changes; closes polar-alignment windows; asks the model when enabled and worth it
 * ``frames``    notices the newest file in .Download (cheap: a directory walk, no reads)
 
 Everything runs on the engine's event loop. Reads from HTTP handlers only touch plain dicts.
@@ -23,7 +23,7 @@ from typing import Any, Callable
 from . import advisor as adv
 from . import equipment as eq
 from . import frames as fr
-from . import guiding, llm
+from . import guiding, llm, polar
 from .nina import NinaError, NinaRest, NinaUnavailable, listen, parse_sequence, state_targets
 from .phd2 import Phd2Client, Phd2Disconnected, Phd2Error
 
@@ -32,13 +32,19 @@ log = logging.getLogger(__name__)
 DEFAULTS = {
     "observatory": {"ninaHost": "127.0.0.1", "ninaPort": 1888, "phd2Host": "127.0.0.1", "phd2Instance": 1},
     "advisor": {"enabled": False, "model": "ollama/llama3.1:8b", "ollamaUrl": "http://localhost:11434",
-                "intervalMin": 10, "targetRms": 0.8},
+                "intervalMin": 10, "targetRms": 0.8, "effort": "none", "autoApply": False},
 }
 
 POLL_S = 4.0
 HISTORY_S = 30.0
 ADVISOR_TICK_S = 20.0
 LOST_KEEP_S = 1800.0
+PHD2_ERRORS = (Phd2Error, Phd2Disconnected, asyncio.TimeoutError)
+
+
+def _log_failure(task: asyncio.Task) -> None:
+    if not task.cancelled() and task.exception():
+        log.error("analysis failed", exc_info=task.exception())
 
 
 class Observatory:
@@ -51,6 +57,8 @@ class Observatory:
         self.buffer = guiding.GuideBuffer()
         self.dist = guiding.Disturbances()
         self.advisor = adv.Advisor(store)
+        self._analysis_task: asyncio.Task | None = None
+        self.polar = polar.PolarTracker(store)
         self.phd2: Phd2Client | None = None
         self.nina: NinaRest | None = None
         self.tasks: list[asyncio.Task] = []
@@ -368,10 +376,21 @@ class Observatory:
                     ctx_weather[label] = f"{weather[key]:.1f}{unit}"
         changes, _ = self.advisor.tonight()
         return {"stats": st, "diagnosis": diag, "phd2": self._phd2_dict(), "mount": ctx_mount, "weather": ctx_weather,
-                "targetRms": float(self.adv_settings()["targetRms"]),
+                "targetRms": float(self.adv_settings()["targetRms"]), "polar": self.polar.summary(),
                 "changes": [c for c in changes if c["axis"] in ("ra", "dec")]}
 
     async def analyze(self, manual: bool) -> dict:
+        return await self._ask(manual, *self._claim())
+
+    def start_analysis(self) -> None:
+        """"Analyze now": check and claim synchronously (409s reach the caller), then let the model answer in
+        the background. A reasoning model can take minutes, longer than the web proxy waits; the page
+        follows `advisor.busy` and the analysis log instead."""
+        task = asyncio.create_task(self._ask(True, *self._claim()), name="obs-advisor-analyze")
+        self._analysis_task = task  # a reference, so the task is not garbage-collected mid-call
+        task.add_done_callback(_log_failure)
+
+    def _claim(self) -> tuple[dict, dict, dict]:
         if self.advisor.busy:
             raise RuntimeError("An analysis is already running")
         s = self.adv_settings()
@@ -380,11 +399,15 @@ class Observatory:
         if not st or st["n"] < 30:
             raise RuntimeError("Not enough clean guiding yet (need about a minute of undisturbed guide steps)")
         self.advisor.busy = True
-        entry: dict[str, Any] = {"id": f"a{int(time.time())}", "t": time.time(), "model": s["model"], "manual": manual,
+        return s, st, diag
+
+    async def _ask(self, manual: bool, s: dict, st: dict, diag: dict) -> dict:
+        entry: dict[str, Any] = {"id": f"a{int(time.time())}", "t": time.time(), "model": s["model"], "effort": s["effort"], "manual": manual,
                                  "diagnosis": diag, "stats": adv._brief(st), "suggestions": [], "notes": []}
         try:
             prompt = adv.build_prompt(self._context(st, diag))
-            reply = await asyncio.to_thread(llm.call, s["model"], adv.SYSTEM, prompt, ollama_url=s["ollamaUrl"])
+            reply = await asyncio.to_thread(llm.call, s["model"], adv.SYSTEM, prompt, ollama_url=s["ollamaUrl"],
+                                          effort=s["effort"])
             entry["latencyMs"] = reply["latencyMs"]
             parsed = llm.extract_json(reply["text"])
             if parsed is None:
@@ -399,17 +422,71 @@ class Observatory:
             self.advisor.busy = False
             self.advisor.last_call = time.time()
         self.advisor.add_analysis(entry)
+        if s["autoApply"] and entry["suggestions"]:
+            await self._auto_apply(entry)
         return entry
+
+    async def _auto_apply(self, entry: dict) -> None:
+        """Auto-apply: the top suggestion only, so the before/after measurement is that change's alone."""
+        sg = entry["suggestions"][0]
+        name = f"{sg['axis'].upper()} {sg['param']} {sg['current']:g} → {sg['value']:g}"
+        if reason := self._auto_skip(sg):
+            entry["auto"] = f"Not applied automatically: {reason}."
+        else:
+            try:
+                await self.set_param(sg["axis"], sg["param"], sg["value"], source="auto", suggestion=sg["id"])
+                entry["auto"] = f"Applied {name} automatically; measuring for 5 minutes (put back if it measures worse)."
+            except PHD2_ERRORS as exc:
+                entry["auto"] = f"Not applied automatically: {exc or type(exc).__name__}."
+        self.advisor.save()
+
+    def _auto_skip(self, sg: dict) -> str | None:
+        if not self.phd2 or not self.phd2.connected or self.phd2.state.app_state != "Guiding":
+            return "PHD2 is not guiding"
+        if self.advisor.pending():
+            return "the last change is still being measured"
+        live = (self.phd2.state.params.get(sg["axis"]) or {}).get(sg["param"])
+        if live is None or abs(live - sg["current"]) > 1e-6:
+            return "the parameter changed since the analysis"
+        changes, _ = self.advisor.tonight()
+        if any(c["axis"] == sg["axis"] and c["param"] == sg["param"] and abs(c["new"] - sg["value"]) < 1e-6
+               and c["verdict"] == "worse" for c in changes):
+            return "the same change made guiding worse earlier tonight"
+        return None
+
+    async def _auto_revert(self) -> None:
+        """With auto-apply on, the newest change, if automatic and measured WORSE, is put back (once)."""
+        c = self.advisor.changes[-1] if self.advisor.changes else None
+        if not c or c["source"] != "auto" or c["verdict"] != "worse" or c.get("reverted"):
+            return
+        c["reverted"] = True
+        self.advisor.save()
+        live = ((self.phd2.state.params if self.phd2 else {}).get(c["axis"]) or {}).get(c["param"])
+        if live is not None and abs(live - c["new"]) < 1e-6:
+            try:
+                await self.set_param(c["axis"], c["param"], c["old"], source="auto-revert")
+            except PHD2_ERRORS as exc:
+                log.warning("auto-revert of %s.%s failed: %s", c["axis"], c["param"], exc)
+
+    def _update_polar(self) -> None:
+        calibration = self.phd2.state.calibration if self.phd2 else None
+        shift = self.polar.update(self.buffer, self.dist, calibration, self.equipment.get("mount"))
+        if shift:
+            self.dist.events.append((shift["t"], f"polar shift {shift['deltaArcmin']:g}′"))
+            log.warning("polar alignment moved: Dec drift %+.2f → %+.2f ″/min", shift["before"], shift["after"])
 
     async def _advisor_loop(self) -> None:
         while True:
             await asyncio.sleep(ADVISOR_TICK_S)
             try:
                 self.advisor.measure(self.buffer, self.dist)
+                self._update_polar()
                 self.dist.prune()
                 s = self.adv_settings()
                 if not s["enabled"] or self.advisor.busy:
                     continue
+                if s["autoApply"]:
+                    await self._auto_revert()
                 if not self.phd2 or self.phd2.state.app_state != "Guiding":
                     continue
                 if time.time() - self.advisor.last_call < float(s["intervalMin"]) * 60:
@@ -509,9 +586,10 @@ class Observatory:
                 "scale": self.buffer.scale,
             },
             "advisor": {
-                "enabled": bool(s["enabled"]), "model": s["model"], "intervalMin": s["intervalMin"], "targetRms": s["targetRms"],
-                "key": llm.key_status(s["model"]), "busy": self.advisor.busy, "lastError": self.advisor.last_error,
+                "enabled": bool(s["enabled"]), "model": s["model"], "effort": s["effort"], "autoApply": bool(s["autoApply"]), "intervalMin": s["intervalMin"], "targetRms": s["targetRms"],
+                "key": llm.key_status(s["model"], s["ollamaUrl"]), "busy": self.advisor.busy, "lastError": self.advisor.last_error,
                 "check": self.advisor_check, "analyses": list(reversed(analyses[-10:])), "changes": list(reversed(changes)),
             },
+            "polar": self.polar.summary(),
             "paramInfo": {k: {"label": v[0], "help": v[1], "basic": k in adv.BASIC_PARAMS} for k, v in adv.PARAM_INFO.items()},
         }

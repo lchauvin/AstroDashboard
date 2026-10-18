@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import styles from "./charts.module.css";
 
+/** Non-finite values (NaN) are gaps: the line breaks there and the tooltip leaves the series out. */
 export type Series = { key: string; label: string; color: string; values: number[] };
 
 type Props = {
@@ -26,11 +27,13 @@ const PAD = { l: 44, r: 34, t: 18, b: 22 };
 function xLabel(s: number): string {
   if (s === 0) return "now";
   const m = Math.round(s / 60);
+  if (Math.abs(s) >= 7200) return `−${(Math.abs(s) / 3600).toFixed(Math.abs(s) % 3600 ? 1 : 0)} h`;
   return Math.abs(s) >= 60 ? `−${Math.abs(m)} min` : `−${Math.abs(Math.round(s))} s`;
 }
 
 function agoLabel(s: number): string {
   const a = Math.abs(s);
+  if (a >= 3600) return `${Math.floor(a / 3600)} h ${String(Math.floor((a % 3600) / 60)).padStart(2, "0")} min ago`;
   return a < 60 ? `${Math.round(a)} s ago` : `${Math.floor(a / 60)} min ${String(Math.round(a % 60)).padStart(2, "0")} s ago`;
 }
 
@@ -55,7 +58,7 @@ export function TimeChart({ t, series, seconds, unit, digits = 2, limit = "auto"
   const lim = useMemo(() => {
     if (limit !== "auto") return limit;
     let m = minLimit;
-    for (const s of series) for (let i = 0; i < s.values.length; i++) if (!excluded?.[i]) m = Math.max(m, Math.abs(s.values[i]));
+    for (const s of series) for (let i = 0; i < s.values.length; i++) if (!excluded?.[i] && Number.isFinite(s.values[i])) m = Math.max(m, Math.abs(s.values[i]));
     // Round up to a readable step so the axis does not jitter every frame.
     const steps = [0.5, 1, 1.5, 2, 3, 4, 5, 8, 10, 15, 20, 30, 50, 100, 200, 500, 1000, 2000, 5000];
     return steps.find((s) => s >= m * 1.05) ?? m;
@@ -76,6 +79,10 @@ export function TimeChart({ t, series, seconds, unit, digits = 2, limit = "auto"
     let pen = false;
     for (let i = 0; i < t.length; i++) {
       if (t[i] < -seconds) continue;
+      if (!Number.isFinite(vals[i])) {
+        pen = false;
+        continue;
+      }
       d += `${pen ? "L" : "M"}${x(t[i]).toFixed(1)},${y(vals[i]).toFixed(1)}`;
       pen = !gapAfter[i];
     }
@@ -113,7 +120,7 @@ export function TimeChart({ t, series, seconds, unit, digits = 2, limit = "auto"
   const last = t.length - 1;
   const endLabels = useMemo(() => {
     if (last < 0) return [];
-    const ys = series.map((s) => ({ s, y: y(s.values[last]) })).sort((a, b) => a.y - b.y);
+    const ys = series.filter((s) => Number.isFinite(s.values[last])).map((s) => ({ s, y: y(s.values[last]) })).sort((a, b) => a.y - b.y);
     for (let i = 1; i < ys.length; i++) if (ys[i].y - ys[i - 1].y < 12) ys[i].y = ys[i - 1].y + 12;
     return ys;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -186,7 +193,7 @@ export function TimeChart({ t, series, seconds, unit, digits = 2, limit = "auto"
         {hover !== null ? (
           <g pointerEvents="none">
             <line x1={hx} x2={hx} y1={PAD.t} y2={PAD.t + ih} className={styles.crosshair} />
-            {series.map((s) => (
+            {series.filter((s) => Number.isFinite(s.values[hover])).map((s) => (
               <circle key={s.key} cx={hx} cy={y(s.values[hover])} r={4} className={styles.dot} style={{ fill: s.color }} />
             ))}
           </g>
@@ -195,7 +202,7 @@ export function TimeChart({ t, series, seconds, unit, digits = 2, limit = "auto"
       {hover !== null ? (
         <div className={styles.tooltip} style={{ left: Math.min(Math.max(hx + 12, 0), w - 190) }}>
           <div className={styles.ttHead}>{agoLabel(t[hover])}</div>
-          {series.map((s) => (
+          {series.filter((s) => Number.isFinite(s.values[hover])).map((s) => (
             <div key={s.key} className={styles.ttRow}>
               <i style={{ background: s.color }} /> {s.label} <b className="num">{fmtV(s.values[hover])}</b>
             </div>

@@ -16,13 +16,9 @@ from .frames import canonical_filter
 from .ingest.planner import DOWNLOAD, NIGHT_DIR_RE, match_target
 from .ingest.service import IngestService
 from .observatory import frames as obs_frames
-from .observatory.llm import LlmError
 from .observatory.nina import NinaError, NinaUnavailable
-from .observatory.phd2 import Phd2Disconnected, Phd2Error
-from .observatory.runtime import Observatory
+from .observatory.runtime import PHD2_ERRORS, Observatory
 from .preview import preview as frame_preview
-
-PHD2_ERRORS = (Phd2Error, Phd2Disconnected, asyncio.TimeoutError)
 
 
 class ParamBody(BaseModel):
@@ -191,11 +187,10 @@ def register(app: FastAPI, state) -> None:
         if not obs.adv_settings()["enabled"]:
             raise HTTPException(409, detail="The AI advisor is off")
         try:
-            return await obs.analyze(manual=True)
+            obs.start_analysis()
         except RuntimeError as exc:
             raise HTTPException(409, detail=str(exc)) from exc
-        except LlmError as exc:
-            raise HTTPException(502, detail=str(exc)) from exc
+        return {"started": True}
 
     @app.post("/api/live/advisor/suggestions/{sid}/apply")
     async def advisor_apply(sid: str) -> dict[str, Any]:

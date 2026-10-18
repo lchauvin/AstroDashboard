@@ -6,6 +6,8 @@ import math
 import random
 import time
 
+import pytest
+
 from astrodash.observatory import advisor as adv
 from astrodash.observatory import equipment, fake, frames, guiding, llm
 from astrodash.observatory.nina import parse_sequence
@@ -151,6 +153,39 @@ def test_extract_json_survives_think_blocks_and_fences():
     assert llm.extract_json("no json") is None
 
 
+def test_ollama_url_at_ollama_com_uses_the_cloud_key(monkeypatch):
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    assert llm.key_status("ollama/llama3.1:8b")["ok"]
+    assert not llm.key_status("ollama/gpt-oss:120b", "https://ollama.com")["ok"]
+    monkeypatch.setenv("OLLAMA_API_KEY", "k")
+    assert llm._endpoint("ollama", "https://ollama.com/") == ("https://ollama.com/v1", "OLLAMA_API_KEY")
+    assert llm._endpoint("ollama", "http://192.168.2.200:11434") == (None, None)
+
+
+def test_reasoning_effort_steps_down_when_rejected_and_only_none_is_capped(monkeypatch):
+    import httpx
+    sent = []
+
+    def post(url, json, timeout, **_):
+        sent.append((json.get("reasoning_effort"), json.get("max_tokens"), timeout))
+        if json.get("reasoning_effort") is not None:
+            return httpx.Response(400, text=f"unsupported reasoning_effort {json['reasoning_effort']!r}")
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}], "usage": {}})
+
+    monkeypatch.setattr(llm.httpx, "post", post)
+    monkeypatch.setattr(llm, "_UNSUPPORTED", set())
+    assert llm.call("ollama/m", "s", "p")["text"] == "{}"
+    assert sent == [("none", 3000, 120.0), ("low", None, 600.0), (None, None, 600.0)]
+    sent.clear()
+    llm.call("ollama/m", "s", "p")  # remembered: no more rejected round trips
+    assert sent == [(None, None, 600.0)]
+    sent.clear()
+    llm.call("ollama/n", "s", "p", effort="high")
+    assert sent == [("high", None, 600.0), (None, None, 600.0)]
+    with pytest.raises(llm.LlmError):
+        llm.call("ollama/n", "s", "p", effort="max")
+
+
 def test_frame_flags_compare_within_a_filter():
     hist = [{"ImageType": "LIGHT", "Filter": "L", "HFR": 2.0, "Stars": 900, "Date": None} for _ in range(5)]
     hist += [{"ImageType": "LIGHT", "Filter": "Ha", "HFR": 2.0, "Stars": 200, "Date": None} for _ in range(4)]  # fewer stars is normal in Ha
@@ -235,3 +270,183 @@ def test_tonights_frames_endpoint_counts_the_whole_night(tmp_path):
         d = client.get("/api/live/frames", params={"filter": "O", "limit": 10}).json()
         assert d["selected"] == 50 and len(d["frames"]) == 10 and {f["filterKey"] for f in d["frames"]} == {"O"}
         assert client.get("/api/live/frames", params={"all": "true"}).json()["total"] == 156
+
+
+# ---------------------------------------------------------------------- polar alignment
+
+from astrodash.observatory import polar  # noqa: E402
+
+
+def _guided(drift_north, seconds=300.0, sign=1, rate=4.0, scale=1.5, t0=None, seed=1, buf=None):
+    """PHD2 guiding a mount whose pointing drifts `drift_north` ″/min; `sign` is the residual→pulse convention."""
+    rng = random.Random(seed)
+    buf = buf or guiding.GuideBuffer()
+    buf.scale = scale
+    t0 = time.time() - seconds if t0 is None else t0
+    err = 0.0  # px; with sign +1 a positive residual is the pointing south of the lock
+    for i in range(int(seconds / 2)):
+        err += -sign * drift_north / 60 * 2 / scale
+        measured = err + rng.gauss(0, 0.15)
+        corr = 0.7 * measured if abs(measured) > 0.2 else 0.0
+        err -= corr
+        buf.add({"Frame": i, "RADistanceRaw": 0.0, "DECDistanceRaw": measured, "SNR": 20, "HFD": 2.0,
+                 "DECDuration": abs(corr) / rate * 1000, "DECDirection": "North" if sign * corr > 0 else "South"}, t=t0 + 2 * i)
+    return buf
+
+
+def test_dec_drift_is_read_back_from_the_corrections_whatever_the_sign_convention():
+    for sign in (1, -1):
+        buf = _guided(1.2, sign=sign)
+        est = polar.window_rate(list(buf.samples), None, 4.0, 1.5, polar.pulse_sign(list(buf.samples)))
+        assert abs(est["rate"] - 1.2) < 0.2, (sign, est)  # σ ≈ 0.07″/min per window
+    # a dither in the middle: the samples inside it are dropped and the segments still add up
+    buf = _guided(-0.8)
+    mid = buf.samples[75].t
+    dist = guiding.Disturbances(items=[guiding.Interval("dither", mid, mid + 40)])
+    est = polar.window_rate(list(buf.samples), dist, 4.0, 1.5, 1)
+    assert abs(est["rate"] + 0.8) < 0.2 and est["clean"] < 270
+    assert polar.window_rate(list(buf.samples)[:40], None, 4.0, 1.5, 1) is None  # < 2 min clean
+
+
+def _windows(alt, az, lat=45.5, hours=(-3.0, 1.0), noise=0.1, seed=2):
+    rng = random.Random(seed)
+    out, h, t = [], hours[0], 0.0
+    while h <= hours[1]:
+        r = polar.K * (az * math.cos(math.radians(lat)) * math.cos(h * math.pi / 12) - alt * math.sin(h * math.pi / 12))
+        out.append({"t": t, "rate": r + rng.gauss(0, noise), "clean": 280, "n": 140, "ha": h, "dec": 41.0, "alt": 50.0,
+                    "pier": "East" if h < 0 else "West", "lat": lat, "epoch": 0})
+        h, t = h + 5 / 60, t + 300
+    return out
+
+
+def test_fit_splits_altitude_from_azimuth_and_says_which_way():
+    f = polar.fit(_windows(6.0, -10.0))
+    assert f["ok"] and not f["pierFlipped"], f
+    assert abs(f["alt"] - 6.0) < 1.0 and abs(f["az"] + 10.0) < 1.5, f
+    assert polar.advice(f) == ["lower the altitude by about 6′", "turn the azimuth east by about 10′"]
+    assert not polar.fit(_windows(6.0, -10.0, hours=(-1.0, -0.2)))["ok"]  # not enough hour angle
+    # a Dec sense that flips with the pier: the sizes survive, the directions are withheld
+    flipped = [{**w, "rate": -w["rate"]} if w["pier"] == "West" else w for w in _windows(6.0, -10.0)]
+    g = polar.fit(flipped)
+    assert g["pierFlipped"] and abs(abs(g["alt"]) - 6.0) < 1.0 and polar.advice(g) == []
+
+
+def test_a_mount_that_moves_starts_a_new_epoch():
+    tracker = polar.PolarTracker(_Store())
+    ws = _windows(3.0, 4.0, hours=(-1.0, -0.5))
+    tracker.windows = ws[:-2]
+    assert tracker._check_shift() is None
+    tracker.windows = ws[:-2] + [{**w, "rate": w["rate"] + 1.5} for w in ws[-2:]]
+    shift = tracker._check_shift()
+    assert shift and tracker.epoch == 1 and abs(shift["delta"] - 1.5) < 0.3
+    assert [w["epoch"] for w in tracker.windows[-3:]] == [0, 1, 1]
+    s = tracker.summary(now=tracker.windows[-1]["t"] + 10)
+    assert s["now"]["windows"] == 2 and s["shifts"] == [shift]
+
+
+def test_tracker_closes_wall_clock_windows_with_the_mount_context():
+    store = _Store()
+    tracker = polar.PolarTracker(store)
+    end = math.floor(time.time() / polar.WINDOW_S) * polar.WINDOW_S
+    buf = _guided(0.9, seconds=polar.WINDOW_S, t0=end - polar.WINDOW_S)
+    mount = {"Connected": True, "SiderealTime": 1.5, "RightAscension": 23.0, "Declination": 41.0, "Altitude": 25.0,
+             "SideOfPier": "pierEast", "SiteLatitude": 45.5}
+    tracker.update(buf, guiding.Disturbances(), {"yRate": 4.0}, mount, now=end + 5)
+    (w,) = tracker.windows
+    assert abs(w["rate"] - 0.9) < 0.2 and w["pier"] == "East" and abs(w["ha"] - 2.458) < 0.01
+    assert store.data["polar_log"]["windows"] == [w]
+    tracker.update(buf, guiding.Disturbances(), {"yRate": 4.0}, mount, now=end + 30)  # same window: no work
+    s = tracker.summary(now=end + 30)
+    assert len(tracker.windows) == 1 and abs(s["now"]["minArcmin"] - 0.9 / polar.K) < 0.5
+    assert any("refraction" in c for c in s["caveats"])
+    assert adv.polar_line(s).startswith("POLAR ALIGNMENT: Dec drift +")
+    t2 = polar.PolarTracker(_Store())
+    t2.update(buf, guiding.Disturbances(), None, mount, now=end + 5)
+    assert t2.status and not t2.windows  # no calibration, no window
+
+
+def test_analyze_now_returns_at_once_and_the_model_answers_in_the_background(monkeypatch, tmp_path):
+    import threading
+
+    from astrodash.observatory import runtime
+
+    settings = {"advisor": {"enabled": True, "model": "ollama/m", "effort": "low"}}
+    obs = runtime.Observatory(lambda: settings, _Store(), tmp_path)
+    release = threading.Event()
+
+    def slow_call(*_a, **_k):  # a reasoning model: longer than the web proxy would wait
+        assert release.wait(5)
+        return {"text": '{"assessment": "fine", "suggestions": []}', "latencyMs": 1, "model": "ollama/m", "note": ""}
+
+    monkeypatch.setattr(obs, "recent_stats", lambda: {"n": 100})
+    monkeypatch.setattr(runtime.guiding, "diagnose", lambda st, target: {"actionable": True})
+    monkeypatch.setattr(obs, "_context", lambda st, diag: {})
+    monkeypatch.setattr(runtime.adv, "build_prompt", lambda ctx: "p")
+    monkeypatch.setattr(runtime.adv, "_brief", lambda st: None)
+    monkeypatch.setattr(obs, "_phd2_dict", lambda: {"params": {}})
+    monkeypatch.setattr(runtime.llm, "call", slow_call)
+
+    async def run():
+        obs.start_analysis()
+        assert obs.advisor.busy
+        with pytest.raises(RuntimeError, match="already running"):
+            obs.start_analysis()
+        release.set()
+        await obs._analysis_task
+        assert not obs.advisor.busy
+        assert obs.advisor.analyses[-1]["assessment"] == "fine"
+        assert obs.advisor.analyses[-1]["effort"] == "low"
+
+    asyncio.run(run())
+
+
+class _FakePhd2:
+    def __init__(self, params):
+        self.connected = True
+        self.state = type("S", (), {"app_state": "Guiding", "params": params})()
+
+    async def set_param(self, axis, name, value):
+        self.state.params[axis][name] = value
+        return value
+
+
+def test_auto_apply_takes_the_top_suggestion_skips_when_unsafe_and_reverts_a_worse_one(monkeypatch, tmp_path):
+    from astrodash.observatory import runtime
+
+    settings = {"advisor": {"enabled": True, "model": "ollama/m", "autoApply": True}}
+    obs = runtime.Observatory(lambda: settings, _Store(), tmp_path)
+    obs.phd2 = _FakePhd2({"ra": {"aggression": 0.7, "hysteresis": 0.1}, "dec": {}})
+    stats = {"total": 1.0, "ra": {"rms": 0.7}, "dec": {"rms": 0.6}, "n": 150, "se": 0.03, "hfdPx": 2.0}
+    monkeypatch.setattr(obs, "recent_stats", lambda: stats)
+    reply = '{"assessment": "RA overshoots", "suggestions": [' \
+            '{"axis": "ra", "param": "aggression", "value": 0.6}, {"axis": "ra", "param": "hysteresis", "value": 0.15}]}'
+    monkeypatch.setattr(runtime.llm, "call", lambda *a, **k: {"text": reply, "latencyMs": 1, "model": "m", "note": ""})
+    monkeypatch.setattr(obs, "_context", lambda st, diag: {})
+    monkeypatch.setattr(runtime.adv, "build_prompt", lambda ctx: "p")
+    monkeypatch.setattr(runtime.guiding, "diagnose", lambda st, target: {"actionable": True})
+    monkeypatch.setattr(obs, "_phd2_dict", lambda: {"params": obs.phd2.state.params})
+
+    async def run():
+        entry = await obs.analyze(manual=False)
+        assert obs.phd2.state.params["ra"] == {"aggression": 0.6, "hysteresis": 0.1}  # the top one only
+        assert entry["auto"].startswith("Applied RA aggression 0.7 → 0.6")
+        change = obs.advisor.changes[-1]
+        assert (change["source"], change["verdict"]) == ("auto", "pending")
+
+        entry = await obs.analyze(manual=False)  # still measuring: nothing applied
+        assert "still being measured" in entry["auto"]
+        assert obs.phd2.state.params["ra"]["aggression"] == 0.6
+
+        change["verdict"] = "worse"
+        await obs._auto_revert()
+        assert obs.phd2.state.params["ra"]["aggression"] == 0.7
+        assert obs.advisor.changes[-1]["source"] == "auto-revert" and change["reverted"]
+        await obs._auto_revert()  # once only
+        assert obs.advisor.changes[-1]["source"] == "auto-revert" and len(obs.advisor.changes) == 2
+
+        obs.advisor.changes[-1]["verdict"] = "neutral"
+        entry = await obs.analyze(manual=False)  # 0.7 → 0.6 measured worse tonight: not again
+        assert "made guiding worse earlier tonight" in entry["auto"]
+        assert obs.phd2.state.params["ra"]["aggression"] == 0.7
+
+    asyncio.run(run())

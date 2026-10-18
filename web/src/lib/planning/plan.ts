@@ -312,11 +312,18 @@ export function plan(input: PlanInput): PlanResult {
     if (input.keepAllIdeas && seasonDays > 0) p.season = grids(site, date, seasonDays, 20, false).map((g) => usableHours(g, site, p.ra, p.dec));
     ideaPlans.push(p);
   }
-  ideaPlans.sort((a, b) => b.score - a.score || b.hours90 - a.hours90);
-  // The top new ideas, plus every listed target wherever it ranks.
-  const shownIdeas = [...ideaPlans.filter((p) => !p.listed).slice(0, 60), ...ideaPlans.filter((p) => p.listed)].sort(
-    (a, b) => b.score - a.score || b.hours90 - a.hours90,
-  );
+  // The top new ideas — by score, and by tonight's and the next 90 nights' hours so they can be re-sorted
+  // by either — plus every listed target wherever it ranks. Kept in score order.
+  const unlisted = ideaPlans.filter((p) => !p.listed);
+  const top = (by: (a: TargetPlan, b: TargetPlan) => number) => [...unlisted].sort(by).slice(0, 60);
+  const shownIdeas = [
+    ...new Set([
+      ...top((a, b) => b.score - a.score || b.hours90 - a.hours90),
+      ...top((a, b) => b.tonightHours - a.tonightHours || b.score - a.score),
+      ...top((a, b) => b.hours90 - a.hours90 || b.score - a.score),
+      ...ideaPlans.filter((p) => p.listed),
+    ]),
+  ].sort((a, b) => b.score - a.score || b.hours90 - a.hours90);
 
   // Calendar: per night, the best of your targets and its filter.
   const calendar: CalendarNight[] = nights.map((g, i) => {

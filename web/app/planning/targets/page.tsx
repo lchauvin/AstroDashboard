@@ -17,7 +17,16 @@ import pageStyles from "../../library/library.module.css";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Planning · all targets" };
 
-type Search = { site?: string; date?: string; finished?: string };
+type Search = { site?: string; date?: string; finished?: string; sort?: string };
+
+/** How the potential targets (Telescopius lists, new ideas) are ordered: the planner's score, or usable hours. */
+type IdeaSort = "score" | "tonight" | "h90";
+
+const IDEA_SORTS: Record<IdeaSort, (a: TargetPlan, b: TargetPlan) => number> = {
+  score: (a, b) => b.score - a.score || b.hours90 - a.hours90,
+  tonight: (a, b) => b.tonightHours - a.tonightHours || b.hours90 - a.hours90 || b.score - a.score,
+  h90: (a, b) => b.hours90 - a.hours90 || b.tonightHours - a.tonightHours || b.score - a.score,
+};
 
 const detailHref = (p: TargetPlan, q: string) => `/planning/target/${encodeURIComponent(p.key)}${q}`;
 
@@ -49,6 +58,9 @@ export default async function PlanningTargetsPage({ searchParams }: { searchPara
   }
   const { site, tonight, rig, calibration } = result;
   const q = `?site=${site.id}&date=${date}`;
+  const sort: IdeaSort = sp.sort === "tonight" || sp.sort === "h90" ? sp.sort : "score";
+  const ideas = [...result.ideas].sort(IDEA_SORTS[sort]);
+  const sortHref = (s: IdeaSort) => `${q}${sp.finished === "1" ? "&finished=1" : ""}${s === "score" ? "" : `&sort=${s}`}`;
   const bortle = bortleFromSqm(site.sqm);
   const lSqm = calibration?.filters.L?.sqmEquivalent;
   const calibrated = calibration ? Object.values(calibration.filters) : [];
@@ -142,11 +154,11 @@ export default async function PlanningTargetsPage({ searchParams }: { searchPara
                   ({l.targets.length}){" "}
                 </span>
               ))}
-              — ranked the same way, out-of-season ones included. Targets already in your library are left out.
+              — ranked the same way{sort === "score" ? "" : ` (sorted by ${sort === "tonight" ? "tonight's" : "next 90 nights'"} hours)`}, out-of-season ones included. Targets already in your library are left out.
               {data.listsError ? ` Telescopius: ${data.listsError}` : ""}
             </p>
           </div>
-          <Ideas plans={result.ideas.filter((p) => p.listed)} q={q} empty="Every listed target is already in your library." />
+          <Ideas plans={ideas.filter((p) => p.listed)} q={q} sort={sort} sortHref={sortHref} empty="Every listed target is already in your library." />
         </section>
       ) : null}
 
@@ -155,11 +167,12 @@ export default async function PlanningTargetsPage({ searchParams }: { searchPara
           <h2 className="section-title">New ideas</h2>
           <p className={styles.sectionNote}>
             Bright nebulae and galaxies from OpenNGC and Sharpless that suit a {rig.fov.width.toFixed(1)}° field, not already
-            in your library, ranked by tonight&apos;s usable hours, brightness (hours to SNR 30) and framing.
+            in your library, {sort === "score" ? "ranked by tonight’s usable hours, brightness (hours to SNR 30) and framing" : `sorted by ${sort === "tonight" ? "tonight’s" : "the next 90 nights’"} usable hours`}.
+            Click Tonight or Next 90 d to sort by hours; click again to go back to the ranking.
             {data.halphaPending ? ` ${data.halphaPending} Hα survey values are still being fetched in the background.` : ""}
           </p>
         </div>
-        <Ideas plans={result.ideas.filter((p) => !p.listed).slice(0, 25)} q={q} />
+        <Ideas plans={ideas.filter((p) => !p.listed).slice(0, 25)} q={q} sort={sort} sortHref={sortHref} />
       </section>
 
       <p className={styles.foot}>
@@ -233,7 +246,32 @@ function YourTargets({ plans, q, start }: { plans: TargetPlan[]; q: string; star
   );
 }
 
-function Ideas({ plans, q, empty = "Nothing suitable is up at this site in the next 90 nights." }: { plans: TargetPlan[]; q: string; empty?: string }) {
+/** A column header that sorts the potential targets by it; clicking the active one returns to the ranking. */
+function SortHead({ by, sort, sortHref, children }: { by: IdeaSort; sort: IdeaSort; sortHref: (s: IdeaSort) => string; children: React.ReactNode }) {
+  const active = sort === by;
+  return (
+    <th aria-sort={active ? "descending" : undefined}>
+      <Link href={sortHref(active ? "score" : by)} scroll={false} className={`${styles.sortHead} ${active ? styles.sortActive : ""}`} title={active ? "Back to the ranking" : "Sort by these hours, most first"}>
+        {children}
+        <span aria-hidden>{active ? " ▼" : " ↕"}</span>
+      </Link>
+    </th>
+  );
+}
+
+function Ideas({
+  plans,
+  q,
+  sort,
+  sortHref,
+  empty = "Nothing suitable is up at this site in the next 90 nights.",
+}: {
+  plans: TargetPlan[];
+  q: string;
+  sort: IdeaSort;
+  sortHref: (s: IdeaSort) => string;
+  empty?: string;
+}) {
   if (!plans.length) return <p className="muted">{empty}</p>;
   return (
     <div className={tableStyles.scroller}>
@@ -243,8 +281,12 @@ function Ideas({ plans, q, empty = "Nothing suitable is up at this site in the n
             <th aria-label="Rank" />
             <th>Object</th>
             <th>Type · size</th>
-            <th>Tonight</th>
-            <th>Next 90 d</th>
+            <SortHead by="tonight" sort={sort} sortHref={sortHref}>
+              Tonight
+            </SortHead>
+            <SortHead by="h90" sort={sort} sortHref={sortHref}>
+              Next 90 d
+            </SortHead>
             <th>To SNR 30</th>
             <th>Suggestion</th>
           </tr>

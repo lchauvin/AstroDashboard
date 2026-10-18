@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { ago, clock, duration, enginePost, fmt, type Analysis, type Change, type LiveState, type Suggestion } from "@/lib/live";
+import { ago, clock, duration, enginePost, fmt, type Analysis, type Change, type LiveState, type Polar, type Suggestion } from "@/lib/live";
 import { Marks, StatusIcon, Tip } from "../ui";
 import { LiveBar, NotConnected } from "./LiveBar";
 import styles from "./live.module.css";
@@ -162,6 +162,7 @@ export function Guiding({ initial }: { initial: LiveState | null }) {
         <AdvisorCard s={s} act={act} busy={busy} adv={adv} />
       </div>
 
+      {s.polar ? <PolarCard pol={s.polar} adv={adv} serverTime={s.serverTime} /> : null}
       {p.connected ? <Params s={s} act={act} busy={busy} adv={adv} /> : null}
       <Changes changes={s.advisor.changes} act={act} busy={busy} connected={p.connected} adv={adv} />
     </div>
@@ -329,30 +330,43 @@ function AdvisorCard({ s, act, busy, adv }: { s: LiveState; act: Act; busy: bool
   const a = s.advisor;
   const latest = a.analyses[0];
   const toggle = (enabled: boolean) => act(() => enginePost("/api/settings", { advisor: { enabled } }, "PUT"), enabled ? "AI advisor on." : "AI advisor off.");
+  const toggleAuto = (autoApply: boolean) =>
+    act(() => enginePost("/api/settings", { advisor: { autoApply } }, "PUT"), autoApply ? "Auto-apply on: the top suggestion is applied and measured." : "Auto-apply off: suggestions wait for you.");
   return (
     <section className={`framed ${styles.card}`}>
       <Marks />
       <div className={styles.cardHead}>
         <span className="eyebrow">AI advisor</span>
-        <label className={styles.switch}>
-          <input type="checkbox" checked={a.enabled} disabled={busy} onChange={(e) => void toggle(e.target.checked)} />
-          <span>{a.enabled ? "On" : "Off"}</span>
-        </label>
+        <span className={styles.switches}>
+          {a.enabled ? (
+            <Tip tip="Applies the top suggestion of each analysis by itself, one change at a time: never while the last change is still being measured, never a change that measured worse tonight. An automatic change that measures worse is put back.">
+              <label className={styles.switch}>
+                <input type="checkbox" checked={a.autoApply} disabled={busy} onChange={(e) => void toggleAuto(e.target.checked)} />
+                <span>Auto-apply</span>
+              </label>
+            </Tip>
+          ) : null}
+          <label className={styles.switch}>
+            <input type="checkbox" checked={a.enabled} disabled={busy} onChange={(e) => void toggle(e.target.checked)} />
+            <span>{a.enabled ? "On" : "Off"}</span>
+          </label>
+        </span>
       </div>
       {!a.enabled ? (
         <p className={styles.hint}>
           When on, every {a.intervalMin} min of steady guiding the AI reads the guiding error, the diagnosis, the conditions and your current
-          parameters (algorithm, aggressiveness, hysteresis, min-move…) and suggests changes. Nothing is applied until you click Apply, and every
-          change is then measured against the 5 minutes before it. It skips the call when there is nothing a setting can fix.
+          parameters (algorithm, aggressiveness, hysteresis, min-move…) and suggests changes. Nothing is applied until you click Apply (or turn on
+          Auto-apply), and every change is then measured against the 5 minutes before it. It skips the call when there is nothing a setting can fix.
         </p>
       ) : (
         <>
           <div className={styles.advisorHead}>
             <span className={styles.hint}>
               <span className="mono">{a.model}</span>
+              {a.effort === "none" ? null : ` · ${a.effort} reasoning`}
               {!a.key.ok ? null : ` · every ${a.intervalMin} min`}
             </span>
-            <button type="button" className="button" disabled={busy || a.busy || !a.key.ok || !s.phd2.connected} onClick={() => act(() => enginePost("/api/live/advisor/analyze"))}>
+            <button type="button" className="button" disabled={busy || a.busy || !a.key.ok || !s.phd2.connected} onClick={() => act(() => enginePost("/api/live/advisor/analyze"), "Asked the model; its answer appears below when it replies.")}>
               {a.busy ? "Analyzing…" : "Analyze now"}
             </button>
           </div>
@@ -382,7 +396,87 @@ function AdvisorCard({ s, act, busy, adv }: { s: LiveState; act: Act; busy: bool
   );
 }
 
+const signed = (v: number, d: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(d)}`;
+
+/** `serverTime`, not Date.now(): the page is rendered on the server too, and the series is relative to the snapshot. */
+function PolarCard({ pol, adv, serverTime }: { pol: Polar; adv: boolean; serverTime: number }) {
+  const { now, fit: f } = pol;
+  const shift = pol.shifts.at(-1);
+  const recentShift = shift && serverTime - shift.t < 3 * 3600 ? shift : null;
+  const ser = pol.series;
+  const seconds = Math.max(3600, ...ser.t.map((t) => -t + pol.windowS));
+  const errLevel = (m: number) => (m <= 5 ? "ok" : m <= 15 ? "warn" : "bad");
+  const dirs = f.ok && f.directions;
+  const pm = (se: number) => `±${se.toFixed(se < 1 ? 1 : 0)}′`;
+  return (
+    <section className={styles.block}>
+      <div className={styles.cardHead}>
+        <h2 className="section-title">Polar alignment</h2>
+        <Tip tip="Read from the Dec corrections PHD2 already sends, so guiding and imaging are untouched. A misaligned polar axis makes the pointing drift in Dec; the pulses that cancel it measure it. Each 5-minute window gives the drift; over a few hours of hour angle the windows split it into altitude and azimuth.">
+          <span className={styles.more}>how?</span>
+        </Tip>
+      </div>
+      {recentShift ? (
+        <p className={styles.flagged}>
+          <StatusIcon level="warn" size={13} /> The alignment moved at {clock(recentShift.t)}: Dec drift {signed(recentShift.before, 2)} → {signed(recentShift.after, 2)} ″/min (about{" "}
+          {recentShift.deltaArcmin.toFixed(0)}′). A tripod leg settling, a bump, a loose clamp? The fit restarts from there.
+        </p>
+      ) : null}
+      <div className={styles.tiles}>
+        <Tile label="Dec drift" value={now ? `${signed(now.rate, 2)}″/min` : "—"}
+          sub={now ? `${now.rate >= 0 ? "northward" : "southward"} · last ${duration(now.windows * pol.windowS)} of guiding` : pol.status ? `waiting: ${pol.status}` : "first window after 5 minutes of guiding"} />
+        <Tile label="Error, at least" value={now ? `${now.minArcmin.toFixed(1)}′` : "—"} level={now ? errLevel(now.minArcmin) : "info"}
+          sub="the part this hour angle can see" />
+        <Tile label="Altitude" value={f.ok ? `${signed(f.alt, 0)}′` : "—"}
+          sub={f.ok ? `${pm(f.altSe)}${dirs && Math.abs(f.alt) > 2 * f.altSe ? ` · axis too ${f.alt > 0 ? "high" : "low"}` : ""}` : "needs more hour angle"} />
+        <Tile label="Azimuth" value={f.ok ? `${signed(f.az, 0)}′` : "—"}
+          sub={f.ok ? `${pm(f.azSe)}${dirs && Math.abs(f.az) > 2 * f.azSe ? ` · axis ${f.az > 0 ? "east" : "west"} of the pole` : ""}` : "needs more hour angle"} />
+        {f.ok ? <Tile label="Total" value={`${f.total.toFixed(0)}′`} level={errLevel(f.total)} sub={`fitted over ${f.spanH} h, ${f.n} windows`} /> : null}
+      </div>
+      {pol.advice.length ? (
+        <p>
+          <strong>Next time you polar-align:</strong> {pol.advice.join(", ")}.
+        </p>
+      ) : null}
+      {ser.t.length > 1 ? (
+        <section className={`framed ${styles.card}`}>
+          <Marks />
+          <span className="eyebrow">Dec drift per 5-minute window · ″/min (+ north)</span>
+          <Legend series={[{ label: "measured", color: DEC }, ...(f.ok ? [{ label: "fitted polar error", color: "var(--text-muted)" }] : [])]} />
+          <TimeChart
+            t={ser.t}
+            seconds={seconds}
+            unit="″/min"
+            minLimit={0.5}
+            height={180}
+            series={[
+              { key: "rate", label: "Drift", color: DEC, values: ser.rate },
+              ...(f.ok ? [{ key: "model", label: "Fit", color: "var(--text-muted)", values: ser.model.map((v) => v ?? NaN) }] : []),
+            ]}
+            events={pol.shifts.map((x) => ({ t: x.t - serverTime, label: `moved ${x.deltaArcmin.toFixed(0)}′` }))}
+            ariaLabel="Dec drift from polar misalignment, per 5-minute window"
+          />
+        </section>
+      ) : null}
+      <p className={styles.hint}>
+        {f.ok
+          ? "Near the meridian the drift measures azimuth; six hours out it measures altitude. "
+          : `Altitude and azimuth come once the windows span about 1.5 h of hour angle (${f.reason}). `}
+        Every figure scales with PHD2&apos;s Dec calibration: a calibration 10 % off is a drift 10 % off.
+        {adv && f.ok ? ` Fit noise ${f.sigma.toFixed(2)}″/min per window.` : ""}
+      </p>
+      {pol.caveats.map((c) => (
+        <p key={c} className={styles.hint}>
+          <StatusIcon level="info" size={12} /> {c}
+        </p>
+      ))}
+    </section>
+  );
+}
+
 const pname = (info: LiveState["paramInfo"], name: string) => info[name]?.label ?? name;
+
+const SOURCE_LABEL: Record<Change["source"], string> = { manual: "you", ai: "AI suggestion", revert: "revert", auto: "AI, auto-applied", "auto-revert": "auto revert (worse)" };
 
 function AnalysisView({ an, act, busy, adv, params, info }: { an: Analysis; act: Act; busy: boolean; adv: boolean; params: Record<string, Record<string, number>>; info: LiveState["paramInfo"] }) {
   return (
@@ -394,6 +488,7 @@ function AnalysisView({ an, act, busy, adv, params, info }: { an: Analysis; act:
       </div>
       {an.error ? <p className={styles.error}>{an.error}</p> : null}
       {an.assessment ? <p className={styles.assessment}>{an.assessment}</p> : null}
+      {an.auto ? <p className={styles.hint}>{an.auto}</p> : null}
       {!an.error && !an.suggestions.length ? <p className={styles.hint}>No change suggested.</p> : null}
       {an.suggestions.map((sg, i) => (
         <SuggestionRow key={sg.id} sg={sg} first={i === 0} act={act} busy={busy} live={params[sg.axis]?.[sg.param]} label={pname(info, sg.param)} adv={adv} />
@@ -602,7 +697,7 @@ function Changes({ changes, act, busy, connected, adv }: { changes: Change[]; ac
                   {c.axis === "both" ? "" : `${c.axis.toUpperCase()} `}
                   {c.param} <span className="num">{c.old} → {c.new}</span>
                 </td>
-                <td className={styles.hint}>{c.source === "ai" ? "AI suggestion" : c.source === "revert" ? "revert" : "you"}</td>
+                <td className={styles.hint}>{SOURCE_LABEL[c.source] ?? "you"}</td>
                 <td>
                   <StatusIcon level={VERDICT_LEVEL[c.verdict]} size={13} label={c.verdict} />{" "}
                   {c.verdict === "pending" ? `measuring… result ${clock(c.measureAt)}` : c.outcome}

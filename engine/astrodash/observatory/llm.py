@@ -9,7 +9,8 @@
 | anthropic    | https://api.anthropic.com/v1     | ANTHROPIC_API_KEY  |
 
 Only the first slash splits the provider off, so OpenRouter ids (`openrouter/anthropic/…`) pass
-through intact. The first four are OpenAI-compatible chat completions. Keys never leave the engine.
+through intact. An `ollama/…` model whose Ollama URL is ollama.com is the cloud API and takes
+OLLAMA_API_KEY too. The first four are OpenAI-compatible chat completions. Keys never leave the engine.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import os
 import re
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -32,6 +34,8 @@ PROVIDERS = {
 
 # (model, field) pairs a backend has rejected once; not sent again for the life of the process.
 _UNSUPPORTED: set[tuple[str, str]] = set()
+EFFORTS = ("none", "low", "medium", "high")
+CAPPED_TOKENS = 3000  # with no reasoning the answer is a few hundred tokens; a thinking model gets no cap
 
 
 class LlmError(RuntimeError):
@@ -48,48 +52,69 @@ def split_model(model: str) -> tuple[str, str]:
     return provider, name.strip()
 
 
-def key_status(model: str) -> dict:
+def _endpoint(provider: str, ollama_url: str) -> tuple[str | None, str | None]:
+    """(base URL, key variable) for a provider; a local `ollama` URL that is really ollama.com counts as the cloud."""
+    if provider == "ollama" and (urlparse(ollama_url).hostname or "").lower().removeprefix("www.") == "ollama.com":
+        return PROVIDERS["ollama_cloud"]
+    return PROVIDERS[provider]
+
+
+def key_status(model: str, ollama_url: str = "http://localhost:11434") -> dict:
     """Whether the key the model needs is present (never the key itself)."""
     try:
         provider, _ = split_model(model)
     except LlmError as exc:
         return {"ok": False, "message": str(exc)}
-    env = PROVIDERS[provider][1]
+    env = _endpoint(provider, ollama_url)[1]
     if env and not os.environ.get(env, "").strip():
         return {"ok": False, "message": f"{env} is not set (add it to .env next to astrodashboard.toml and restart the engine)"}
     return {"ok": True, "message": f"{env} set" if env else "no key needed"}
 
 
 def call(model: str, system: str, prompt: str, *, ollama_url: str = "http://localhost:11434",
-         max_tokens: int = 3000, timeout_s: float = 120.0) -> dict[str, Any]:
-    """Blocking: run it in a worker thread. Returns {text, latencyMs, model, note}."""
+         effort: str = "none") -> dict[str, Any]:
+    """Blocking: run it in a worker thread. Returns {text, latencyMs, model, note}.
+
+    `effort` is the reasoning effort for the OpenAI-compatible providers. "none" caps the answer at
+    CAPPED_TOKENS; any other level sends no token cap and waits up to 10 minutes. Anthropic models do
+    not think unless asked to, so they ignore it.
+    """
+    if effort not in EFFORTS:
+        raise LlmError(f"Reasoning effort must be one of {', '.join(EFFORTS)}, got {effort!r}")
     provider, name = split_model(model)
-    base, env = PROVIDERS[provider]
+    base, env = _endpoint(provider, ollama_url)
     key = os.environ.get(env, "").strip() if env else ""
     if env and not key:
         raise LlmError(f"{env} is not set")
     started = time.monotonic()
     if provider == "anthropic":
-        text, note = _anthropic(base, key, name, system, prompt, max_tokens, timeout_s)
+        text, note = _anthropic(base, key, name, system, prompt, CAPPED_TOKENS, 120.0)
     else:
         base = base or ollama_url.rstrip("/") + "/v1"
-        text, note = _openai_compat(base, key or "ollama", name, system, prompt, max_tokens, timeout_s)
+        text, note = _openai_compat(base, key or "ollama", name, system, prompt, effort)
     return {"text": text, "latencyMs": int((time.monotonic() - started) * 1000), "model": model, "note": note}
 
 
-def _openai_compat(base: str, key: str, model: str, system: str, prompt: str, max_tokens: int, timeout_s: float) -> tuple[str, str]:
+def _openai_compat(base: str, key: str, model: str, system: str, prompt: str, effort: str) -> tuple[str, str]:
+    capped = effort == "none"
     body: dict[str, Any] = {
         "model": model,
-        "max_tokens": max_tokens,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
     }
-    # Ask the server to constrain the output to JSON, and keep thinking models brief: the decision is
-    # small and pre-diagnosed, and a long think can run out of tokens before the answer.
+    if capped:
+        body["max_tokens"] = CAPPED_TOKENS
+    # Ask the server to constrain the output to JSON, and pass the chosen reasoning effort. Even a "low"
+    # think (mistral-large-4: ~3000 tokens) overruns the cap, so a backend that rejects "none" gets
+    # "low" uncapped; one that rejects the chosen level gets no field at all.
     if (model, "response_format") not in _UNSUPPORTED:
         body["response_format"] = {"type": "json_object"}
-    if (model, "reasoning_effort") not in _UNSUPPORTED:
-        body["reasoning_effort"] = "low"
-    for _ in range(3):
+    ladder = ("none", "low") if capped else (effort,)
+    if level := next((e for e in ladder if (model, f"reasoning_effort={e}") not in _UNSUPPORTED), None):
+        body["reasoning_effort"] = level
+    if body.get("reasoning_effort") != "none":
+        body.pop("max_tokens", None)
+    for _ in range(2 + len(ladder)):
+        timeout_s = 120.0 if "max_tokens" in body else 600.0
         try:
             r = httpx.post(f"{base}/chat/completions", json=body, headers={"Authorization": f"Bearer {key}"}, timeout=timeout_s)
         except httpx.HTTPError as exc:
@@ -98,6 +123,14 @@ def _openai_compat(base: str, key: str, model: str, system: str, prompt: str, ma
             low = r.text.lower()
             hints = {"response_format": ("response_format", "json_object"), "reasoning_effort": ("reason", "think")}
             rejected = next((f for f in hints if f in body and any(h in low for h in hints[f])), None)
+            if rejected == "reasoning_effort":
+                _UNSUPPORTED.add((model, f"reasoning_effort={body['reasoning_effort']}"))
+                if level := next((e for e in ladder if (model, f"reasoning_effort={e}") not in _UNSUPPORTED), None):
+                    body["reasoning_effort"] = level
+                else:
+                    body.pop("reasoning_effort")
+                body.pop("max_tokens", None)  # whatever it does now, it is not reasoning-free
+                continue
             if rejected:
                 _UNSUPPORTED.add((model, rejected))
                 body.pop(rejected)
@@ -111,7 +144,8 @@ def _openai_compat(base: str, key: str, model: str, system: str, prompt: str, ma
         except (KeyError, IndexError, TypeError) as exc:
             raise LlmError(f"{model}: unexpected answer shape") from exc
         usage = data.get("usage") or {}
-        return text, f"finish={choice.get('finish_reason')} tokens={usage.get('completion_tokens')}/{max_tokens}"
+        cap = f"/{body['max_tokens']}" if "max_tokens" in body else ""
+        return text, f"finish={choice.get('finish_reason')} tokens={usage.get('completion_tokens')}{cap} effort={body.get('reasoning_effort', 'default')}"
     raise LlmError(f"{model}: request rejected")
 
 

@@ -19,7 +19,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from . import astrospheric, halpha, planning
-from .observatory.llm import LlmError, split_model
+from .observatory.llm import EFFORTS, LlmError, split_model
 from .observatory.runtime import DEFAULTS as OBS_DEFAULTS
 
 log = logging.getLogger(__name__)
@@ -263,6 +263,10 @@ def register(app: FastAPI, state) -> None:
                 raise HTTPException(422, detail=f"advisor.model: {exc}") from exc
         if "ollamaUrl" in a and not (isinstance(a["ollamaUrl"], str) and a["ollamaUrl"].startswith(("http://", "https://"))):
             raise HTTPException(422, detail="advisor.ollamaUrl must be an http(s) URL")
+        if "autoApply" in a and not isinstance(a["autoApply"], bool):
+            raise HTTPException(422, detail="advisor.autoApply must be true or false")
+        if "effort" in a and a["effort"] not in EFFORTS:
+            raise HTTPException(422, detail=f"advisor.effort must be one of {', '.join(EFFORTS)}")
         if "intervalMin" in a and not (isinstance(a["intervalMin"], (int, float)) and 2 <= a["intervalMin"] <= 120):
             raise HTTPException(422, detail="advisor.intervalMin must be 2–120 minutes")
         if "targetRms" in a and not (isinstance(a["targetRms"], (int, float)) and 0.2 <= a["targetRms"] <= 5):

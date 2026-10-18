@@ -61,6 +61,23 @@ export type GuideGraph = {
   events: { t: number; label: string }[];
 };
 
+/** Polar alignment read from PHD2's Dec corrections (engine `polar.py`). Rates are the pointing's Dec drift, ″/min, + = north. */
+export type PolarFit =
+  | { ok: false; reason: string }
+  | { ok: true; alt: number; az: number; altSe: number; azSe: number; total: number; sigma: number; spanH: number; n: number; pierFlipped: boolean; latKnown: boolean; directions: boolean };
+export type PolarShift = { t: number; before: number; after: number; delta: number; deltaArcmin: number; epoch: number };
+export type Polar = {
+  now: { rate: number; minArcmin: number; windows: number; ha: number | null } | null;
+  fit: PolarFit;
+  advice: string[];
+  shifts: PolarShift[];
+  windows: number;
+  status: string | null;
+  caveats: string[];
+  series: { t: number[]; rate: number[]; model: (number | null)[] };
+  windowS: number;
+};
+
 export type Phd2 = {
   connected: boolean;
   address: string;
@@ -89,11 +106,14 @@ export type Analysis = {
   id: string;
   t: number;
   model: string;
+  effort?: string;
   manual: boolean;
   latencyMs?: number;
   assessment?: string;
   suggestions: Suggestion[];
   notes: string[];
+  /** With auto-apply on: what happened to the top suggestion. */
+  auto?: string;
   diagnosis: Diagnosis;
   stats: Brief | null;
   error?: string;
@@ -105,7 +125,8 @@ export type Change = {
   param: string;
   old: number;
   new: number;
-  source: "manual" | "ai" | "revert";
+  source: "manual" | "ai" | "revert" | "auto" | "auto-revert";
+  reverted?: boolean;
   before: Brief | null;
   after: Brief | null;
   verdict: "pending" | "better" | "worse" | "neutral" | "void";
@@ -130,6 +151,8 @@ export type LiveState = {
   advisor: {
     enabled: boolean;
     model: string;
+    effort: string;
+    autoApply: boolean;
     intervalMin: number;
     targetRms: number;
     key: { ok: boolean; message: string };
@@ -140,6 +163,8 @@ export type LiveState = {
     changes: Change[];
   };
   paramInfo: Record<string, { label: string; help: string; basic: boolean }>;
+  /** Absent from engines older than the polar-alignment estimate. */
+  polar?: Polar;
 };
 
 // ---------------------------------------------------------------- auto-ingest

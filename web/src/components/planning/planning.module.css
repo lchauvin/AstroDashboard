@@ -303,3 +303,13 @@ select.input {
 .adviceCell {
   min-width: 200px;
 }
+
+.sortHead {
+  color: inherit;
+  text-decoration: none;
+}
+
+.sortHead:hover,
+.sortActive {
+  color: var(--color-accent-700);
+}

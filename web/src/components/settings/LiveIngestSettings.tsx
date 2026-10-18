@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { IngestStatus } from "@/lib/live";
-import type { AdvisorSettings, ObservatorySettings } from "@/lib/planning/types";
+import type { AdvisorSettings, ObservatorySettings, ReasoningEffort } from "@/lib/planning/types";
 import styles from "./settings.module.css";
 
 export type LiveConn = { nina: boolean; ninaError: string | null; phd2: boolean; phd2Error: string | null; simulated: boolean; key: { ok: boolean; message: string } };
@@ -77,14 +77,26 @@ export function LiveIngestSettings({ observatory, advisor, conn, ingest }: { obs
       <h3 className="eyebrow" style={{ marginTop: 28 }}>AI guiding advisor</h3>
       <p className={styles.hint} style={{ marginTop: 6 }}>
         Model as <span className="mono">provider/model-id</span>: <span className="mono">ollama/llama3.1:8b</span> (local, no key),{" "}
-        <span className="mono">ollama_cloud/…</span> (OLLAMA_API_KEY), <span className="mono">openrouter/…</span> (OPENROUTER_API_KEY),{" "}
+        <span className="mono">ollama_cloud/…</span> or <span className="mono">ollama/…</span> with the URL{" "}
+        <span className="mono">https://ollama.com</span> (OLLAMA_API_KEY), <span className="mono">openrouter/…</span> (OPENROUTER_API_KEY),{" "}
         <span className="mono">openai/…</span> (OPENAI_API_KEY) or <span className="mono">anthropic/claude-sonnet-5-5</span> (ANTHROPIC_API_KEY). Keys go in{" "}
         <span className="mono">.env</span> next to astrodashboard.toml and are never shown or stored here. Turn the advisor on or off on the Guiding page.
+        Reasoning <b>none</b> answers in seconds within a 3000-token cap; <b>low</b>–<b>high</b> let a thinking model reason with no token
+        cap (up to 10 min a call). Anthropic models ignore it.
       </p>
       <div className={styles.rowActions} style={{ marginTop: 10 }}>
         <label className={styles.field} style={{ minWidth: 320 }}>
           <span>Model</span>
           <input className={styles.input} value={adv.model} onChange={(e) => setAdv({ ...adv, model: e.target.value })} />
+        </label>
+        <label className={styles.field} style={{ width: 130 }}>
+          <span>Reasoning</span>
+          <select className={styles.input} value={adv.effort} onChange={(e) => setAdv({ ...adv, effort: e.target.value as ReasoningEffort })}>
+            <option value="none">None</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
         </label>
         <label className={styles.field} style={{ width: 130 }}>
           <span>Every (min)</span>
@@ -103,7 +115,7 @@ export function LiveIngestSettings({ observatory, advisor, conn, ingest }: { obs
         <button
           type="button"
           className="button button-primary"
-          onClick={() => run(() => send("/api/settings", "PUT", { advisor: { model: adv.model.trim(), intervalMin: adv.intervalMin, targetRms: adv.targetRms, ollamaUrl: adv.ollamaUrl.trim() } }), "Saved.")}
+          onClick={() => run(() => send("/api/settings", "PUT", { advisor: { model: adv.model.trim(), effort: adv.effort, intervalMin: adv.intervalMin, targetRms: adv.targetRms, ollamaUrl: adv.ollamaUrl.trim() } }), "Saved.")}
         >
           Save
         </button>

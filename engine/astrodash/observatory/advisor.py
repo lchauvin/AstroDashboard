@@ -106,6 +106,9 @@ when evidence is moderate). If the needed parameter is at its limit, use the alt
 - Never repeat a change that tonight's log shows made things WORSE; do not undo one that made them BETTER.
 - The guide exposure, Dec guide mode and calibration are not yours to change, but you may mention them \
 in the assessment (e.g. low SNR → longer exposure; stale calibration → recalibrate).
+- POLAR ALIGNMENT is measured from the Dec corrections. A steady Dec drift is normal and guiding cancels \
+it; it calls for a parameter only when Dec is under-correcting. Mention re-aligning in the assessment only \
+when the error exceeds about 10′ or a SHIFT was detected (the mount moved).
 
 Reply with ONE JSON object and nothing else:
 {"assessment": "<what limits guiding now, <=200 chars>",
@@ -139,6 +142,8 @@ def build_prompt(ctx: dict) -> str:
                      f"axes {_fmt(cal.get('xAngle'), 0)}°/{_fmt(cal.get('yAngle'), 0)}°, at Dec {_fmt(cal.get('declination'), 0)}°")
     lines.append("SETUP: " + ", ".join(setup))
     lines.append(f"TARGET: total RMS {ctx['targetRms']:.2f}″")
+    if pol := polar_line(ctx.get("polar")):
+        lines.append(pol)
     lines.append("")
     lines.append(f"GUIDING NOW: total {st['total']:.2f}″ ±{st['se']:.2f}″ (n={st['n']} frames, {st['seconds']} s clean, osc {st['oscillation']:.2f})")
     lines.append("  axis   rms    peak   mean    lag1  idle reversals pulse limited")
@@ -167,6 +172,19 @@ def build_prompt(ctx: dict) -> str:
     lines.append("")
     lines.append("Reply with the JSON object only.")
     return "\n".join(lines)
+
+
+def polar_line(p: dict | None) -> str | None:
+    if not p or not p.get("now"):
+        return None
+    now, f = p["now"], p["fit"]
+    out = f"POLAR ALIGNMENT: Dec drift {now['rate']:+.2f}″/min, error at least {now['minArcmin']:.0f}′"
+    if f.get("ok"):
+        out += f"; fitted over {f['spanH']} h: altitude {f['alt']:+.0f}′ ±{f['altSe']:.0f}, azimuth {f['az']:+.0f}′ ±{f['azSe']:.0f}"
+    for s in p.get("shifts") or []:
+        if time.time() - s["t"] < 3 * 3600:
+            out += f"; SHIFT {s['deltaArcmin']:g}′ at {time.strftime('%H:%M', time.localtime(s['t']))}"
+    return out
 
 
 def validate(parsed: dict | None, phd: dict) -> tuple[str, list[dict], list[str]]:

@@ -5,6 +5,8 @@
 
 The mount responds to the guiding parameters, so the diagnosis and the advisor have something
 real to react to: RA starts too aggressive (it rings), Dec has a deadband too wide for its drift.
+The Dec drift is a polar axis 8′ too high and 15′ west of the pole, at the sky's real hour angle,
+for the polar-alignment estimate to find (in windows of 5 minutes; the fit needs hours).
 Seeing wanders, dithers happen every few minutes, the star is occasionally lost, a frame is
 "saved" every 40 s. Nothing is written to disk: frame previews are rendered in memory.
 
@@ -28,7 +30,10 @@ log = logging.getLogger(__name__)
 
 FRAME_EVERY_S = 40.0
 EXPOSURE_S = 40.0
-GAIN = 1.35  # mount response to a pulse: > 1 means the calibration under-estimates the guide rate
+GAIN = 1.35  # RA response to a pulse: > 1 means the calibration under-estimates the guide rate
+X_RATE, Y_RATE = 3.912, 3.705  # calibrated guide rates, px/s
+PA_ALT, PA_AZ, LATITUDE = 8.0, -15.0, 45.5  # polar axis error (′, + = too high / east of the pole) and site
+RA_H, DEC_DEG, LST0_H = 0.7122, 41.27, 23.3006  # M 31, and the sidereal time when the simulator starts
 
 
 class Sim:
@@ -59,7 +64,8 @@ class Sim:
         noise = self.seeing * 0.24
         t = time.time() - self.started
         self.ra_err += random.gauss(0, noise) + 0.10 * math.sin(t / 70)
-        self.dec_err += random.gauss(0, noise * 0.8) + 0.07
+        # A positive residual is corrected northwards: it is the pointing lying south of the lock.
+        self.dec_err += random.gauss(0, noise * 0.8) - self.polar_drift() * self.exposure_ms / 60000
         jitter = self.seeing * 0.16
         ra_m, dec_m = self.ra_err + random.gauss(0, jitter), self.dec_err + random.gauss(0, jitter)
 
@@ -74,19 +80,28 @@ class Sim:
         dec_c = correction("dec", dec_m, 0.0) if self.dec_mode != "Off" else 0.0
         self.prev_ra = ra_c
         self.ra_err -= ra_c * GAIN
-        self.dec_err -= dec_c * GAIN
-        ms = lambda c: round(abs(c) / self.scale * 180)  # noqa: E731
+        self.dec_err -= dec_c
+        ms = lambda c, rate: round(abs(c) / self.scale / rate * 1000)  # noqa: E731
         return {
             "Event": "GuideStep", "Timestamp": time.time(), "Host": "sim", "Inst": 1, "Frame": self.frame, "Time": t,
             "Mount": "Sim Mount", "dx": ra_m / self.scale, "dy": dec_m / self.scale,
             "RADistanceRaw": ra_m / self.scale, "DECDistanceRaw": dec_m / self.scale,
-            "RADuration": ms(ra_c), "RADirection": "East" if ra_c > 0 else "West",
-            "DECDuration": ms(dec_c), "DECDirection": "North" if dec_c > 0 else "South",
+            "RADuration": ms(ra_c, X_RATE), "RADirection": "East" if ra_c > 0 else "West",
+            "DECDuration": ms(dec_c, Y_RATE), "DECDirection": "North" if dec_c > 0 else "South",
             "StarMass": max(500.0, 5200 + random.gauss(0, 260)),
             "SNR": max(3.0, 26 - (self.seeing - 2.0) * 5 + random.gauss(0, 1.5)),
             "HFD": self.seeing / self.scale + random.gauss(0, 0.05),
             "AvgDist": math.hypot(ra_m, dec_m) / self.scale, "RALimited": False, "DecLimited": False,
         }
+
+    def lst(self) -> float:
+        return (LST0_H + (time.time() - self.started) / 3600 * 1.0027379) % 24
+
+    def polar_drift(self) -> float:
+        """The pointing's Dec drift from the polar error, ″/min, + = north (see polar.py)."""
+        h = (((self.lst() - RA_H + 12) % 24) - 12) * math.pi / 12
+        k = 60 * 2 * math.pi / 1436.07
+        return k * (PA_AZ * math.cos(math.radians(LATITUDE)) * math.cos(h) - PA_ALT * math.sin(h))
 
     def star(self, size: int) -> Optional[dict]:
         import base64
@@ -192,7 +207,7 @@ class FakePhd2:
         elif m == "get_calibrated":
             r = True
         elif m == "get_calibration_data":
-            r = {"xAngle": 87.3, "yAngle": -2.1, "xRate": 3.912, "yRate": 3.705, "xParity": "+", "yParity": "+", "declination": 41.0}
+            r = {"xAngle": 87.3, "yAngle": -2.1, "xRate": X_RATE, "yRate": Y_RATE, "xParity": "+", "yParity": "+", "declination": 41.0}
         elif m == "get_algo_param_names":
             axis = p[0] if p else "ra"
             r = ["algorithmName", *s.params[axis]]
@@ -322,7 +337,8 @@ def nina_router(sim: Sim) -> APIRouter:
         elif device == "mount":
             base.update(Name="Sim EQ6-R", Altitude=58.2, Azimuth=141.9, SideOfPier="pierWest", TimeToMeridianFlip=1.42,
                         TrackingEnabled=True, AtPark=False, Slewing=False, RightAscensionString="00:42:44", DeclinationString="+41° 16' 09\"",
-                        SiderealTimeString="23:18:02", TrackingRate={"TrackingMode": "Sidereal"})
+                        SiderealTimeString="23:18:02", TrackingRate={"TrackingMode": "Sidereal"},
+                        SiderealTime=sim.lst(), RightAscension=RA_H, Declination=DEC_DEG, SiteLatitude=LATITUDE)
         elif device == "focuser":
             base.update(Name="Sim EAF", Position=sim.focus, Temperature=6.4, IsMoving=False, StepSize=4.5, TempComp=False)
         elif device == "filterwheel":

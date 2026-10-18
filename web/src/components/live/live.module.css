@@ -68,6 +68,12 @@
 }
 
 .advToggle,
+.switches {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+}
+
 .switch {
   display: inline-flex;
   align-items: center;
