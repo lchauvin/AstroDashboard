@@ -81,7 +81,11 @@ export type DashSettings = {
   advisor?: AdvisorSettings;
   /** Live: stop the NINA sequence while the guide star is lost, resume it once guiding is steady. */
   guard?: GuardSettings;
+  /** Planning: push tonight's verdict to a phone through ntfy (see server/notify.ts). */
+  notify?: NotifySettings;
 };
+
+export type NotifySettings = { enabled: boolean; ntfyServer: string; ntfyTopic: string; moonlit: boolean; dashboardUrl: string };
 
 export type ObservatorySettings = { ninaHost: string; ninaPort: number; phd2Host: string; phd2Instance: number };
 export type GuardSettings = { enabled: boolean; stopAfterS: number; resumeAfterS: number; maxWaitMin: number };

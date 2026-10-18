@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import threading
 import time
 from collections import defaultdict
@@ -25,6 +26,17 @@ from .observatory.runtime import DEFAULTS as OBS_DEFAULTS
 
 log = logging.getLogger(__name__)
 
+NOTIFY_DEFAULTS: dict[str, Any] = {
+    "enabled": False,
+    "ntfyServer": "https://ntfy.sh",
+    # Anyone who knows the topic can read it, so it should be hard to guess.
+    "ntfyTopic": "",
+    # Also notify for clear but moonlit nights (not only Excellent / Good).
+    "moonlit": True,
+    # Opened when the notification is tapped, e.g. http://192.168.2.10:3006 (empty: no link).
+    "dashboardUrl": "",
+}
+
 DEFAULT_SETTINGS: dict[str, Any] = {
     # Implied hours above this flag an SNR goal as unrealistic (PLAN §6.4).
     "goalCapHours": 40,
@@ -36,6 +48,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "advisor": dict(OBS_DEFAULTS["advisor"]),
     # Live: stop the NINA sequence while the guide star is lost, resume it once guiding is steady (off by default).
     "guard": dict(OBS_DEFAULTS["guard"]),
+    # Planning: push tonight's verdict to a phone through ntfy (sent by the web app's /api/notify/tonight).
+    "notify": dict(NOTIFY_DEFAULTS),
 }
 # Settings that are no longer used (AstroController's address); dropped on the next save.
 RETIRED_SETTINGS = {"liveUrl"}
@@ -238,7 +252,7 @@ def register(app: FastAPI, state) -> None:
     def _settings() -> dict[str, Any]:
         stored = {k: v for k, v in (cache.get_json("settings") or {}).items() if k not in RETIRED_SETTINGS}
         out = {**DEFAULT_SETTINGS, **stored}
-        for key in ("observatory", "advisor", "guard"):  # partial objects keep the defaults for missing fields
+        for key in ("observatory", "advisor", "guard", "notify"):  # partial objects keep the defaults for missing fields
             out[key] = {**DEFAULT_SETTINGS[key], **(stored.get(key) or {})}
         return out
 
@@ -286,6 +300,21 @@ def register(app: FastAPI, state) -> None:
                 raise HTTPException(422, detail=f"guard.{key} must be {lo}–{hi}")
         return g
 
+    def _check_notify(n: Any) -> dict[str, Any]:
+        if not isinstance(n, dict) or set(n) - set(DEFAULT_SETTINGS["notify"]):
+            raise HTTPException(422, detail="notify: unknown fields")
+        for key in ("enabled", "moonlit"):
+            if key in n and not isinstance(n[key], bool):
+                raise HTTPException(422, detail=f"notify.{key} must be true or false")
+        n = {k: v.strip() if isinstance(v, str) else v for k, v in n.items()}
+        if "ntfyServer" in n and not (isinstance(n["ntfyServer"], str) and n["ntfyServer"].startswith(("http://", "https://"))):
+            raise HTTPException(422, detail="notify.ntfyServer must be an http(s) URL")
+        if "ntfyTopic" in n and not (isinstance(n["ntfyTopic"], str) and re.fullmatch(r"[A-Za-z0-9_-]{0,64}", n["ntfyTopic"])):
+            raise HTTPException(422, detail="notify.ntfyTopic: letters, digits, - and _ only (64 at most)")
+        if "dashboardUrl" in n and not (isinstance(n["dashboardUrl"], str) and (n["dashboardUrl"] == "" or n["dashboardUrl"].startswith(("http://", "https://")))):
+            raise HTTPException(422, detail="notify.dashboardUrl must be empty or an http(s) URL")
+        return n
+
     @app.get("/api/settings")
     def settings() -> dict[str, Any]:
         lib = state.library
@@ -309,12 +338,28 @@ def register(app: FastAPI, state) -> None:
             body["advisor"] = {**(stored.get("advisor") or {}), **_check_advisor(body["advisor"])}
         if "guard" in body:
             body["guard"] = {**(stored.get("guard") or {}), **_check_guard(body["guard"])}
+        if "notify" in body:
+            body["notify"] = {**(stored.get("notify") or {}), **_check_notify(body["notify"])}
         reconnect = "observatory" in body and body["observatory"] != (stored.get("observatory") or {})
         cache.set_json("settings", {**stored, **body})
         obs, loop = getattr(state, "observatory", None), getattr(state, "loop", None)
         if reconnect and obs is not None and loop is not None and obs.tasks:
             asyncio.run_coroutine_threadsafe(obs.reconfigure(), loop)
         return {"settings": _settings()}
+
+    # ------------------------------------------------------------------ notifications
+
+    @app.get("/api/notify/state")
+    def notify_state() -> dict[str, Any]:
+        """The last night verdict the web app checked (and whether it was sent), so it only re-sends on a change."""
+        return {"state": cache.get_json("notify-state")}
+
+    @app.put("/api/notify/state")
+    def save_notify_state(body: dict[str, Any]) -> dict[str, Any]:
+        if len(json.dumps(body)) > 5_000:
+            raise HTTPException(422, detail="Notification state too large")
+        cache.set_json("notify-state", body)
+        return {"state": body}
 
     # ------------------------------------------------------------------ goals
 

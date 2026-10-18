@@ -2,12 +2,14 @@ import Link from "next/link";
 
 import { EngineNotice } from "@/components/EngineNotice";
 import { LiveIngestSettings, type LiveConn } from "@/components/settings/LiveIngestSettings";
+import { NotifySettings } from "@/components/settings/NotifySettings";
 import { GoalCapForm, RigForm } from "@/components/settings/RigForm";
 import { SitesManager, type LearnedBin, type SiteSky } from "@/components/settings/SitesManager";
 import type { Suggestion } from "@/components/settings/SitesMap";
 import styles from "@/components/settings/settings.module.css";
 import { engineGet } from "@/lib/engine";
 import type { IngestStatus, LiveState } from "@/lib/live";
+import { NOTIFY_DEFAULTS } from "@/server/notify";
 import { loadPlanningData } from "@/server/planning";
 import pageStyles from "../library/library.module.css";
 
@@ -19,6 +21,7 @@ const TABS = [
   { id: "rig", label: "Rig" },
   { id: "goals", label: "Goals" },
   { id: "live", label: "Live · Ingest" },
+  { id: "notify", label: "Notifications" },
 ] as const;
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
@@ -80,6 +83,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           </p>
           <GoalCapForm cap={data.data.context.settings.goalCapHours} />
         </div>
+      ) : tab === "notify" ? (
+        <NotifySettings saved={{ ...NOTIFY_DEFAULTS, ...data.data.context.settings.notify }} />
       ) : (
         <LiveIngestSettings
           observatory={data.data.context.settings.observatory ?? { ninaHost: "127.0.0.1", ninaPort: 1888, phd2Host: "127.0.0.1", phd2Instance: 1 }}

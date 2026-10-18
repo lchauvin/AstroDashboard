@@ -95,6 +95,16 @@ def test_sites_goals_settings_api(data_root, tmp_path):
         assert client.put("/api/settings", json={"bogus": 1}).status_code == 422
         assert client.put("/api/settings", json={"goalCapHours": 30}).json()["settings"]["goalCapHours"] == 30
 
+        # Notifications: partial updates keep the defaults; the topic is checked; the state round-trips.
+        notify = client.put("/api/settings", json={"notify": {"ntfyTopic": " astro-x7k2 "}}).json()["settings"]["notify"]
+        assert notify["ntfyTopic"] == "astro-x7k2" and notify["ntfyServer"] == "https://ntfy.sh" and not notify["enabled"]
+        assert client.put("/api/settings", json={"notify": {"ntfyTopic": "a/b"}}).status_code == 422
+        assert client.put("/api/settings", json={"notify": {"dashboardUrl": "ftp://x"}}).status_code == 422
+        assert client.put("/api/settings", json={"notify": {"bogus": 1}}).status_code == 422
+        assert client.get("/api/notify/state").json()["state"] is None
+        client.put("/api/notify/state", json={"date": "2026-10-18", "sent": True, "level": "excellent"})
+        assert client.get("/api/notify/state").json()["state"]["sent"] is True
+
 
 def test_pointing_wraps_ra_through_zero():
     from astrodash.library import _pointing

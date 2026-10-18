@@ -48,6 +48,10 @@ API Keys; patrons and sponsors) the same way: target pages then show the object'
 surface brightness, Planning lists your Telescopius target lists and the month's sky events. Everything is cached in the engine. The engine scans on startup (about 8 s cold, under 1 s after that thanks to the
 header cache in `var/astrodash.db`); **Rescan** on the Library page picks up new nights.
 
+To get tonight's Planning verdict on your phone, set a topic in Settings → Notifications and subscribe to it in the free
+**ntfy** app, then run `scripts\install-notify-task.ps1` once: a scheduled task checks at 15:00 and 19:30 (the dashboard has
+to be running) and notifies only for good nights, with an update if the verdict changes. Runs are logged in `var\notify.log`.
+
 ## Data safety
 
 The engine never writes to the data root, with one bounded exception: auto-ingest in **Auto** mode moves finished
