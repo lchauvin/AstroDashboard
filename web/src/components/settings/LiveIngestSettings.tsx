@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import type { IngestStatus } from "@/lib/live";
-import type { AdvisorSettings, ObservatorySettings, ReasoningEffort } from "@/lib/planning/types";
+import type { AdvisorSettings, GuardSettings, ObservatorySettings, ReasoningEffort } from "@/lib/planning/types";
 import styles from "./settings.module.css";
 
 export type LiveConn = { nina: boolean; ninaError: string | null; phd2: boolean; phd2Error: string | null; simulated: boolean; key: { ok: boolean; message: string } };
@@ -17,10 +18,11 @@ async function send(path: string, method: string, body?: unknown) {
 }
 
 /** Settings → Live · Ingest: where NINA and PHD2 run, the AI advisor's model, and the NINA object → target table. */
-export function LiveIngestSettings({ observatory, advisor, conn, ingest }: { observatory: ObservatorySettings; advisor: AdvisorSettings; conn: LiveConn | null; ingest: IngestStatus | null }) {
+export function LiveIngestSettings({ observatory, advisor, guard, conn, ingest }: { observatory: ObservatorySettings; advisor: AdvisorSettings; guard: GuardSettings; conn: LiveConn | null; ingest: IngestStatus | null }) {
   const router = useRouter();
   const [obs, setObs] = useState(observatory);
   const [adv, setAdv] = useState(advisor);
+  const [grd, setGrd] = useState(guard);
   const [object, setObject] = useState("");
   const [rev, setRev] = useState(ingest?.targets.find((t) => t.stage === "acquiring")?.id ?? "");
   const [msg, setMsg] = useState<string | null>(null);
@@ -123,6 +125,38 @@ export function LiveIngestSettings({ observatory, advisor, conn, ingest }: { obs
       <p className={styles.hint}>
         {conn ? (conn.key.ok ? `Key: ${conn.key.message}.` : `${conn.key.message}.`) : null} The target RMS also sets the green/amber levels on the
         Guiding page; the automatic check does not ask the model while both axes are within it.
+      </p>
+
+      <h3 className="eyebrow" style={{ marginTop: 28 }}>Pause the sequence when guiding is lost</h3>
+      <p className={styles.hint} style={{ marginTop: 6 }}>
+        When the guide star has been lost (clouds, a tree) for longer than <b>Stop after</b>, the dashboard stops the NINA sequence; once PHD2 has
+        guided for <b>Resume after</b> without losing it, it starts the sequence again. NINA picks up at the first unfinished instruction and
+        retakes the interrupted exposure. Its pre-sequence checklist (“… continue anyway?”, e.g. with the flat panel unplugged) is skipped on
+        resume, so it cannot hold up the night. A deliberate guiding stop (meridian flip, autofocus, centering) never counts. PHD2 has to find
+        its star again by itself: if the star drifted out of its search region meanwhile, guiding does not come back, and neither does the
+        sequence.
+      </p>
+      <div className={styles.rowActions} style={{ marginTop: 10 }}>
+        <label className={styles.field} style={{ width: 130 }}>
+          <span>Stop after (s)</span>
+          <input className={styles.input} type="number" min={15} max={1800} step={15} value={grd.stopAfterS} onChange={(e) => setGrd({ ...grd, stopAfterS: Number(e.target.value) })} />
+        </label>
+        <label className={styles.field} style={{ width: 140 }}>
+          <span>Resume after (s)</span>
+          <input className={styles.input} type="number" min={15} max={1800} step={15} value={grd.resumeAfterS} onChange={(e) => setGrd({ ...grd, resumeAfterS: Number(e.target.value) })} />
+        </label>
+        <label className={styles.field} style={{ width: 150 }}>
+          <span>Give up after (min)</span>
+          <input className={styles.input} type="number" min={5} max={720} step={5} value={grd.maxWaitMin} onChange={(e) => setGrd({ ...grd, maxWaitMin: Number(e.target.value) })} />
+        </label>
+        <button type="button" className="button button-primary" onClick={() => run(() => send("/api/settings", "PUT", { guard: { stopAfterS: grd.stopAfterS, resumeAfterS: grd.resumeAfterS, maxWaitMin: grd.maxWaitMin } }), "Saved.")}>
+          Save
+        </button>
+      </div>
+      <p className={styles.hint}>
+        Give up: if guiding has not been steady again within this time, the sequence stays stopped. Starting the sequence yourself meanwhile
+        cancels the resume. Turn it on or off on <Link href="/live">Live › Overview</Link> (Sequence card, off by default{guard.enabled ? "; on now" : ""});
+        its state shows at the top of the Live pages.
       </p>
 
       <h3 className="eyebrow" style={{ marginTop: 28 }}>NINA object → target</h3>

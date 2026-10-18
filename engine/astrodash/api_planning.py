@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from . import astrospheric, halpha, planning
 from .observatory.llm import EFFORTS, LlmError, split_model
+from .observatory.guard import LIMITS as GUARD_LIMITS
 from .observatory.runtime import DEFAULTS as OBS_DEFAULTS
 
 log = logging.getLogger(__name__)
@@ -33,6 +34,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "observatory": dict(OBS_DEFAULTS["observatory"]),
     # Live → Guiding: the AI advisor (suggests guiding changes; its API key comes from .env, never from here).
     "advisor": dict(OBS_DEFAULTS["advisor"]),
+    # Live: stop the NINA sequence while the guide star is lost, resume it once guiding is steady (off by default).
+    "guard": dict(OBS_DEFAULTS["guard"]),
 }
 # Settings that are no longer used (AstroController's address); dropped on the next save.
 RETIRED_SETTINGS = {"liveUrl"}
@@ -235,7 +238,7 @@ def register(app: FastAPI, state) -> None:
     def _settings() -> dict[str, Any]:
         stored = {k: v for k, v in (cache.get_json("settings") or {}).items() if k not in RETIRED_SETTINGS}
         out = {**DEFAULT_SETTINGS, **stored}
-        for key in ("observatory", "advisor"):  # partial objects keep the defaults for missing fields
+        for key in ("observatory", "advisor", "guard"):  # partial objects keep the defaults for missing fields
             out[key] = {**DEFAULT_SETTINGS[key], **(stored.get(key) or {})}
         return out
 
@@ -273,6 +276,16 @@ def register(app: FastAPI, state) -> None:
             raise HTTPException(422, detail="advisor.targetRms must be 0.2–5 arcsec")
         return a
 
+    def _check_guard(g: Any) -> dict[str, Any]:
+        if not isinstance(g, dict) or set(g) - set(DEFAULT_SETTINGS["guard"]):
+            raise HTTPException(422, detail="guard: unknown fields")
+        if "enabled" in g and not isinstance(g["enabled"], bool):
+            raise HTTPException(422, detail="guard.enabled must be true or false")
+        for key, (lo, hi) in GUARD_LIMITS.items():
+            if key in g and not (isinstance(g[key], (int, float)) and not isinstance(g[key], bool) and lo <= g[key] <= hi):
+                raise HTTPException(422, detail=f"guard.{key} must be {lo}–{hi}")
+        return g
+
     @app.get("/api/settings")
     def settings() -> dict[str, Any]:
         lib = state.library
@@ -294,6 +307,8 @@ def register(app: FastAPI, state) -> None:
             body["observatory"] = {**(stored.get("observatory") or {}), **_check_observatory(body["observatory"])}
         if "advisor" in body:
             body["advisor"] = {**(stored.get("advisor") or {}), **_check_advisor(body["advisor"])}
+        if "guard" in body:
+            body["guard"] = {**(stored.get("guard") or {}), **_check_guard(body["guard"])}
         reconnect = "observatory" in body and body["observatory"] != (stored.get("observatory") or {})
         cache.set_json("settings", {**stored, **body})
         obs, loop = getattr(state, "observatory", None), getattr(state, "loop", None)

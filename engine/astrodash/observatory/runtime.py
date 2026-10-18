@@ -23,6 +23,7 @@ from typing import Any, Callable
 from . import advisor as adv
 from . import equipment as eq
 from . import frames as fr
+from . import guard as gd
 from . import guiding, llm, polar
 from .nina import NinaError, NinaRest, NinaUnavailable, listen, parse_sequence, state_targets
 from .phd2 import Phd2Client, Phd2Disconnected, Phd2Error
@@ -33,11 +34,13 @@ DEFAULTS = {
     "observatory": {"ninaHost": "127.0.0.1", "ninaPort": 1888, "phd2Host": "127.0.0.1", "phd2Instance": 1},
     "advisor": {"enabled": False, "model": "ollama/llama3.1:8b", "ollamaUrl": "http://localhost:11434",
                 "intervalMin": 10, "targetRms": 0.8, "effort": "none", "autoApply": False},
+    "guard": dict(gd.DEFAULTS),
 }
 
 POLL_S = 4.0
 HISTORY_S = 30.0
 ADVISOR_TICK_S = 20.0
+GUARD_TICK_S = 5.0
 LOST_KEEP_S = 1800.0
 PHD2_ERRORS = (Phd2Error, Phd2Disconnected, asyncio.TimeoutError)
 
@@ -58,6 +61,7 @@ class Observatory:
         self.dist = guiding.Disturbances()
         self.advisor = adv.Advisor(store)
         self._analysis_task: asyncio.Task | None = None
+        self.guard = gd.SequenceGuard(store)
         self.polar = polar.PolarTracker(store)
         self.phd2: Phd2Client | None = None
         self.nina: NinaRest | None = None
@@ -81,6 +85,9 @@ class Observatory:
 
     def adv_settings(self) -> dict:
         return {**DEFAULTS["advisor"], **(self._settings().get("advisor") or {})}
+
+    def guard_settings(self) -> dict:
+        return {**DEFAULTS["guard"], **(self._settings().get("guard") or {})}
 
     def obs_settings(self) -> dict:
         return {**DEFAULTS["observatory"], **(self._settings().get("observatory") or {})}
@@ -113,6 +120,7 @@ class Observatory:
             asyncio.create_task(self._supervise("nina_ws", self._run_ws), name="obs-nina-ws"),
             asyncio.create_task(self._poll_nina(), name="obs-nina-poll"),
             asyncio.create_task(self._advisor_loop(), name="obs-advisor"),
+            asyncio.create_task(self._guard_loop(), name="obs-guard"),
             asyncio.create_task(self._frames_loop(), name="obs-frames"),
         ]
         log.info("observatory: NINA %s, PHD2 %s:%d%s", self.nina_root(), host, port, " (simulated)" if self.simulated else "")
@@ -163,10 +171,12 @@ class Observatory:
             await self.phd2.run()
         finally:
             self.dist.begin("disconnected")
+            self.guard.reset_signals()
 
     def _on_phd2_event(self, msg: dict) -> None:
         ev = msg.get("Event")
         d = self.dist
+        self.guard.on_phd2_event(ev, time.time())
         if ev == "GuideStep":
             if self.phd2 and self.phd2.state.pixel_scale:
                 self.buffer.scale = self.phd2.state.pixel_scale
@@ -512,6 +522,44 @@ class Observatory:
             except Exception:  # noqa: BLE001 — a bad tick must not kill the loop
                 log.exception("advisor tick failed")
 
+    # ------------------------------------------------------------------ sequence guard
+
+    async def _guard_loop(self) -> None:
+        while True:
+            await asyncio.sleep(GUARD_TICK_S)
+            try:
+                await self.guard_tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — a bad tick must not kill the loop
+                log.exception("sequence guard tick failed")
+
+    async def guard_tick(self) -> None:
+        g, now = self.guard, time.time()
+        guiding = bool(self.phd2 and self.phd2.connected and self.phd2.state.app_state == "Guiding")
+        action = g.decide(now, self.guard_settings(), self.sequence_running(), guiding)
+        if not action or not self.nina:
+            return
+        try:
+            if action == "stop":
+                await self.nina.sequence_stop()
+                g.stopped(now, now - (g.lost_since or now))
+                self.dist.events.append((now, "sequence stopped (guide star lost)"))
+                log.warning("sequence guard: guide star lost, sequence stopped")
+            else:
+                await self.nina.sequence_start(skip_validation=True)
+                g.started(now, now - (g.steady_since or now))
+                self.dist.events.append((now, "sequence resumed"))
+                log.warning("sequence guard: guiding steady again, sequence resumed")
+        except NinaError as exc:
+            if action == "start" and "already running" in str(exc):
+                g.forget("The sequence was already running when the guard went to resume it.", now)
+            else:
+                g.error = f"Could not {action} the sequence: {exc}"
+        except NinaUnavailable as exc:
+            g.error = f"Could not {action} the sequence: NINA is not answering ({exc})"
+        self._wake_history.set()  # re-read NINA's state now rather than at the next poll
+
     # ------------------------------------------------------------------ snapshot
 
     def sequence_running(self) -> bool | None:
@@ -591,5 +639,6 @@ class Observatory:
                 "check": self.advisor_check, "analyses": list(reversed(analyses[-10:])), "changes": list(reversed(changes)),
             },
             "polar": self.polar.summary(),
+            "guard": self.guard.as_dict(time.time(), self.guard_settings()),
             "paramInfo": {k: {"label": v[0], "help": v[1], "basic": k in adv.BASIC_PARAMS} for k, v in adv.PARAM_INFO.items()},
         }

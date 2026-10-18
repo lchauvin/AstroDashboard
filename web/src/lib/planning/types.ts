@@ -79,9 +79,12 @@ export type DashSettings = {
   observatory?: ObservatorySettings;
   /** Live → Guiding: the AI advisor. Its API key is read from the engine's .env, never stored here. */
   advisor?: AdvisorSettings;
+  /** Live: stop the NINA sequence while the guide star is lost, resume it once guiding is steady. */
+  guard?: GuardSettings;
 };
 
 export type ObservatorySettings = { ninaHost: string; ninaPort: number; phd2Host: string; phd2Instance: number };
+export type GuardSettings = { enabled: boolean; stopAfterS: number; resumeAfterS: number; maxWaitMin: number };
 export type ReasoningEffort = "none" | "low" | "medium" | "high";
 export type AdvisorSettings = { enabled: boolean; model: string; ollamaUrl: string; intervalMin: number; targetRms: number; effort: ReasoningEffort; autoApply: boolean };
 

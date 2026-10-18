@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { clock, duration, filterLetterOf, fmt, type DeviceCard, type Frame, type IngestStatus, type LiveState, type SeqStep } from "@/lib/live";
+import { clock, duration, enginePost, filterLetterOf, fmt, type DeviceCard, type Frame, type IngestStatus, type LiveState, type SeqStep } from "@/lib/live";
 import { FilterChip, Marks, StatusIcon, Tip } from "../ui";
 import { LiveBar, NotConnected } from "./LiveBar";
 import styles from "./live.module.css";
@@ -16,7 +16,7 @@ const DEC = "var(--filter-H)";
 
 /** `beforeFrames` is rendered just above Tonight's frames (the page puts Auto-ingest there). */
 export function Overview({ initial, ingest, beforeFrames }: { initial: LiveState | null; ingest: IngestStatus | null; beforeFrames?: React.ReactNode }) {
-  const { data: s, offline } = useLive(initial, 180);
+  const { data: s, offline, refresh } = useLive(initial, 180);
   const [adv] = useAdvanced();
   if (!s)
     return (
@@ -32,7 +32,7 @@ export function Overview({ initial, ingest, beforeFrames }: { initial: LiveState
       <div className={styles.topGrid}>
         <LatestFrame s={s} adv={adv} />
         <div className={styles.sideCol}>
-          <SequenceCard s={s} adv={adv} />
+          <SequenceCard s={s} adv={adv} refresh={refresh} />
           <GuidingMini s={s} />
           <TonightTarget initial={ingest} />
         </div>
@@ -98,7 +98,7 @@ const SEQ_STATE: Record<string, { label: string; level: "ok" | "info" | "warn" }
   none: { label: "No sequence loaded", level: "warn" },
 };
 
-function SequenceCard({ s, adv }: { s: LiveState; adv: boolean }) {
+function SequenceCard({ s, adv, refresh }: { s: LiveState; adv: boolean; refresh: () => Promise<unknown> }) {
   const q = s.sequence;
   const cur = q.current;
   const info = cur?.info ?? {};
@@ -154,7 +154,40 @@ function SequenceCard({ s, adv }: { s: LiveState; adv: boolean }) {
       ) : (
         <p className={styles.hint}>Waiting for NINA.</p>
       )}
+      {s.guard ? <GuardToggle g={s.guard} refresh={refresh} /> : null}
     </section>
+  );
+}
+
+/** The sequence guard's on/off; its timings are in Settings → Live · Ingest, its state on the Live bar. */
+function GuardToggle({ g, refresh }: { g: NonNullable<LiveState["guard"]>; refresh: () => Promise<unknown> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const toggle = async (enabled: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await enginePost("/api/settings", { guard: { enabled } }, "PUT");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className={styles.guardToggle}>
+      <Tip tip="Stops the NINA sequence when the guide star has been lost (clouds) for a while, and starts it again once PHD2 has guided steadily. NINA's pre-sequence checklist is skipped on resume. A meridian flip, autofocus or centering never counts.">
+        <label className={styles.switch}>
+          <input type="checkbox" checked={g.enabled} disabled={busy} onChange={(e) => void toggle(e.target.checked)} />
+          <span>Pause when guiding is lost</span>
+        </label>
+      </Tip>
+      <span className={styles.hint}>
+        stop after {g.stopAfterS} s lost · resume after {g.resumeAfterS} s steady · <Link href="/settings?tab=live">timings</Link>
+      </span>
+      {error ? <span className={styles.error}>{error}</span> : null}
+    </div>
   );
 }
 

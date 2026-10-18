@@ -450,3 +450,83 @@ def test_auto_apply_takes_the_top_suggestion_skips_when_unsafe_and_reverts_a_wor
         assert obs.phd2.state.params["ra"]["aggression"] == 0.7
 
     asyncio.run(run())
+
+
+def test_guard_stops_on_a_lost_star_and_resumes_after_steady_guiding():
+    from astrodash.observatory.guard import DEFAULTS, SequenceGuard
+
+    s = {**DEFAULTS, "enabled": True}
+    g = SequenceGuard(_Store())
+    g.on_phd2_event("GuideStep", 0)
+    for t in range(1, 60):
+        g.on_phd2_event("StarLost", t)
+    assert g.decide(59, s, running=True, guiding=True) is None  # 58 s lost
+    assert g.decide(61, s, running=True, guiding=True) == "stop"
+    assert g.decide(61, {**s, "enabled": False}, running=True, guiding=True) is None  # off by default
+    g.stopped(61, 60)
+    assert g.decide(70, s, running=True, guiding=True) is None  # NINA's state not re-read yet: no false "started by you"
+    g.on_phd2_event("GuideStep", 100)
+    g.on_phd2_event("StarLost", 130)  # a passing cloud: the steady minute starts again
+    g.on_phd2_event("GuideStep", 140)
+    assert g.decide(190, s, running=False, guiding=True) is None
+    assert g.decide(201, s, running=False, guiding=True) == "start"
+    g.started(201, 61)
+    assert g.paused_at is None and "resumed" in g.log[-1]["message"]
+
+
+def test_guard_ignores_deliberate_stops_and_steps_aside():
+    from astrodash.observatory.guard import DEFAULTS, SequenceGuard
+
+    s = {**DEFAULTS, "enabled": True}
+    g = SequenceGuard(_Store())
+    g.on_phd2_event("StarLost", 0)
+    g.on_phd2_event("GuidingStopped", 5)  # a meridian flip or autofocus: NINA stopped guiding itself
+    assert g.decide(300, s, running=True, guiding=False) is None
+
+    g.on_phd2_event("StarLost", 300)
+    g.stopped(400, 100)
+    assert g.decide(500, s, running=True, guiding=True) is None  # you started it yourself
+    assert g.paused_at is None and "outside the guard" in g.log[-1]["message"]
+
+    g.stopped(600, 100)
+    assert g.decide(600 + 121 * 60, s, running=False, guiding=False) is None  # no guiding for 2 h: give up
+    assert g.paused_at is None and "gave up" in g.log[-1]["message"]
+
+    g.stopped(10_000, 100)
+    assert g.decide(10_010, {**s, "enabled": False}, running=False, guiding=True) is None
+    assert g.paused_at is None and "turned off" in g.log[-1]["message"]
+
+
+def test_guard_tick_calls_nina_and_skips_the_checklist(tmp_path):
+    from astrodash.observatory import runtime
+    from astrodash.observatory.nina import NinaError
+
+    settings = {"guard": {"enabled": True, "stopAfterS": 15, "resumeAfterS": 15}}
+    obs = runtime.Observatory(lambda: settings, _Store(), tmp_path)
+    obs.phd2 = _FakePhd2({"ra": {}, "dec": {}})
+    calls = []
+
+    class Nina:
+        async def sequence_stop(self):
+            calls.append("stop")
+
+        async def sequence_start(self, skip_validation):
+            calls.append(("start", skip_validation))
+            raise NinaError("/sequence/start: Sequence is already running")
+
+    obs.nina = Nina()
+    now = time.time()
+    obs.sequence = {"available": True, "status": "running"}
+    obs.nina_status.update(connected=True, lastOk=now)
+    obs.guard.on_phd2_event("StarLost", now - 20)
+
+    async def run():
+        await obs.guard_tick()
+        assert calls == ["stop"] and obs.guard.paused_at
+        obs.sequence["status"] = "idle"
+        obs.guard.on_phd2_event("GuideStep", now - 20)
+        await obs.guard_tick()
+        assert calls[-1] == ("start", True)
+        assert obs.guard.paused_at is None and "already running" in obs.guard.log[-1]["message"]
+
+    asyncio.run(run())

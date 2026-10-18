@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 
-import { ago, type LiveState } from "@/lib/live";
+import { ago, clock, enginePost, type GuardState, type LiveState } from "@/lib/live";
 import { StatusIcon } from "../ui";
 import styles from "./live.module.css";
 import { useAdvanced } from "./useLive";
@@ -52,6 +53,56 @@ export function LiveBar({ s, offline, tab }: { s: LiveState | null; offline: boo
             </span>
           ))}
         </div>
+      ) : null}
+      {s?.guard ? <GuardRow g={s.guard} now={s.serverTime} /> : null}
+    </div>
+  );
+}
+
+/** The sequence guard, when it has something to say: a star being lost, a stopped sequence waiting to resume, or what it just did. */
+function GuardRow({ g, now }: { g: GuardState; now: number }) {
+  const [error, setError] = useState<string | null>(null);
+  const last = g.log[0];
+  const cancel = async () => {
+    setError(null);
+    try {
+      await enginePost("/api/live/guard/cancel");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  let body: React.ReactNode = null;
+  if (g.state === "paused" && g.pausedAt) {
+    body = (
+      <>
+        <StatusIcon level="warn" size={13} /> Sequence stopped at {clock(g.pausedAt)}: guide star lost. It resumes after {g.resumeAfterS} s of steady guiding
+        {g.steadyForS !== null ? ` (steady for ${g.steadyForS} s)` : " (PHD2 has not found the star yet)"}; gives up at {clock(g.giveUpAt)}.{" "}
+        <button type="button" className={styles.link} onClick={() => void cancel()}>
+          Don&apos;t resume
+        </button>
+      </>
+    );
+  } else if (g.state === "lost" && g.lostForS !== null) {
+    body = (
+      <>
+        <StatusIcon level="warn" size={13} /> Guide star lost for {g.lostForS} s: the sequence stops at {g.stopAfterS} s unless guiding comes back.
+      </>
+    );
+  } else if (last && now - last.t < 900) {
+    body = (
+      <>
+        <StatusIcon level="info" size={13} /> {clock(last.t)} · {last.message}
+      </>
+    );
+  }
+  if (!body && !g.error && !error) return null;
+  return (
+    <div className={styles.lostRow} role="status">
+      {body ? <span className={styles.lost}>{body}</span> : null}
+      {g.error || error ? (
+        <span className={styles.lost}>
+          <StatusIcon level="bad" size={13} /> {error ?? g.error}
+        </span>
       ) : null}
     </div>
   );

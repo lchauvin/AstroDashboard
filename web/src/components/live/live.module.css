@@ -67,17 +67,27 @@
   color: var(--color-accent-700);
 }
 
-.advToggle,
+.guardToggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-divider);
+}
+
 .switches {
   display: inline-flex;
   align-items: center;
   gap: 16px;
 }
 
+.advToggle,
 .switch {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   font: 400 10.5px/1 var(--font-mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -85,12 +95,64 @@
   user-select: none;
 }
 
+/* A checkbox drawn as a sliding switch: still a checkbox for keyboard and screen readers. */
 .advToggle input,
 .switch input {
-  accent-color: var(--color-accent);
-  width: 15px;
-  height: 15px;
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 28px;
+  height: 16px;
   margin: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-text) 22%, transparent);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.advToggle input::before,
+.switch input::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-bg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+
+.advToggle input:checked,
+.switch input:checked {
+  background: var(--color-accent);
+}
+
+.advToggle input:checked::before,
+.switch input:checked::before {
+  transform: translateX(12px);
+}
+
+.advToggle input:focus-visible,
+.switch input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.advToggle input:disabled,
+.switch input:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .advToggle input,
+  .switch input,
+  .advToggle input::before,
+  .switch input::before {
+    transition: none;
+  }
 }
 
 .lostRow {

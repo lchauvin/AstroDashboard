@@ -192,6 +192,13 @@ def register(app: FastAPI, state) -> None:
             raise HTTPException(409, detail=str(exc)) from exc
         return {"started": True}
 
+    @app.post("/api/live/guard/cancel")
+    def guard_cancel() -> dict[str, Any]:
+        if obs.guard.paused_at is None:
+            raise HTTPException(409, detail="The guard has nothing to resume")
+        obs.guard.forget("Resume cancelled by you: the sequence stays stopped.")
+        return {"ok": True}
+
     @app.post("/api/live/advisor/suggestions/{sid}/apply")
     async def advisor_apply(sid: str) -> dict[str, Any]:
         s = obs.advisor.suggestion(sid)

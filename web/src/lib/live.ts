@@ -61,6 +61,21 @@ export type GuideGraph = {
   events: { t: number; label: string }[];
 };
 
+/** The sequence guard (engine `guard.py`): stops the NINA sequence while the guide star is lost, resumes it after steady guiding. */
+export type GuardState = {
+  enabled: boolean;
+  stopAfterS: number;
+  resumeAfterS: number;
+  maxWaitMin: number;
+  state: "off" | "watching" | "lost" | "paused";
+  error: string | null;
+  pausedAt: number | null;
+  lostForS: number | null;
+  steadyForS: number | null;
+  giveUpAt: number | null;
+  log: { t: number; message: string }[];
+};
+
 /** Polar alignment read from PHD2's Dec corrections (engine `polar.py`). Rates are the pointing's Dec drift, ″/min, + = north. */
 export type PolarFit =
   | { ok: false; reason: string }
@@ -165,6 +180,8 @@ export type LiveState = {
   paramInfo: Record<string, { label: string; help: string; basic: boolean }>;
   /** Absent from engines older than the polar-alignment estimate. */
   polar?: Polar;
+  /** Absent from engines older than the sequence guard. */
+  guard?: GuardState;
 };
 
 // ---------------------------------------------------------------- auto-ingest

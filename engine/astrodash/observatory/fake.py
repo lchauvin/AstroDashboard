@@ -57,6 +57,8 @@ class Sim:
         self.focus = 18500
         self.images: list[dict] = []
         self.exposure_started = time.time()
+        self.sequence_running = True
+        self.cloud_until = 0.0  # /fake-nina/v2/api/sim/cloud: the guide star is lost until then
 
     def step(self) -> dict:
         self.frame += 1
@@ -261,6 +263,9 @@ class FakePhd2:
             await asyncio.sleep(self.sim.exposure_ms / 1000)
             if self.sim.state != "Guiding":
                 continue
+            if time.time() < self.sim.cloud_until:
+                await self.broadcast({"Event": "StarLost", "Frame": self.sim.frame, "SNR": 1.2, "Status": "star lost - low SNR"})
+                continue
             await self.broadcast(self.sim.step())
             if time.time() >= next_dither:
                 next_dither = time.time() + random.uniform(260, 360)
@@ -299,13 +304,14 @@ def nina_router(sim: Sim) -> APIRouter:
     @router.get("/api/sequence/json")
     async def sequence():
         n = len(sim.images)
+        run = "RUNNING" if sim.sequence_running else "CREATED"
         return ok([
             {"Name": "Start", "Status": "FINISHED", "Items": [{"Name": "Cool Camera", "Status": "FINISHED"}, {"Name": "Unpark Scope", "Status": "FINISHED"}]},
-            {"Name": "Targets", "Status": "RUNNING", "Items": [
-                {"Name": sim.target, "Status": "RUNNING", "Conditions": [{"Name": "Loop Until Time"}], "Items": [
+            {"Name": "Targets", "Status": run, "Items": [
+                {"Name": sim.target, "Status": run, "Conditions": [{"Name": "Loop Until Time"}], "Items": [
                     {"Name": "Slew and Center", "Status": "FINISHED"},
                     {"Name": "Run Autofocus", "Status": "FINISHED"},
-                    {"Name": "Smart Exposure", "Status": "RUNNING", "ExposureTime": EXPOSURE_S, "Filter": {"Name": sim.filter},
+                    {"Name": "Smart Exposure", "Status": run, "ExposureTime": EXPOSURE_S, "Filter": {"Name": sim.filter},
                      "Gain": 100, "Offset": 50, "ImageType": "LIGHT",
                      "Conditions": [{"Name": "Loop For Iterations", "Iterations": 60, "CompletedIterations": min(n, 60)}]},
                     {"Name": "Smart Exposure", "Status": "CREATED", "ExposureTime": EXPOSURE_S, "Filter": {"Name": "OIII"},
@@ -315,6 +321,26 @@ def nina_router(sim: Sim) -> APIRouter:
             {"Name": "End", "Status": "CREATED", "Items": [{"Name": "Warm Camera", "Status": "CREATED"}, {"Name": "Park Scope", "Status": "CREATED"}]},
             {"GlobalTriggers": [{"Name": "Meridian Flip"}]},
         ])
+
+    @router.get("/api/sequence/stop")
+    async def sequence_stop():
+        sim.sequence_running = False
+        log.info("[sim] sequence stopped")
+        return ok("Sequence stopped")
+
+    @router.get("/api/sequence/start")
+    async def sequence_start(skipValidation: bool = False):  # noqa: N803 — the API's own name
+        if sim.sequence_running:
+            return {"Response": None, "Error": "Sequence is already running", "StatusCode": 409, "Success": False, "Type": "API"}
+        sim.sequence_running = True
+        log.info("[sim] sequence started (skipValidation=%s)", skipValidation)
+        return ok("Sequence started")
+
+    @router.get("/api/sim/cloud")
+    async def sim_cloud(seconds: float = 120):
+        """Not NINA: a cloud for the simulator. The guide star is lost for `seconds`."""
+        sim.cloud_until = time.time() + seconds
+        return ok(f"cloud for {seconds:g} s")
 
     @router.get("/api/sequence/state")
     async def sequence_state():
@@ -378,6 +404,8 @@ def nina_router(sim: Sim) -> APIRouter:
     async def emit() -> None:
         while True:
             await asyncio.sleep(FRAME_EVERY_S)
+            if not sim.sequence_running:
+                continue
             sim.exposure_started = time.time()
             rec = stats(len(sim.images))
             sim.images.append(rec)

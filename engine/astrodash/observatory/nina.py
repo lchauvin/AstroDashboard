@@ -120,6 +120,14 @@ class NinaRest:
             raise NinaError(f"{path}: {err}")
         return resp.content, ctype
 
+    async def sequence_stop(self) -> None:
+        await self.get("/sequence/stop")
+
+    async def sequence_start(self, skip_validation: bool = True) -> None:
+        """Without `skip_validation` NINA would ask its pre-sequence checklist on the observatory PC and
+        this call would wait for someone to click."""
+        await self.get("/sequence/start", skipValidation=skip_validation)
+
     async def equipment(self) -> dict[str, Any]:
         """Every device at once (concurrently: a stalled focuser must not delay the camera)."""
 
