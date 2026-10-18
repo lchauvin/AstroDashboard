@@ -298,17 +298,22 @@ function AdvisorBadges({ a }: { a: LiveState["advisor"] }) {
 
 function Device({ d, adv }: { d: DeviceCard; adv: boolean }) {
   const facts = d.facts.filter((f) => adv || !f.advanced);
+  const alert = d.level === "warn" || d.level === "bad"; // a warning reads under the device name, not squeezed beside the label
+  const state = (
+    <span className={styles.state}>
+      {d.level ? <StatusIcon level={d.level} size={13} /> : null}
+      {d.status}
+    </span>
+  );
   const body = (
     <>
       <Marks />
       <div className={styles.cardHead}>
         <span className="eyebrow">{d.label}</span>
-        <span className={styles.state}>
-          {d.level ? <StatusIcon level={d.level} size={13} /> : null}
-          {d.status}
-        </span>
+        {alert ? null : state}
       </div>
       {d.name ? <div className={styles.deviceName}>{d.name}</div> : null}
+      {alert ? <div className={styles.deviceAlert}>{state}</div> : null}
       {facts.length ? (
         <dl className={styles.facts}>
           {facts.map((f) => (

@@ -463,6 +463,10 @@
   overflow-wrap: anywhere;
 }
 
+.deviceAlert {
+  margin-top: -4px; /* belongs to the name above it more than to the facts below */
+}
+
 .facts {
   display: flex;
   flex-direction: column;
