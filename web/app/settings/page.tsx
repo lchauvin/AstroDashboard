@@ -89,6 +89,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <LiveIngestSettings
           observatory={data.data.context.settings.observatory ?? { ninaHost: "127.0.0.1", ninaPort: 1888, phd2Host: "127.0.0.1", phd2Instance: 1 }}
           advisor={data.data.context.settings.advisor ?? { enabled: false, model: "ollama/llama3.1:8b", ollamaUrl: "http://localhost:11434", intervalMin: 10, targetRms: 0.8, effort: "none", autoApply: false }}
+          downloadDir={data.data.context.settings.ingest?.downloadDir ?? ""}
           skyMonitor={data.data.context.settings.skyMonitor ?? { enabled: false, windowS: 60, lostPct: 75, dimPct: 50, clearAfterS: 120, giveUpMin: 120 }}
           conn={live?.ok ? liveConn(live.data) : null}
           ingest={ingest?.ok ? ingest.data : null}

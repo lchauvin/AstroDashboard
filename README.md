@@ -44,7 +44,8 @@ npm run dev -- --port 3006
 ```
 
 Open http://localhost:3006. For Live, enable NINA's Advanced API plugin and PHD2's server (Tools → Enable Server)
-and set their addresses in Settings → Live · Ingest. To try Live in daylight, start the engine with
+and set their addresses in Settings → Live · Ingest, along with the folder NINA saves its frames into (the SMB share's
+local path on this PC; `G:\Astro\.Download` by default, and it must be on the data root's drive). To try Live in daylight, start the engine with
 `uv run astrodash-engine --fake-observatory` (simulated NINA and PHD2; the guiding reacts to its parameters).
 The Guiding page's AI advisor uses the model set in the same Settings tab; API keys go in `.env` (see `.env.example`).
 To have NINA react to clouds, connect its safety monitor (Equipment › Safety Monitor) to "AstroDashboard sky monitor",

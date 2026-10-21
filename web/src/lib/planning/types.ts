@@ -83,10 +83,13 @@ export type DashSettings = {
   skyMonitor?: SkyMonitorSettings;
   /** Planning: push tonight's verdict to a phone through ntfy (see server/notify.ts). */
   notify?: NotifySettings;
+  /** Live · Ingest: the folder NINA's frames land in (the SMB share's local path); "" = <data root>\.Download. */
+  ingest?: IngestSettings;
 };
 
 export type NotifySettings = { enabled: boolean; ntfyServer: string; ntfyTopic: string; moonlit: boolean; dashboardUrl: string };
 
+export type IngestSettings = { downloadDir: string };
 export type ObservatorySettings = { ninaHost: string; ninaPort: number; phd2Host: string; phd2Instance: number };
 export type SkyMonitorSettings = {
   enabled: boolean;

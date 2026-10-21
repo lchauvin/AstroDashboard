@@ -3,8 +3,9 @@
 Every operation is re-checked against the disk just before it runs:
 - the source exists (and a file still has the size and mtime recorded when the plan was made);
 - the destination does not exist — nothing is ever overwritten;
-- every path stays inside the data root, out of `.Download` (ingest's lane) and
-  out of the global `.Calibration` library; `trash` only targets `.Trash\\<plan>`;
+- every path stays inside the data root and out of its dot folders (the download folder, ingest's
+  lane; the global `.Calibration` library; `.PixInsight`…) but its own: `trash` only targets
+  `.Trash\\<plan>`, backups `.Dashboard\\backups\\<plan>`;
 - renames stay on one volume (atomic).
 
 There is no delete: `rmdir_empty` uses `os.rmdir`, which refuses a folder with
@@ -26,7 +27,6 @@ from typing import Any, Callable
 
 from . import pxi
 
-FORBIDDEN_TOPS = {".Download", ".Calibration"}
 TRASH = ".Trash"
 JOURNAL_DIR = ".Dashboard"
 
@@ -43,8 +43,11 @@ def _abs(root: Path, rel: str) -> Path:
         p.relative_to(root)
     except ValueError as exc:
         raise PlanRefused(f"outside the data root: {rel}") from exc
-    if p.parts[len(root.parts):][:1] and p.parts[len(root.parts)] in FORBIDDEN_TOPS:
-        raise PlanRefused(f"{p.parts[len(root.parts)]} is not the organizer's to change: {rel}")
+    # Dot folders at the top belong to others (.Download or another download folder, .Calibration, .PixInsight…);
+    # the organizer only writes its own .Trash and .Dashboard there.
+    top = p.parts[len(root.parts):][:1]
+    if top and top[0].startswith(".") and top[0] not in (TRASH, JOURNAL_DIR):
+        raise PlanRefused(f"{top[0]} is not the organizer's to change: {rel}")
     return p
 
 

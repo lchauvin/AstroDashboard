@@ -193,7 +193,7 @@ def test_the_runtime_reads_the_pointing_against_the_site_horizon(tmp_path):
 
     sites = [{"name": "Away", "lat": 10.0, "lon": 10.0, "horizon": []},
              {"name": "Home", "lat": 45.5, "lon": -73.6, "isDefault": False, "horizon": [{"az": 0, "alt": 5}, {"az": 180, "alt": 35}]}]
-    obs = runtime.Observatory(lambda: {"skyMonitor": {"enabled": True}}, _SiteStore(sites), tmp_path)
+    obs = runtime.Observatory(lambda: {"skyMonitor": {"enabled": True}}, _SiteStore(sites), lambda: tmp_path)
     obs.equipment = {"mount": {"Connected": True, "Altitude": 25.0, "Azimuth": 170.0, "SiteLatitude": 45.5, "SiteLongitude": -73.6}}
     assert obs._obstruction() == "The mount points below the horizon of Home (altitude 25° at azimuth 170°, horizon 33°)"
     obs.equipment["mount"]["SiteLatitude"] = None  # no coordinates, no default: the first site, without a profile
@@ -211,7 +211,7 @@ def test_the_runtime_reads_the_pointing_against_the_site_horizon(tmp_path):
     assert obs.sky.safe and obs.dist.events[-1] == (now + 1, "clear")
     assert obs.snapshot()["sky"]["state"] == "obstructed"
 
-    obs = runtime.Observatory(lambda: {}, _Store(), tmp_path)  # a store without sites
+    obs = runtime.Observatory(lambda: {}, _Store(), lambda: tmp_path)  # a store without sites
     obs.equipment = {"mount": {"Connected": True, "Altitude": 5.0, "Azimuth": 10.0}}
     assert obs._obstruction() is None
 

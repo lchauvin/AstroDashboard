@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-import { fileName, type IngestAction, type IngestHold, type IngestStatus } from "@/lib/live";
+import { downloadName, fileName, type IngestAction, type IngestHold, type IngestStatus } from "@/lib/live";
 import { relativeTime } from "@/lib/format";
 import { FilterChip, Marks, StatusIcon } from "../ui";
 import styles from "./live.module.css";
@@ -21,7 +21,7 @@ async function post(path: string, body?: unknown, method = "POST") {
   return data;
 }
 
-/** Auto-ingest from .Download (PLAN §5.1): mode, plan per night, held frames, and the journal with undo. */
+/** Auto-ingest from NINA's image folder (PLAN §5.1): mode, plan per night, held frames, and the journal with undo. */
 export function IngestPanel({ initial }: { initial: IngestStatus | null }) {
   const [st, setSt] = useState<IngestStatus | null>(initial);
   const [confirmAuto, setConfirmAuto] = useState(false);
@@ -100,7 +100,7 @@ export function IngestPanel({ initial }: { initial: IngestStatus | null }) {
           <Marks />
           <strong>Switch auto-ingest on?</strong>
           <p>
-            Finished frames will be <b>moved</b> from <span className="mono">.Download</span> into each target&apos;s{" "}
+            Finished frames will be <b>moved</b> from <span className="mono">{downloadName(st)}</span> into each target&apos;s{" "}
             <span className="mono">.SessionData\NIGHT_&lt;date&gt;</span> as they land: same-drive renames, never overwriting,
             never deleting, every move journaled and undoable per night. Unknown objects, conflicts and incomplete files stay put.
             Watch one real night in Dry-run first.
@@ -122,7 +122,7 @@ export function IngestPanel({ initial }: { initial: IngestStatus | null }) {
 
       {!nights.length ? (
         <p className={styles.hint}>
-          Nothing in <span className="mono">.Download</span> and nothing ingested yet. NINA&apos;s frames appear here as they land.
+          Nothing in <span className="mono">{downloadName(st)}</span> and nothing ingested yet. NINA&apos;s frames appear here as they land.
         </p>
       ) : null}
 
@@ -190,10 +190,10 @@ function Night({
         <h3 className={styles.nightTitle}>
           {info && info.folder === false ? (
             <>
-              Night of {name} <span className={styles.hint}>· frames directly under .Download (no night folder)</span>
+              Night of {name} <span className={styles.hint}>· frames directly under {downloadName(st)} (no night folder)</span>
             </>
           ) : (
-            <span className="mono">.Download\{name}</span>
+            <span className="mono">{downloadName(st)}\{name}</span>
           )}
         </h3>
         <span className={styles.hint}>
@@ -209,7 +209,7 @@ function Night({
           {j && j.moved > 0 ? (
             confirm === `undo:${name}` ? (
               <span className={styles.confirmInline}>
-                Move {j.moved} frame{j.moved === 1 ? "" : "s"} back into .Download? The night is then paused, so Auto does not redo it.{" "}
+                Move {j.moved} frame{j.moved === 1 ? "" : "s"} back into {downloadName(st)}? The night is then paused, so Auto does not redo it.{" "}
                 <button type="button" className={styles.link} onClick={() => act(() => post("/api/ingest/undo", { night: name }), (r) => {
                   const x = r as { movedBack: number; copiesLeft: string[]; failed: unknown[] };
                   return `Moved ${x.movedBack} back.${x.copiesLeft.length ? ` ${x.copiesLeft.length} flat cop${x.copiesLeft.length === 1 ? "y was" : "ies were"} left in place (removing ${x.copiesLeft.length === 1 ? "it" : "them"} would be a deletion).` : ""}${x.failed.length ? ` ${x.failed.length} could not be moved back.` : ""}`;
@@ -229,7 +229,7 @@ function Night({
           {ingested > 0 ? (
             confirm === `copies:${name}` ? (
               <span className={styles.confirmInline}>
-                Remove the {ingested} cop{ingested === 1 ? "y" : "ies"} in .Download of frames already in their session? Each is compared byte for byte
+                Remove the {ingested} cop{ingested === 1 ? "y" : "ies"} in {downloadName(st)} of frames already in their session? Each is compared byte for byte
                 with the ingested frame first; anything that differs stays.{" "}
                 <button type="button" className={styles.link} onClick={() => act(() => post("/api/ingest/remove-copies", { night: name, confirm: true }), (r) => {
                   const x = r as { removed: number; kept: { src: string; error: string }[] };
@@ -250,7 +250,7 @@ function Night({
           {emptyDirs > 0 ? (
             confirm === `cleanup:${name}` ? (
               <span className={styles.confirmInline}>
-                Remove {emptyDirs} empty folder{emptyDirs === 1 ? "" : "s"} in .Download\{name}? Only empty folders are removed.{" "}
+                Remove {emptyDirs} empty folder{emptyDirs === 1 ? "" : "s"} in {downloadName(st)}\{name}? Only empty folders are removed.{" "}
                 <button type="button" className={styles.link} onClick={() => act(() => post("/api/ingest/cleanup", { night: name, confirm: true }), (r) => `Removed ${(r as { removed: string[] }).removed.length} empty folders.`)}>
                   Yes, remove
                 </button>{" "}
@@ -319,7 +319,7 @@ function Night({
                 <span>
                   <b>{hs.length}</b> ·{" "}
                   {reason === "ingested"
-                    ? "already ingested: a copy came back into .Download after the frame was moved (robocopy re-syncing the observatory PC). The frame is safe in its session."
+                    ? "already ingested: a copy came back into the image folder after the frame was moved (robocopy re-syncing the observatory PC). The frame is safe in its session."
                     : hs[0].message}
                   {hs.length > 1 ? <span className={styles.hint}> (e.g. {fileName(hs[0].src)})</span> : <span className={styles.hint}> {fileName(hs[0].src)}</span>}
                 </span>

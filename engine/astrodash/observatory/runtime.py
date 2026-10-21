@@ -6,7 +6,7 @@ Tasks (each restarts with backoff when its connection drops):
 * ``nina_ws``   websocket events; every (re)connect re-reads REST state
 * ``nina_poll`` equipment + sequence every few seconds (NINA has no per-step event), image history
 * ``advisor``   measures applied changes; closes polar-alignment windows; asks the model when enabled and worth it
-* ``frames``    notices the newest file in .Download (cheap: a directory walk, no reads)
+* ``frames``    notices the newest file in the download folder (cheap: a directory walk, no reads)
 * ``sky``       re-decides the sky monitor's verdict, which NINA reads as a safety monitor (``alpaca.py``)
 
 Everything runs on the engine's event loop. Reads from HTTP handlers only touch plain dicts.
@@ -52,9 +52,10 @@ def _log_failure(task: asyncio.Task) -> None:
 
 
 class Observatory:
-    def __init__(self, settings: Callable[[], dict], store: Any, download_root: Path,
+    def __init__(self, settings: Callable[[], dict], store: Any, download_root: Callable[[], Path],
                  nina_root: str | None = None, phd2_addr: tuple[str, int] | None = None) -> None:
-        """`settings()` returns the dashboard settings; `nina_root`/`phd2_addr` override them (simulator)."""
+        """`settings()` returns the dashboard settings; `nina_root`/`phd2_addr` override them (simulator).
+        `download_root()` is where NINA's frames land (a setting: asked on every pass)."""
         self._settings = settings
         self.download_root = download_root
         self._nina_override, self._phd2_override = nina_root, phd2_addr
@@ -296,7 +297,7 @@ class Observatory:
             if not self.simulated:
                 # No minimum age: the files are written by the observatory PC, whose clock may be ahead of
                 # ours, so their mtime can be in "our" future. Completeness is judged in latest_frame instead.
-                found = await asyncio.to_thread(fr.newest_file, self.download_root, min_age_s=0)
+                found = await asyncio.to_thread(fr.newest_file, self.download_root(), min_age_s=0)
                 prev = self.newest_file
                 if found:
                     found["stable"] = bool(prev and prev["path"] == found["path"] and prev["size"] == found["size"])
@@ -311,7 +312,7 @@ class Observatory:
     def latest_frame(self) -> dict | None:
         """Which image is "the last one".
 
-        The newest file in .Download when NINA has announced it (its name is NINA's newest frame, so it is
+        The newest file in the download folder when NINA has announced it (its name is NINA's newest frame, so it is
         complete), or when NINA is unreachable and the file has stopped growing; otherwise NINA's own JPEG,
         with the last complete file as a fallback should NINA fail to render it.
         """

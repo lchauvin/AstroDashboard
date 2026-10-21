@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-import { clock, enginePost, type IngestObject, type IngestStatus, type IngestTarget } from "@/lib/live";
+import { clock, downloadName, enginePost, type IngestObject, type IngestStatus, type IngestTarget } from "@/lib/live";
 import { AlertTriangle } from "lucide-react";
 
 import { Marks, StatusIcon, Tip } from "../ui";
@@ -261,7 +261,7 @@ export function TonightTarget({ initial }: { initial: IngestStatus | null }) {
           <StatusIcon level="info" size={15} />
           <div>
             <p>
-              Auto moves finished frames from <span className="mono">.Download</span> into each target&apos;s <span className="mono">NIGHT_</span> folder
+              Auto moves finished frames from <span className="mono">{downloadName(st)}</span> into each target&apos;s <span className="mono">NIGHT_</span> folder
               (moves only, never overwrites; the newest frame stays for the preview). Every move is journaled and each night can be undone below.
             </p>
             <div className={styles.row}>
@@ -330,7 +330,7 @@ function NinaLine({ st, busy, moved, targets, onChoose }: { st: IngestStatus; bu
         <div className={styles.tonightName}>
           {n.target}
           <WarnTip>
-            Marked “{n.stage}”: not switching to it. NINA&apos;s frames of {n.object} stay in .Download until you turn on “Also switch to finished
+            Marked “{n.stage}”: not switching to it. NINA&apos;s frames of {n.object} stay in {downloadName(st)} until you turn on “Also switch to finished
             targets”, turn off “Follow NINA&apos;s target” to choose one yourself, or start a new revision in Library › Organizer.
           </WarnTip>
         </div>

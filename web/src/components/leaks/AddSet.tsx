@@ -117,7 +117,7 @@ export function AddSet({ test, kind = "set", onAdded }: { test: LeakTest; kind?:
 
   const g = groups && picked != null ? groups[picked] : null;
   const mismatch = !check && g && previous && !same(g, previous.want);
-  const download = g && g.kind === "light" && /[\\/]\.Download([\\/]|$)/i.test(g.folder);
+  const download = g && g.kind === "light" && (g.inDownload ?? /[\\/]\.Download([\\/]|$)/i.test(g.folder));
   const frames = g ? g.frames + (reference != null && groups ? groups[reference].frames : 0) : 0;
 
   return (
@@ -238,7 +238,7 @@ export function AddSet({ test, kind = "set", onAdded }: { test: LeakTest; kind?:
           ) : null}
           {download ? (
             <p style={{ fontSize: 13.5, marginBottom: 10 }}>
-              <StatusIcon level="warn" size={13} /> These are LIGHT frames in .Download: auto-ingest files lights into a target
+              <StatusIcon level="warn" size={13} /> These are LIGHT frames in NINA&apos;s image folder: auto-ingest files lights into a target
               when tonight&apos;s target takes every light of the night. Move them out, or shoot spot checks as DARK.
             </p>
           ) : null}

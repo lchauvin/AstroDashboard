@@ -231,11 +231,11 @@ export type IngestHold = {
   prompt: boolean;
 };
 
-/** folder: false when the night's frames lie directly under .Download (grouped by their header night). */
-/** ingested: copies in .Download of frames already in their session (re-synced, e.g. by robocopy). */
+/** folder: false when the night's frames lie directly under the download folder (grouped by their header night). */
+/** ingested: copies in the download folder of frames already in their session (re-synced, e.g. by robocopy). */
 export type IngestNightPlan = { lights: number; flats: number; ingested?: number; closed: boolean; newestLight: string | null; emptyDirs?: number; folder?: boolean };
 
-/** Where the lights of one NINA object, still in .Download, would go (per header night). */
+/** Where the lights of one NINA object, still in the download folder, would go (per header night). */
 export type IngestObject = { object: string | null; frames: number; revisionId: string | null; target: string | null; stage: string | null; how: "tonight" | "follow" | "mapping" | "name" | ""; problem: string };
 
 /** Tonight's target chosen in Live: every light of the night, and/or per NINA object (keys are casefolded). */
@@ -245,12 +245,20 @@ export type IngestTarget = { id: string; folder: string; catalogId: string; name
 
 export type IngestJournalNight = { moved: number; copied: number; undone: number; errors: number; targets: Record<string, number>; last: number; emptyDirs: number };
 
+/** The download folder's own name, for sentences (".Download", "NINA"…); its full path is `downloadRoot`. */
+export const downloadName = (st: { downloadRoot?: string } | null | undefined): string =>
+  st?.downloadRoot?.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || ".Download";
+
 export type IngestStatus = {
   mode: "off" | "dry-run" | "auto";
   lastRun: { at: number; mode: string; moved: number; copied: number; errors: number } | null;
   error: string | null;
+  /** The download folder NINA's frames land in (Settings → Live · Ingest), whether it exists, the default, and why
+   *  auto-ingest cannot use it (null when it can). */
   downloadRoot: string;
   downloadExists: boolean;
+  downloadDefault?: string;
+  downloadProblem?: string | null;
   plan: {
     actions: IngestAction[];
     holds: IngestHold[];

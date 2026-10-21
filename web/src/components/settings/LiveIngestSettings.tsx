@@ -26,12 +26,14 @@ async function send(path: string, method: string, body?: unknown) {
   return data;
 }
 
-/** Settings → Live · Ingest: where NINA and PHD2 run, the AI advisor's model, and the NINA object → target table. */
-export function LiveIngestSettings({ observatory, advisor, skyMonitor, conn, ingest }: { observatory: ObservatorySettings; advisor: AdvisorSettings; skyMonitor: SkyMonitorSettings; conn: LiveConn | null; ingest: IngestStatus | null }) {
+/** Settings → Live · Ingest: where NINA and PHD2 run, the AI advisor's model, the sky monitor, the folder NINA's frames
+ *  land in, and the NINA object → target table. */
+export function LiveIngestSettings({ observatory, advisor, skyMonitor, downloadDir, conn, ingest }: { observatory: ObservatorySettings; advisor: AdvisorSettings; skyMonitor: SkyMonitorSettings; downloadDir: string; conn: LiveConn | null; ingest: IngestStatus | null }) {
   const router = useRouter();
   const [obs, setObs] = useState(observatory);
   const [adv, setAdv] = useState(advisor);
   const [sky, setSky] = useState(skyMonitor);
+  const [download, setDownload] = useState(downloadDir);
   const [object, setObject] = useState("");
   const [rev, setRev] = useState(ingest?.targets.find((t) => t.stage === "acquiring")?.id ?? "");
   const [msg, setMsg] = useState<string | null>(null);
@@ -226,6 +228,45 @@ export function LiveIngestSettings({ observatory, advisor, skyMonitor, conn, ing
           "   └─ Wait for Time Span  1 min",
         ].join("\n")}
       </pre>
+
+      <h3 className="eyebrow" style={{ marginTop: 28 }}>NINA&apos;s image folder</h3>
+      <p className={styles.hint}>
+        The folder on this PC that NINA saves its frames into over the network (the SMB share&apos;s local path, as NINA&apos;s
+        image file path points to it). Live shows the newest frame from it and auto-ingest files its frames into each target.
+        Auto-ingest only moves a frame by renaming it on one drive, never by copying and deleting, so the folder must be on the
+        data root&apos;s drive; inside the data root it must be a dot folder directly under it, like <code>.Download</code>.
+        Empty: {ingest?.downloadDefault ?? "<data root>\\.Download"}.
+      </p>
+      <div className={styles.rowActions} style={{ marginTop: 10 }}>
+        <label className={styles.field} style={{ minWidth: 420, flex: 1 }}>
+          <span>Folder</span>
+          <input className={styles.input} value={download} onChange={(e) => setDownload(e.target.value)} placeholder={ingest?.downloadDefault ?? "G:\\Astro\\.Download"} spellCheck={false} />
+        </label>
+        <button
+          type="button"
+          className="button button-primary"
+          disabled={download.trim() === downloadDir}
+          onClick={() =>
+            run(async () => {
+              const saved = await send("/api/settings", "PUT", { ingest: { downloadDir: download } });
+              setDownload(saved?.settings?.ingest?.downloadDir ?? "");
+            }, "Saved: Live and auto-ingest now use this folder.")
+          }
+        >
+          Save
+        </button>
+      </div>
+      {ingest ? (
+        <p className={styles.hint} style={{ marginTop: 6 }}>
+          In use: <span className="mono">{ingest.downloadRoot}</span>
+          {ingest.downloadProblem ? (
+            <span className={styles.error}> · auto-ingest cannot use it: {ingest.downloadProblem}</span>
+          ) : !ingest.downloadExists ? (
+            <span className={styles.error}> · this folder does not exist</span>
+          ) : null}
+          . Undo moves a night&apos;s frames back into the folder in use, so change it between nights.
+        </p>
+      ) : null}
 
       <h3 className="eyebrow" style={{ marginTop: 28 }}>NINA object → target</h3>
       <p className={styles.hint}>

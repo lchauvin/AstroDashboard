@@ -65,7 +65,7 @@ function LatestFrame({ s, adv }: { s: LiveState; adv: boolean }) {
       <Marks />
       <div className={styles.cardHead}>
         <span className="eyebrow">Last image</span>
-        {l ? <span className={styles.hint}>{r?.date ? clock(r.date) : ""}{adv ? ` · ${l.source === "file" ? ".Download" : "from NINA"} · ${l.name ?? ""}` : ""}</span> : null}
+        {l ? <span className={styles.hint}>{r?.date ? clock(r.date) : ""}{adv ? ` · ${l.source === "file" ? "image folder" : "from NINA"} · ${l.name ?? ""}` : ""}</span> : null}
       </div>
       {l ? (
         <a href={`/engine/api/live/frame.jpg?v=${l.token}`} target="_blank" rel="noreferrer" className={styles.frameLink}>

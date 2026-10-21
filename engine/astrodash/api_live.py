@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field
 
 from .frames import canonical_filter, normalize_kind
 from .headers import read_header
-from .ingest.planner import DOWNLOAD, NIGHT_DIR_RE, evening_of, match_target, split_panel
+from .ingest import paths as ingest_paths
+from .ingest.planner import NIGHT_DIR_RE, evening_of, match_target, split_panel
 from .ingest.service import IngestService
 from .library import slugify
 from .observatory import advisor as adv
@@ -82,7 +83,8 @@ class MapBody(BaseModel):
 
 def register(app: FastAPI, state) -> None:
     cache = state.cache
-    obs = Observatory(lambda: cache.get_json("settings") or {}, cache, state.cfg.data_root / DOWNLOAD)
+    obs = Observatory(lambda: cache.get_json("settings") or {}, cache,
+                      lambda: ingest_paths.download_root(state.cfg.data_root, cache.get_json("settings")))
     state.observatory = obs
 
     def on_moved() -> None:
@@ -93,7 +95,7 @@ def register(app: FastAPI, state) -> None:
 
     def _night(n: str) -> str:
         if not NIGHT_DIR_RE.match(n) or os.sep in n or "/" in n:
-            raise HTTPException(422, detail="Not a .Download night folder name")
+            raise HTTPException(422, detail="Not a night folder name of the download folder")
         return n
 
     # ------------------------------------------------------------------ live
@@ -129,11 +131,12 @@ def register(app: FastAPI, state) -> None:
     def _revision_of(path: str, obj: str | None, night, lib) -> str | None:
         """Where auto-ingest sends this light: its target folder once ingested, else tonight's choice,
         the ingest plan's routing, or the NINA object matched to a target."""
+        p = Path(path).resolve()
         try:
-            rel = Path(path).resolve().relative_to(state.cfg.data_root.resolve())
+            rel = None if p.is_relative_to(service.download_root().resolve()) else p.relative_to(state.cfg.data_root.resolve())
         except ValueError:
             rel = None
-        if rel is not None and rel.parts and rel.parts[0] != DOWNLOAD:
+        if rel is not None and rel.parts:
             rid = slugify(rel.parts[0])
             return rid if rid in lib.revisions else None
         if night is None or not obj:
@@ -181,7 +184,7 @@ def register(app: FastAPI, state) -> None:
                 raise NinaUnavailable("NINA is not connected")
             data, ctype = await obs.nina.image_jpeg(int(latest["index"]))
         except (NinaError, NinaUnavailable) as exc:
-            # NINA could not render it: show the last complete file from .Download rather than nothing.
+            # NINA could not render it: show the last complete file from the download folder rather than nothing.
             if latest.get("fallback"):
                 jpg = await asyncio.to_thread(frame_preview, Path(latest["fallback"]), state.cfg.db_path.parent / "previews")
                 return FileResponse(jpg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
@@ -408,7 +411,7 @@ def register(app: FastAPI, state) -> None:
 
     @app.post("/api/ingest/remove-copies")
     def ingest_remove_copies(body: CleanupBody) -> dict[str, Any]:
-        """Remove copies in .Download of frames already ingested (re-synced by robocopy); each is byte-compared first."""
+        """Remove copies in the download folder of frames already ingested (re-synced by robocopy); each is byte-compared first."""
         if not body.confirm:
             raise HTTPException(422, detail="Removing files needs confirm: true")
         state.require_library()

@@ -158,6 +158,7 @@ def test_conflicts_block_and_changed_sources_stop(data_root, tmp_path):
 @pytest.mark.parametrize("op", [
     {"op": "move", "src": "IC 1848 (Soul Nebula)/.SessionData", "dst": ".Download/x"},
     {"op": "move", "src": "IC 1848 (Soul Nebula)/.SessionData", "dst": ".Calibration/x"},
+    {"op": "move", "src": "IC 1848 (Soul Nebula)/.SessionData", "dst": ".Inbox/x"},  # any dot folder: a download folder too
     {"op": "move", "src": "IC 1848 (Soul Nebula)/.SessionData", "dst": "../outside"},
     {"op": "trash", "src": "IC 1848 (Soul Nebula)/.SessionData", "dst": ".Trash/other-plan/x"},
     {"op": "rmdir_empty", "dst": "IC 1848 (Soul Nebula)"},

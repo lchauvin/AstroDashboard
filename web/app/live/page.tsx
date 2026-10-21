@@ -26,7 +26,7 @@ export default async function LivePage() {
           <h1 className={pageStyles.title}>Live</h1>
           <p className={pageStyles.summary}>
             The sequence, the last image and the connected equipment, read straight from NINA and PHD2 — and the frames NINA drops in{" "}
-            <span className="mono">.Download</span>, sorted into their targets.
+            its image folder, sorted into their targets.
           </p>
         </div>
       </div>

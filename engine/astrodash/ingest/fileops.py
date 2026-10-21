@@ -2,7 +2,11 @@
 
 Every operation re-checks its paths, whatever the caller believes:
 
-- `move`: a same-volume rename from `.Download\\…` into a revision's
+The download folder (`<data root>\\.Download` unless Settings say otherwise) is passed in and checked
+first (`paths.problem`): on the data root's drive, never holding the data root, and inside the data
+root only a dot folder directly under it.
+
+- `move`: a same-volume rename from the download folder into a revision's
   `.SessionData\\NIGHT_<date>\\…`. Never overwrites (the rename itself refuses
   an existing destination on Windows, and it is checked first anyway).
 - `copy`: the same destinations, for flats shared by several targets. Written
@@ -10,16 +14,16 @@ Every operation re-checks its paths, whatever the caller believes:
   `.part` file is the only thing this module ever removes, and only when it
   created it and the copy failed.
 - `move_back`: the inverse of `move`, for undo. Same rules, reversed.
-- `rmdir_empty`: removes *empty* directories below `.Download\\<night>`, only
+- `rmdir_empty`: removes *empty* directories below `<download folder>\\<night>`, only
   when you ask for it. `os.rmdir` itself refuses a directory with anything in it.
 
 - `set_status`: changes the `status` field of one target folder's own `target.json`
   (reopening a finished target that NINA is imaging again). Every other field is
   kept; written to a temporary file, then swapped in.
 
-- `remove_duplicate`: removes a file from `.Download` only when a byte-for-byte
+- `remove_duplicate`: removes a file from the download folder only when a byte-for-byte
   identical file is already in a revision's `.SessionData\\NIGHT_` folder (a copy
-  re-synced into `.Download` after its frame was moved, e.g. by robocopy), and only
+  re-synced into the download folder after its frame was moved, e.g. by robocopy), and only
   when you ask for it. The frame itself always survives: one copy stays in the session.
 
 Nothing here deletes a frame's only copy. `tests/test_safety.py` allows file-mutating
@@ -32,7 +36,8 @@ import os
 import uuid
 from pathlib import Path
 
-DOWNLOAD = ".Download"
+from . import paths
+
 SESSION_DATA = ".SessionData"
 
 
@@ -52,13 +57,18 @@ def _under(child: Path, parent: Path) -> bool:
         return False
 
 
-def _check_download_src(root: Path, src: Path) -> None:
-    if not _under(src, root / DOWNLOAD):
-        raise UnsafeOperation(f"source is not under {root / DOWNLOAD}: {src}")
+def _check_download(root: Path, download: Path) -> None:
+    if why := paths.problem(root, download):
+        raise UnsafeOperation(f"not a usable download folder ({download}): {why}")
 
 
-def _check_session_dst(root: Path, dst: Path) -> None:
-    if not _under(dst, root) or _under(dst, root / DOWNLOAD):
+def _check_download_src(download: Path, src: Path) -> None:
+    if not _under(src, download):
+        raise UnsafeOperation(f"source is not under {download}: {src}")
+
+
+def _check_session_dst(root: Path, download: Path, dst: Path) -> None:
+    if not _under(dst, root) or _under(dst, download):
         raise UnsafeOperation(f"destination is not inside a target folder of {root}: {dst}")
     parts = dst.relative_to(root).parts
     if SESSION_DATA not in parts or not any(p.startswith("NIGHT_") for p in parts):
@@ -67,10 +77,11 @@ def _check_session_dst(root: Path, dst: Path) -> None:
         raise UnsafeOperation("destination is on another volume")
 
 
-def move(root: Path, src: str, dst: str) -> None:
-    root, s, d = _resolve(root), _resolve(src), _resolve(dst)
-    _check_download_src(root, s)
-    _check_session_dst(root, d)
+def move(root: Path, download: Path, src: str, dst: str) -> None:
+    root, download, s, d = _resolve(root), _resolve(download), _resolve(src), _resolve(dst)
+    _check_download(root, download)
+    _check_download_src(download, s)
+    _check_session_dst(root, download, d)
     if not s.is_file():
         raise FileNotFoundError(s)
     if d.exists():
@@ -79,10 +90,11 @@ def move(root: Path, src: str, dst: str) -> None:
     os.rename(s, d)  # atomic on one volume; refuses an existing destination on Windows
 
 
-def copy(root: Path, src: str, dst: str, chunk: int = 4 * 1024 * 1024) -> None:
-    root, s, d = _resolve(root), _resolve(src), _resolve(dst)
-    _check_download_src(root, s)
-    _check_session_dst(root, d)
+def copy(root: Path, download: Path, src: str, dst: str, chunk: int = 4 * 1024 * 1024) -> None:
+    root, download, s, d = _resolve(root), _resolve(download), _resolve(src), _resolve(dst)
+    _check_download(root, download)
+    _check_download_src(download, s)
+    _check_session_dst(root, download, d)
     if d.exists():
         raise FileExistsError(d)
     d.parent.mkdir(parents=True, exist_ok=True)
@@ -101,11 +113,12 @@ def copy(root: Path, src: str, dst: str, chunk: int = 4 * 1024 * 1024) -> None:
         raise
 
 
-def move_back(root: Path, dst: str, src: str) -> None:
-    """Undo of `move`: from the session back to where it came from in .Download."""
-    root, d, s = _resolve(root), _resolve(dst), _resolve(src)
-    _check_session_dst(root, d)
-    _check_download_src(root, s)
+def move_back(root: Path, download: Path, dst: str, src: str) -> None:
+    """Undo of `move`: from the session back to where it came from, which must be in the current download folder."""
+    root, download, d, s = _resolve(root), _resolve(download), _resolve(dst), _resolve(src)
+    _check_download(root, download)
+    _check_session_dst(root, download, d)
+    _check_download_src(download, s)
     if not d.is_file():
         raise FileNotFoundError(d)
     if s.exists():
@@ -114,11 +127,12 @@ def move_back(root: Path, dst: str, src: str) -> None:
     os.rename(d, s)
 
 
-def rmdir_empty(root: Path, night_dir: str) -> list[str]:
-    """Remove empty directories below (and including) one `.Download\\<night>` folder. Returns what was removed."""
-    root, top = _resolve(root), _resolve(night_dir)
-    if top.parent != root / DOWNLOAD:
-        raise UnsafeOperation(f"not a night folder directly under {root / DOWNLOAD}: {top}")
+def rmdir_empty(root: Path, download: Path, night_dir: str) -> list[str]:
+    """Remove empty directories below (and including) one `<download folder>\\<night>` folder. Returns what was removed."""
+    root, download, top = _resolve(root), _resolve(download), _resolve(night_dir)
+    _check_download(root, download)
+    if top.parent != download:
+        raise UnsafeOperation(f"not a night folder directly under {download}: {top}")
     removed: list[str] = []
     for dirpath, dirnames, filenames in os.walk(top, topdown=False):
         if filenames:
@@ -144,11 +158,12 @@ def identical(a: Path, b: Path, chunk: int = 4 * 1024 * 1024) -> bool:
                 return True
 
 
-def remove_duplicate(root: Path, src: str, kept: str) -> None:
-    """Remove `src` (in .Download) because `kept` (in a session) is the very same frame, byte for byte."""
-    root, s, k = _resolve(root), _resolve(src), _resolve(kept)
-    _check_download_src(root, s)
-    _check_session_dst(root, k)
+def remove_duplicate(root: Path, download: Path, src: str, kept: str) -> None:
+    """Remove `src` (in the download folder) because `kept` (in a session) is the very same frame, byte for byte."""
+    root, download, s, k = _resolve(root), _resolve(download), _resolve(src), _resolve(kept)
+    _check_download(root, download)
+    _check_download_src(download, s)
+    _check_session_dst(root, download, k)
     if s == k:
         raise UnsafeOperation("source and kept file are the same path")
     if not s.is_file() or not k.is_file():
@@ -164,7 +179,7 @@ STATUSES = ("acquiring", "processed", "finished")
 def set_status(root: Path, target_folder: str, status: str, defaults: dict | None = None) -> str | None:
     """Set `status` in `<root>/<target_folder>/target.json`; returns the previous status (None if there was none).
 
-    Only a target folder directly under the data root (not `.Download`, `.Calibration` or any dot-folder),
+    Only a target folder directly under the data root (not the download folder, `.Calibration` or any dot-folder),
     only its `target.json`, only the `status` key. A missing file is created from `defaults`
     (catalog_id, name, revision) so the target keeps its identity.
     """

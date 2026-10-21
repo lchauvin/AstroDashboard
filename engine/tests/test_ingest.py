@@ -162,16 +162,16 @@ def test_fileops_refuses_anything_outside_its_lane(data_root, tmp_path):
     src = frame(data_root / ".Download" / NIGHT / "x.fits", **light())
     session = data_root / "IC 1848 (Soul Nebula)" / ".SessionData"
     with pytest.raises(fileops.UnsafeOperation):  # destination not in a NIGHT_ folder
-        fileops.move(data_root, str(src), str(session / "x.fits"))
+        fileops.move(data_root, data_root / ".Download", str(src), str(session / "x.fits"))
     with pytest.raises(fileops.UnsafeOperation):  # source not in .Download
-        fileops.move(data_root, str(session / "NIGHT_2026-02-01" / "LIGHT" / "H" / "h0.fits"), str(session / "NIGHT_2026-03-01" / "x.fits"))
+        fileops.move(data_root, data_root / ".Download", str(session / "NIGHT_2026-02-01" / "LIGHT" / "H" / "h0.fits"), str(session / "NIGHT_2026-03-01" / "x.fits"))
     with pytest.raises(fileops.UnsafeOperation):  # outside the data root
-        fileops.move(data_root, str(src), str(tmp_path / "elsewhere" / ".SessionData" / "NIGHT_2026-01-01" / "x.fits"))
+        fileops.move(data_root, data_root / ".Download", str(src), str(tmp_path / "elsewhere" / ".SessionData" / "NIGHT_2026-01-01" / "x.fits"))
     existing = session / "NIGHT_2026-02-01" / "LIGHT" / "H" / "h0.fits"
     with pytest.raises(FileExistsError):  # never overwrite
-        fileops.move(data_root, str(src), str(existing))
+        fileops.move(data_root, data_root / ".Download", str(src), str(existing))
     with pytest.raises(fileops.UnsafeOperation):  # rmdir only directly on a night folder
-        fileops.rmdir_empty(data_root, str(session))
+        fileops.rmdir_empty(data_root, data_root / ".Download", str(session))
     assert src.is_file()
 
 
@@ -359,3 +359,58 @@ def test_copies_resynced_into_download_are_recognised_and_removed_only_when_iden
         assert all(Path(d).exists() for d in moved.values())  # the ingested frames are untouched
         # Undo still only moves back what was moved; the removed copies do not confuse it.
         assert client.post("/api/ingest/undo", json={"night": NIGHT}).json()["movedBack"] == 2
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows drive paths")
+def test_download_folder_rules():
+    from astrodash.ingest import paths
+
+    root = Path("G:/Astro")
+    ok = lambda f: paths.problem(root, Path(f)) is None  # noqa: E731
+    assert ok("G:/Astro/.Download") and ok("G:/Astro/.Inbox") and ok("G:/NINA") and ok("G:/Shares/NINA/images")
+    assert not ok("D:/NINA")                      # another drive: a move would no longer be a rename
+    assert not ok(r"\observatory\images")       # a UNC share: its local path is wanted
+    assert not ok("NINA")                         # relative
+    assert not ok("G:/Astro") and not ok("G:/")   # the data root, or a folder holding it
+    assert not ok("G:/Astro/Inbox")               # a non-dot folder there is a target
+    assert not ok("G:/Astro/.Download/NINA") and not ok("G:/Astro/IC 1848 (Soul Nebula)/.Download")
+    assert not any(ok(f"G:/Astro/{t}") for t in (".Calibration", ".Trash", ".Dashboard"))
+    assert paths.download_root(root, {}) == root / ".Download"
+    assert paths.download_root(root, {"ingest": {"downloadDir": "G:/NINA"}}) == Path("G:/NINA")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows drive paths")
+def test_a_download_folder_elsewhere_on_the_drive(data_root, tmp_path):
+    inbox = tmp_path / "NINA inbox"          # beside the data root, on its drive
+    night = inbox / NIGHT
+    for i in range(2):
+        f = frame(night / "Soul Nebula" / "LIGHT" / "Ha" / f"s{i}.fits",
+                  **light(FILTER="Ha", OBJECT="Soul Nebula", DATE_LOC=f"{NIGHT}T22:0{i}:00"))
+        os.utime(f, (OLD + i, OLD + i))
+    (data_root / "Inbox").mkdir()
+    (data_root / ".Download").mkdir(exist_ok=True)
+    app = app_for(data_root, tmp_path)
+    with TestClient(app) as client:
+        app.state.engine._run_scan()
+        put = lambda d: client.put("/api/settings", json={"ingest": {"downloadDir": d}})  # noqa: E731
+        for bad in (str(tmp_path / "missing"), "Z:/NINA", str(data_root / "IC 1848 (Soul Nebula)"), str(data_root),
+                    str(data_root / "Inbox")):
+            assert put(bad).status_code == 422, bad
+        assert put(f'"{inbox}\\"').json()["settings"]["ingest"] == {"downloadDir": str(inbox)}   # quotes, trailing \ trimmed
+        st = client.get("/api/ingest").json()
+        assert st["downloadRoot"] == str(inbox) and st["downloadExists"] and st["downloadProblem"] is None
+
+        client.post("/api/ingest/mode", json={"mode": "auto"})
+        client.post("/api/ingest/close", json={"night": NIGHT})
+        assert client.post("/api/ingest/run").json()["moved"] == 2
+        dest = data_root / "IC 1848 (Soul Nebula)" / ".SessionData" / f"NIGHT_{NIGHT}" / "LIGHT" / "H"
+        assert (dest / "s0.fits").is_file() and (dest / "s1.fits").is_file()
+        assert client.post("/api/ingest/undo", json={"night": NIGHT}).json()["movedBack"] == 2
+        assert (night / "Soul Nebula" / "LIGHT" / "Ha" / "s0.fits").is_file()
+
+        # The default, given in full or empty, is stored as the default (it follows the data root).
+        assert put(str(data_root / ".Download")).json()["settings"]["ingest"] == {"downloadDir": ""}
+        assert client.get("/api/ingest").json()["downloadRoot"] == str(data_root / ".Download")
+
+    with pytest.raises(fileops.UnsafeOperation):   # fileops re-checks the folder itself
+        fileops.move(data_root, Path("Z:/NINA"), "Z:/NINA/x.fits", str(dest / "x.fits"))

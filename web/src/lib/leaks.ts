@@ -20,6 +20,8 @@ export type DarkGroup = DarkSetting & {
   first?: string | null;
   last?: string | null;
   build?: string;
+  /** In NINA's image folder, where auto-ingest may take its lights (browse results). */
+  inDownload?: boolean;
 };
 
 export type Structure = {

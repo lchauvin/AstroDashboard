@@ -1,4 +1,4 @@
-"""Tonight's frames (from NINA's own per-frame statistics), the newest file in .Download, the guide star.
+"""Tonight's frames (from NINA's own per-frame statistics), the newest file in the download folder, the guide star.
 
 Frame flags compare each light only with recent lights **of the same filter** (Ha legitimately
 shows far fewer stars than L): HFR well above, or star count well below, the rolling median.

@@ -371,7 +371,7 @@ def test_analyze_now_returns_at_once_and_the_model_answers_in_the_background(mon
     from astrodash.observatory import runtime
 
     settings = {"advisor": {"enabled": True, "model": "ollama/m", "effort": "low"}}
-    obs = runtime.Observatory(lambda: settings, _Store(), tmp_path)
+    obs = runtime.Observatory(lambda: settings, _Store(), lambda: tmp_path)
     release = threading.Event()
 
     def slow_call(*_a, **_k):  # a reasoning model: longer than the web proxy would wait
@@ -414,7 +414,7 @@ def test_auto_apply_takes_the_top_suggestion_skips_when_unsafe_and_reverts_a_wor
     from astrodash.observatory import runtime
 
     settings = {"advisor": {"enabled": True, "model": "ollama/m", "autoApply": True}}
-    obs = runtime.Observatory(lambda: settings, _Store(), tmp_path)
+    obs = runtime.Observatory(lambda: settings, _Store(), lambda: tmp_path)
     obs.phd2 = _FakePhd2({"ra": {"aggression": 0.7, "hysteresis": 0.1}, "dec": {}})
     stats = {"total": 1.0, "ra": {"rms": 0.7}, "dec": {"rms": 0.6}, "n": 150, "se": 0.03, "hfdPx": 2.0}
     monkeypatch.setattr(obs, "recent_stats", lambda: stats)
@@ -496,7 +496,7 @@ def test_prompt_lists_the_algorithms_and_tonight_switches():
 def test_algorithm_switch_waits_for_done_when_suggested_and_is_logged_at_once_when_not(monkeypatch, tmp_path):
     from astrodash.observatory import runtime
 
-    obs = runtime.Observatory(lambda: {}, _Store(), tmp_path)
+    obs = runtime.Observatory(lambda: {}, _Store(), lambda: tmp_path)
     phd = _FakePhd2({"ra": {"minMove": 0.2}, "dec": {}})
     phd.state.algorithms = {"ra": "Hysteresis", "dec": "ResistSwitch"}
 
@@ -535,7 +535,7 @@ def test_algorithm_switch_waits_for_done_when_suggested_and_is_logged_at_once_wh
 def test_done_without_a_seen_switch_measures_against_the_analysed_guiding(tmp_path):
     from astrodash.observatory import runtime
 
-    obs = runtime.Observatory(lambda: {}, _Store(), tmp_path)
+    obs = runtime.Observatory(lambda: {}, _Store(), lambda: tmp_path)
     phd = _FakePhd2({"ra": {}, "dec": {"minMove": 0.2}})
     phd.state.algorithms = {"ra": "Hysteresis", "dec": "Lowpass2"}  # switched while the engine was down
 
@@ -577,7 +577,7 @@ def test_auto_apply_leaves_an_algorithm_switch_to_you(monkeypatch, tmp_path):
     from astrodash.observatory import runtime
 
     settings = {"advisor": {"enabled": True, "model": "ollama/m", "autoApply": True}}
-    obs = runtime.Observatory(lambda: settings, _Store(), tmp_path)
+    obs = runtime.Observatory(lambda: settings, _Store(), lambda: tmp_path)
     obs.phd2 = _FakePhd2({"ra": {"aggression": 0.7}, "dec": {}})
     monkeypatch.setattr(obs, "recent_stats", lambda: {"total": 1.0, "ra": {"rms": 0.7}, "dec": {"rms": 0.6}, "n": 150, "se": 0.03, "hfdPx": 2.0})
     reply = '{"assessment": "RA periodic", "suggestions": [{"axis": "ra", "param": "algorithm", "value": "Predictive PEC"}]}'

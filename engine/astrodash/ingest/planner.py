@@ -41,8 +41,8 @@ from typing import Any, Iterable
 from ..frames import canonical_filter, normalize_kind, parse_time
 from ..headers import IMAGE_SUFFIXES, read_header
 from ..layout import panel_folder
+from .paths import DOWNLOAD
 
-DOWNLOAD = ".Download"
 NIGHT_DIR_RE = re.compile(r"^(?:NIGHT_)?(\d{4}-\d{2}-\d{2})$")
 PANEL_OBJECT_RE = re.compile(r"^(?P<base>.*?)\s+Panel\s*(?P<n>\d+)\s*$", re.IGNORECASE)
 IGNORED_DIRS = {"snapshot", "snapshots"}
@@ -55,7 +55,7 @@ class Action:
     src: str
     dst: str
     night: str                 # NIGHT_ date
-    download_night: str        # the .Download folder
+    download_night: str        # its night folder in the download folder
     kind: str
     filter: str | None
     revision_id: str
@@ -235,8 +235,11 @@ def plan_ingest(
     assignments: dict[str, dict[str, Any]] | None = None,
     follow: bool = False,
     follow_finished: bool = False,
+    download: Path | None = None,
 ) -> Plan:
-    """`moved_lights`: per .Download night, revision ids that already received lights (from the journal).
+    """`download`: the download folder (default `<data_root>\\.Download`).
+
+    `moved_lights`: per download night, revision ids that already received lights (from the journal).
 
     `assignments`: per evening date ("2026-10-14"), the targets chosen in Live:
     {"all": revision id or None, "objects": {object casefold: revision id}}.
@@ -247,7 +250,7 @@ def plan_ingest(
     now = now if now is not None else time.time()
     closed_nights = closed_nights or set()
     plan = Plan(scanned_at=now)
-    base = data_root / DOWNLOAD
+    base = download or data_root / DOWNLOAD
     if not base.is_dir():
         return plan
 

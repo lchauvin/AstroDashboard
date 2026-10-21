@@ -27,6 +27,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from . import leaks
+from .ingest import paths as ingest_paths
 
 log = logging.getLogger(__name__)
 
@@ -274,7 +275,12 @@ def register(app: FastAPI, state) -> None:
         path = _resolve(folder)
         if not path.is_dir():
             raise HTTPException(404, detail=f"No such folder: {path}")
-        return leaks.find_groups(path, cfg.gain_ignored)
+        out = leaks.find_groups(path, cfg.gain_ignored)
+        # Lights in NINA's image folder may be taken by auto-ingest mid-test: the page warns.
+        download = ingest_paths.download_root(cfg.data_root, cache.get_json("settings")).resolve()
+        for g in out["groups"]:
+            g["inDownload"] = Path(g["folder"]).resolve().is_relative_to(download)
+        return out
 
     @app.post("/api/leaks")
     def create(body: NewTest) -> dict[str, Any]:

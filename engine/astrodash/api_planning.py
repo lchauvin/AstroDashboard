@@ -10,16 +10,19 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import threading
 import time
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from . import astrospheric, halpha, planning
+from .ingest import paths as ingest_paths
 from .observatory.llm import EFFORTS, LlmError, split_model
 from .observatory.sky import FLAGS as SKY_FLAGS, LIMITS as SKY_LIMITS
 from .observatory.runtime import DEFAULTS as OBS_DEFAULTS
@@ -50,6 +53,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "skyMonitor": dict(OBS_DEFAULTS["skyMonitor"]),
     # Planning: push tonight's verdict to a phone through ntfy (sent by the web app's /api/notify/tonight).
     "notify": dict(NOTIFY_DEFAULTS),
+    # Live · Ingest: the folder NINA's frames land in (the SMB share's local path); empty = <data root>\.Download.
+    "ingest": {"downloadDir": ""},
 }
 # Settings that are no longer used (AstroController's address); dropped on the next save.
 RETIRED_SETTINGS = {"liveUrl", "guard"}  # guard: the sequence guard, replaced by the sky monitor
@@ -252,7 +257,7 @@ def register(app: FastAPI, state) -> None:
     def _settings() -> dict[str, Any]:
         stored = {k: v for k, v in (cache.get_json("settings") or {}).items() if k not in RETIRED_SETTINGS}
         out = {**DEFAULT_SETTINGS, **stored}
-        for key in ("observatory", "advisor", "skyMonitor", "notify"):  # partial objects keep the defaults for missing fields
+        for key in ("observatory", "advisor", "skyMonitor", "notify", "ingest"):  # partial objects keep the defaults for missing fields
             out[key] = {**DEFAULT_SETTINGS[key], **(stored.get(key) or {})}
         return out
 
@@ -316,6 +321,27 @@ def register(app: FastAPI, state) -> None:
             raise HTTPException(422, detail="notify.dashboardUrl must be empty or an http(s) URL")
         return n
 
+    def _check_ingest(g: Any) -> dict[str, Any]:
+        """The download folder: empty for <data root>\\.Download, else an existing folder auto-ingest can keep its
+        guarantees with (`ingest/paths.py`: the data root's drive; inside it, only a dot folder directly under it)."""
+        if not isinstance(g, dict) or set(g) - set(DEFAULT_SETTINGS["ingest"]):
+            raise HTTPException(422, detail="ingest: unknown fields")
+        if "downloadDir" not in g:
+            return g
+        raw = g["downloadDir"]
+        if not isinstance(raw, str) or len(raw) > 500:
+            raise HTTPException(422, detail="ingest.downloadDir must be a folder path")
+        folder = raw.strip().strip('"').rstrip("\\/")
+        if not folder:
+            return {"downloadDir": ""}
+        if why := ingest_paths.problem(state.cfg.data_root, Path(folder)):
+            raise HTTPException(422, detail=f"The download folder cannot be {folder}: {why}.")
+        if not Path(folder).is_dir():
+            raise HTTPException(422, detail=f"There is no folder {folder} (create it, share it to NINA, then set it here).")
+        folder = os.path.abspath(folder)
+        # The default itself is stored as "default", so it follows the data root.
+        return {"downloadDir": "" if Path(folder) == Path(os.path.abspath(state.cfg.data_root / ingest_paths.DOWNLOAD)) else folder}
+
     @app.get("/api/settings")
     def settings() -> dict[str, Any]:
         lib = state.library
@@ -341,11 +367,16 @@ def register(app: FastAPI, state) -> None:
             body["skyMonitor"] = {**(stored.get("skyMonitor") or {}), **_check_sky(body["skyMonitor"])}
         if "notify" in body:
             body["notify"] = {**(stored.get("notify") or {}), **_check_notify(body["notify"])}
+        if "ingest" in body:
+            body["ingest"] = {**(stored.get("ingest") or {}), **_check_ingest(body["ingest"])}
         reconnect = "observatory" in body and body["observatory"] != (stored.get("observatory") or {})
+        moved_download = "ingest" in body and body["ingest"] != (stored.get("ingest") or {})
         cache.set_json("settings", {**stored, **body})
         obs, loop = getattr(state, "observatory", None), getattr(state, "loop", None)
         if reconnect and obs is not None and loop is not None and obs.tasks:
             asyncio.run_coroutine_threadsafe(obs.reconfigure(), loop)
+        if moved_download and getattr(state, "ingest", None) is not None:
+            state.ingest.poke()  # plan from the new folder now rather than at the next pass
         return {"settings": _settings()}
 
     # ------------------------------------------------------------------ notifications

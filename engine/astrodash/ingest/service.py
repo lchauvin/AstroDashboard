@@ -5,9 +5,10 @@ Modes (stored in the dashboard database, default "dry-run"):
   dry-run  — the plan is computed and shown, nothing moves;
   auto     — ready actions are applied through `fileops`, journaled first-to-last.
 
-Moves are the only automatic change. Undo is per `.Download` night and moves
-files back; copies of shared flats are reported (removing them would be a
-deletion, which needs you). Empty `.Download` folders are removed only when you
+Frames come from the download folder (`<data root>\\.Download` unless Settings → Live · Ingest
+say otherwise; `paths.py` says what it may be). Moves are the only automatic change. Undo is
+per download night and moves files back; copies of shared flats are reported (removing them
+would be a deletion, which needs you). Empty download folders are removed only when you
 press the button for that night.
 """
 
@@ -21,8 +22,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
-from . import fileops
-from .planner import DOWNLOAD, NIGHT_DIR_RE, Plan, TargetRef, plan_ingest, split_panel
+from . import fileops, paths
+from .planner import NIGHT_DIR_RE, Plan, TargetRef, plan_ingest, split_panel
 
 log = logging.getLogger(__name__)
 
@@ -67,10 +68,17 @@ class IngestService:
         self.cache.set_json("ingest", {**(self.cache.get_json("ingest") or {}), "mode": mode, "modeChanged": time.time()})
         self._wake.set()
 
+    def download_root(self) -> Path:
+        """Where NINA's frames land (Settings → Live · Ingest, else `<data root>\\.Download`)."""
+        return paths.download_root(self.cfg.data_root, self.cache.get_json("settings"))
+
+    def download_problem(self) -> str | None:
+        return paths.problem(self.cfg.data_root, self.download_root())
+
     def closed_nights(self) -> set[str]:
         """Nights you closed, plus every night whose next local noon has passed, plus all when the sequence has ended."""
         closed = set((self.cache.get_json("ingest") or {}).get("closed", []))
-        base = self.cfg.data_root / DOWNLOAD
+        base = self.download_root()
         running = self._sequence_running()
         now = datetime.now()
         # Night folders, plus plain dates: frames lying outside any night folder are grouped by their header night.
@@ -229,6 +237,7 @@ class IngestService:
             stable_s=self.stable_s, closed_nights=self.closed_nights(), moved_lights=self.moved_lights(),
             assignments=self.assignments(),
             follow=self.follow()["follow"], follow_finished=self.follow()["followFinished"],
+            download=self.download_root(),
         )
 
     def run_once(self) -> dict[str, Any]:
@@ -238,6 +247,12 @@ class IngestService:
             if mode == "off":
                 self.last_plan = None
                 self.last_run = {"at": time.time(), "mode": mode, "moved": 0, "copied": 0, "errors": 0}
+                return self.last_run
+            download = self.download_root()
+            if problem := paths.problem(self.cfg.data_root, download):
+                # Settings refuse such a folder; a data root changed since could still leave it unusable.
+                self.last_plan = None
+                self.last_run = {"at": time.time(), "mode": mode, "moved": 0, "copied": 0, "errors": 0, "problem": problem}
                 return self.last_run
             plan = self.plan()
             self.last_plan = plan
@@ -267,7 +282,7 @@ class IngestService:
                     row = {"ts": time.time(), "download_night": a.download_night, "op": a.op, "src": a.src, "dst": a.dst,
                            "size": a.size, "revision": a.revision_id, "kind": a.kind, "filter": a.filter, "error": None}
                     try:
-                        (fileops.move if a.op == "move" else fileops.copy)(self.cfg.data_root, a.src, a.dst)
+                        (fileops.move if a.op == "move" else fileops.copy)(self.cfg.data_root, download, a.src, a.dst)
                         moved += a.op == "move"
                         copied += a.op == "copy"
                     except Exception as exc:  # noqa: BLE001 — journaled, and the file stays where it was
@@ -294,7 +309,7 @@ class IngestService:
                     kept_copies.append(r["dst"])  # removing a copy is a deletion: left for you
                     continue
                 try:
-                    fileops.move_back(self.cfg.data_root, r["dst"], r["src"])
+                    fileops.move_back(self.cfg.data_root, self.download_root(), r["dst"], r["src"])
                     undone.append(r["id"])
                 except Exception as exc:  # noqa: BLE001
                     failed.append({"dst": r["dst"], "error": f"{type(exc).__name__}: {exc}"})
@@ -308,14 +323,14 @@ class IngestService:
             return {"movedBack": len(undone), "copiesLeft": kept_copies, "failed": failed}
 
     def remove_ingested_copies(self, download_night: str) -> dict[str, Any]:
-        """Remove a night's copies in .Download whose frame is already ingested (each compared byte for byte first)."""
+        """Remove a night's copies in the download folder whose frame is already ingested (each compared byte for byte first)."""
         with self._lock:
             plan = self.plan()
             holds = [h for h in (plan.holds if plan else []) if h.reason == "ingested" and h.download_night == download_night and h.dst]
             removed, kept = [], []
             for h in holds:
                 try:
-                    fileops.remove_duplicate(self.cfg.data_root, h.src, h.dst)
+                    fileops.remove_duplicate(self.cfg.data_root, self.download_root(), h.src, h.dst)
                     removed.append({"ts": time.time(), "src": h.src, "kept": h.dst})
                 except Exception as exc:  # noqa: BLE001 — anything not provably identical stays
                     kept.append({"src": h.src, "error": f"{type(exc).__name__}: {exc}"})
@@ -327,7 +342,7 @@ class IngestService:
         return {"removed": len(removed), "kept": kept}
 
     def empty_dirs(self, download_night: str) -> list[str]:
-        top = self.cfg.data_root / DOWNLOAD / download_night
+        top = self.download_root() / download_night
         out = []
         if top.is_dir():
             import os
@@ -341,7 +356,8 @@ class IngestService:
         with self._lock:
             if not NIGHT_DIR_RE.match(download_night):
                 raise ValueError("not a night folder name")
-            return fileops.rmdir_empty(self.cfg.data_root, str(self.cfg.data_root / DOWNLOAD / download_night))
+            download = self.download_root()
+            return fileops.rmdir_empty(self.cfg.data_root, download, str(download / download_night))
 
     # ------------------------------------------------------------------ thread
 
@@ -377,8 +393,10 @@ class IngestService:
             "mode": self.mode,
             "lastRun": self.last_run,
             "error": self.last_error,
-            "downloadRoot": str(self.cfg.data_root / DOWNLOAD),
-            "downloadExists": (self.cfg.data_root / DOWNLOAD).is_dir(),
+            "downloadRoot": str(self.download_root()),
+            "downloadExists": self.download_root().is_dir(),
+            "downloadDefault": str(self.cfg.data_root / paths.DOWNLOAD),
+            "downloadProblem": self.download_problem(),
             "plan": plan.as_dict() if plan else None,
             "closed": sorted(self.closed_nights()),
             "paused": sorted(self.paused_nights()),
