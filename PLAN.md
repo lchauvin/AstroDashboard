@@ -271,6 +271,16 @@ The dashboard calls the library API (`compute_metrics`, `scan_session`, `group_s
 - **Session score card**: usable hours per filter after rejection. This number feeds the Library's integration totals as "good hours".
 - Optional LLM narrative, reusing `astro_eval.analysis` (off by default, key from env).
 
+### 4.4 Framing across nights (2026-10-20)
+
+Is each night framed like the one before it, as far as dithering explains? `framing.py` measures, `api_framing.py` serves (`/api/framing/revisions/{rev}`, `/api/framing/sessions/{rev}/{night}`, and `framing` in `/api/live/state`).
+
+- **Stars, not headers.** Each light is reduced to its 150 brightest stars (sep on 2×2-binned pixels, positions in sensor pixels; about 0.3 s a frame, limited by the disk), kept in the dashboard database (`frame_stars`, by path and size). Two frames are matched at any rotation: a translation vote at 0° and 180°, else a vote on the angle between star pairs of equal length, then a similarity fit. Meridian flips, a turned camera and different filters all match.
+- **A night's framing** is the median pose (centre, and rotation folded into ±90°) of its lights relative to one of them. Its **dither spread** is the 90th percentile of the lights' distances from that median. A light more than 150 px and 4× the typical distance away (the mispointing rule of §4.2) was framed differently and counts in neither.
+- **The distance is the largest corner shift**, so a shift and a rotation are judged in the same pixels, the ones the stack crops. A night against the previous night of the same revision and mosaic panel (a night without usable stars is skipped over): ✓ within the larger of the two spreads (never under 10 px), ⚠ within twice that, ✗ beyond. A single frame gets its own night's spread on top, since it dithers around that night's median; Live, with one frame of tonight, uses twice the previous night's spread.
+- **Where it shows.** Library → target → Sessions: a *Framing* column (✓/⚠/✗ and the corner shift, one mark per mosaic panel, the numbers on hover), from a sample of 12 lights per night measured in the background after each scan. Diagnostics: a *Framing* block on the Summary and a *Framing* column per frame, from every light of the night (measured on first view, or as the last phase of an analysis). Live: a line under the last image, for the newest light on disk, sent to the revision auto-ingest would send it to (its folder once ingested, else tonight's choice, the ingest plan, or NINA's object matched to a target).
+- **On the real library (2026-10-20):** spreads within a night 15–60 px; nights re-centred 10–50 px apart. Flagged ✗: IC 405's 2026 nights against 2025 (145 px, 1.6°), NGC 6888 (camera turned 25° on 07-07, back on 07-12), NGC 7635 09-14 (224 px), Sh2-114 08-04 (1.6°), IC 63 08-31, IC 1805 09-29 and NGC 281 08-10 (60–85 px).
+
 ---
 
 ## 5. Section 3 — Live

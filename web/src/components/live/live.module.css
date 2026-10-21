@@ -373,6 +373,16 @@
   color: var(--color-text);
 }
 
+.framingLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 .stepLine {
   display: flex;
   flex-wrap: wrap;

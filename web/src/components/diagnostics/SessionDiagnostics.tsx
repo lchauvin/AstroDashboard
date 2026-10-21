@@ -10,6 +10,7 @@ import { hours, num, relativeTime } from "@/lib/format";
 import { FilterChip, Marks, StatusIcon } from "../ui";
 import { Calibration, flatLevel } from "./Calibration";
 import { Findings } from "./Findings";
+import { FramingBlock, framesOf, useSessionFraming } from "./Framing";
 import { FrameTable } from "./FrameTable";
 import { PreviewModal } from "./PreviewModal";
 import { byFilter, calibrationEntries, groupFindings, panelsOf, scopeFindings, worst } from "./scope";
@@ -48,6 +49,9 @@ export function SessionDiagnostics({
   const [panelId, setPanelId] = useState<string | null>(initialPanel ?? null);
   const active = job && (job.status === "queued" || job.status === "running");
   const url = `/engine/api/diagnostics/${detail.revision.id}/${encodeURIComponent(detail.session.folder)}`;
+  // Framing against the previous night; asked again once a new analysis has measured every light.
+  const framing = useSessionFraming(detail.revision.id, detail.session.folder, current.stored?.finished);
+  const frameFraming = useMemo(() => framesOf(framing.data), [framing.data]);
 
   useEffect(() => setJob(detail.job), [detail.job]);
   useEffect(() => setCurrent(detail), [detail]);
@@ -97,6 +101,8 @@ export function SessionDiagnostics({
   // Mosaic scope: one panel, or all of them.
   const panels = useMemo(() => panelsOf(allLights), [allLights]);
   const panel = panels.find((p) => p.label === panelId) ?? null;
+  // The Library's panel number ("2") of the selected panel, for its framing.
+  const framingPanel = panel ? (/(\d+)\s*$/.exec(panel.label)?.[1] ?? null) : null;
   const lights = panel ? allLights.filter((g) => g.target === panel.id) : allLights;
   const panelOfPath = useMemo(() => {
     const m = new Map<string, string>();
@@ -132,6 +138,7 @@ export function SessionDiagnostics({
       `FWHM ${num(f.fwhm_median, 2)}″`,
       `${num(f.n_stars)} stars`,
       `score ${num(f.score, 2)}`,
+      frameFraming[f.path] ? `framing ${Math.round(frameFraming[f.path].cornerPx)} px` : "",
       found.length ? `findings: ${found.join(", ")}` : "",
     ]
       .filter(Boolean)
@@ -217,10 +224,13 @@ export function SessionDiagnostics({
       </div>
 
       {!r ? (
-        <p className="muted">
-          This night has not been analysed yet. A run measures every light and flat with astro-eval (roughly a minute
-          per 150 frames) and keeps the results in the dashboard.
-        </p>
+        <>
+          <p className="muted">
+            This night has not been analysed yet. A run measures every light and flat with astro-eval (roughly a minute
+            per 150 frames) and keeps the results in the dashboard.
+          </p>
+          <FramingBlock state={framing} panel={null} />
+        </>
       ) : (
         <>
           {panels.length ? (
@@ -266,6 +276,7 @@ export function SessionDiagnostics({
           {section === "summary" ? (
             <>
               {analysis ? <Findings groups={scope.findings} onPreview={openPaths} /> : null}
+              <FramingBlock state={framing} panel={framingPanel} />
               {panels.length && !panel ? (
                 <PanelMatrix
                   panels={panels}
@@ -324,6 +335,7 @@ export function SessionDiagnostics({
                 panelOf={panels.length && !panel ? (p) => panelOfPath.get(p) : undefined}
                 onDecide={decide}
                 deciding={deciding}
+                framing={Object.keys(frameFraming).length ? frameFraming : undefined}
               />
             </section>
           ) : null}

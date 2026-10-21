@@ -20,6 +20,11 @@ each fix, each with a comment saying what changed and compared with the set befo
 the structure of the difference of the two masters (gradient, edges beyond the gradient, 3×3 zones, patchiness), each
 against a noise floor from the sets' even/odd half masters, shown stretched hard with profiles and per-frame charts.
 
+**Framing** (Library → target → Sessions, each night's Diagnostics, Live): every night is checked against the previous
+night of the same target (and mosaic panel) by matching stars. ✓ when the shift and rotation, measured at the frame
+corners, stay within the dither spread; ⚠ up to twice it; ✗ beyond. Live checks the newest light the same way, so a
+mis-centred or turned framing shows on the first frame of the night (PLAN.md §4.4).
+
 ## Run
 
 Two services (registered in `project-dashboard.json`). `.\start.ps1` (or double-click `start.cmd`) starts both,
@@ -62,9 +67,9 @@ frames from `.Download` into targets' `.SessionData\NIGHT_<date>` folders (and c
 confined to `engine/astrodash/ingest/fileops.py`, never overwrites or deletes, and is journaled and undoable per night.
 Organizer plans you approve are applied by `engine/astrodash/organizer/apply.py` under the same rules.
 Otherwise the engine only lists directories and reads FITS/XISF *headers* (plus the pixels of a
-few raw biases for the sky pedestal, of frames you preview, and of the dark sets you add to a light-leak test, which
-may sit outside the data root). Its own files (header cache, thumbnails, sites, goals, settings, light-leak arrays in
-`var/leaks`) live in `var/`. `engine/tests/test_safety.py` fails if any module gains a
+few raw biases for the sky pedestal, of frames you preview, of lights for the framing check, and of the dark sets you
+add to a light-leak test, which may sit outside the data root). Its own files (header cache, thumbnails, sites, goals,
+settings, star positions, light-leak arrays in `var/leaks`) live in `var/`. `engine/tests/test_safety.py` fails if any module gains a
 file-mutating call outside the allow-list.
 
 ## Tests

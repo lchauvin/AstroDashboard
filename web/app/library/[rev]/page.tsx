@@ -161,7 +161,7 @@ export default async function TargetPage({ params }: { params: Promise<{ rev: st
       <section className={styles.block}>
         <div className={styles.blockHead}>
           <h2 className="section-title">Sessions</h2>
-          <span className="eyebrow">Frames × exposure · flats · darks · conditions</span>
+          <span className="eyebrow">Frames × exposure · flats · darks · framing · conditions</span>
         </div>
         <SessionMatrix rev={rev} />
       </section>

@@ -87,6 +87,13 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+CREATE TABLE IF NOT EXISTS frame_stars (
+    path     TEXT PRIMARY KEY,
+    size     INTEGER NOT NULL,
+    data     TEXT,
+    error    TEXT,
+    measured REAL NOT NULL
+);
 """
 
 
@@ -196,6 +203,32 @@ class HeaderCache:
 
     def set_json(self, key: str, value: Any) -> None:
         self.set_meta(key, json.dumps(value))
+
+    # ------------------------------------------------------------------ framing
+
+    def frame_stars(self, paths: list[str]) -> dict[str, tuple[int, dict[str, Any] | None, str | None]]:
+        """Measured star lists by frame path → (size measured at, stars, error)."""
+        out: dict[str, tuple[int, dict[str, Any] | None, str | None]] = {}
+        for i in range(0, len(paths), 500):
+            chunk = paths[i:i + 500]
+            with self._lock:
+                rows = self._conn.execute(
+                    f"SELECT path, size, data, error FROM frame_stars WHERE path IN ({','.join('?' * len(chunk))})", chunk
+                ).fetchall()
+            out.update({p: (s, json.loads(d) if d else None, e) for p, s, d, e in rows})
+        return out
+
+    def save_frame_stars(self, rows: list[tuple[str, int, dict[str, Any] | None, str | None]]) -> None:
+        payload = [(p, s, json.dumps(d) if d is not None else None, e, time.time()) for p, s, d, e in rows]
+        if not payload:
+            return
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "INSERT INTO frame_stars(path, size, data, error, measured) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(path) DO UPDATE SET size=excluded.size, data=excluded.data, error=excluded.error, "
+                "measured=excluded.measured",
+                payload,
+            )
 
     # ------------------------------------------------------------------ planning
 

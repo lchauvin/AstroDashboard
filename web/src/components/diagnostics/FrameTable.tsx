@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import type { LightFrame, LightGroupResult } from "@/lib/diagnostics";
 import { FLAG_LABELS, filterLetter, overrideNote, reasonLabel } from "@/lib/diagnostics";
 import { num } from "@/lib/format";
+import type { FrameFraming } from "@/lib/framing";
 import { FilterChip, StatusIcon } from "../ui";
 import styles from "./Diagnostics.module.css";
 
@@ -32,6 +33,7 @@ export function FrameTable({
   panelOf,
   onDecide,
   deciding,
+  framing,
 }: {
   groups: LightGroupResult[];
   onSelect: (frames: LightFrame[], index: number) => void;
@@ -42,9 +44,11 @@ export function FrameTable({
   onDecide?: (frame: LightFrame, reject: boolean) => void;
   /** Path of the frame whose decision is being saved. */
   deciding?: string | null;
+  /** Each frame against the previous night's framing (adds a Framing column). */
+  framing?: Record<string, FrameFraming>;
 }) {
   const [tab, setTab] = useState<string>("all");
-  const [sort, setSort] = useState<{ key: Col["key"]; dir: 1 | -1 }>({ key: "time", dir: 1 });
+  const [sort, setSort] = useState<{ key: Col["key"] | "framing"; dir: 1 | -1 }>({ key: "time", dir: 1 });
   const [onlyRejected, setOnlyRejected] = useState(false);
 
   const filters = [...new Set(groups.map((g) => g.filter))];
@@ -54,7 +58,8 @@ export function FrameTable({
   const rows = useMemo(() => {
     const src = groups.filter(inTab).flatMap((g) => g.frames);
     const filtered = onlyRejected ? src.filter((f) => f.rejected) : src;
-    const val = (f: LightFrame) => (sort.key === "time" ? timeOf(f) : (f[sort.key] as number | null));
+    const val = (f: LightFrame) =>
+      sort.key === "time" ? timeOf(f) : sort.key === "framing" ? (framing?.[f.path]?.cornerPx ?? null) : (f[sort.key] as number | null);
     return [...filtered].sort((a, b) => {
       const va = val(a);
       const vb = val(b);
@@ -62,7 +67,7 @@ export function FrameTable({
       if (vb == null || Number.isNaN(vb)) return -1;
       return (va - vb) * sort.dir;
     });
-  }, [groups, current, sort, onlyRejected]);
+  }, [groups, current, sort, onlyRejected, framing]);
 
   const rejectedCount = groups.filter(inTab).flatMap((g) => g.frames).filter((f) => f.rejected).length;
 
@@ -96,6 +101,16 @@ export function FrameTable({
               <th>Status</th>
               {onDecide ? <th aria-label="Keep or reject" /> : null}
               <th>Findings</th>
+              {framing ? (
+                <th
+                  title="Largest corner shift from the previous night's framing (px): within its dither and this night's, up to twice that, beyond"
+                  aria-sort={sort.key === "framing" ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
+                  onClick={() => setSort((s) => ({ key: "framing", dir: s.key === "framing" ? ((-s.dir) as 1 | -1) : 1 }))}
+                  style={{ textAlign: "right" }}
+                >
+                  Framing{sort.key === "framing" ? (sort.dir === 1 ? " ↑" : " ↓") : ""}
+                </th>
+              ) : null}
               {COLS.map((c) => (
                 <th
                   key={c.key}
@@ -159,6 +174,22 @@ export function FrameTable({
                     ))}
                   </span>
                 </td>
+                {framing ? (
+                  <td className="num" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    {framing[f.path] ? (
+                      <span
+                        style={{ display: "inline-flex", gap: 5, alignItems: "center" }}
+                        title={framing[f.path].outlier ? "Framed differently from the rest of this night" : undefined}
+                      >
+                        {framing[f.path].level !== "ok" ? <StatusIcon level={framing[f.path].level} size={12} /> : null}
+                        {Math.round(framing[f.path].cornerPx)}
+                        {framing[f.path].outlier ? "*" : ""}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                ) : null}
                 {COLS.map((c) => (
                   <td key={c.key} className="num" style={{ textAlign: c.key === "time" ? "left" : "right" }}>
                     {c.key === "time"

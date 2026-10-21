@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Bot, Lightbulb } from "lucide-react";
 
+import { shortDate } from "@/lib/format";
+import { framingLevel, framingText, px, type LiveFraming } from "@/lib/framing";
 import { ago, clock, duration, enginePost, filterLetterOf, fmt, type DeviceCard, type Frame, type IngestStatus, type LiveState, type SeqStep, type SkyState } from "@/lib/live";
 import { FilterChip, Marks, StatusIcon, Tip } from "../ui";
 import { LiveBar, NotConnected } from "./LiveBar";
@@ -88,7 +90,44 @@ function LatestFrame({ s, adv }: { s: LiveState; adv: boolean }) {
           ) : null}
         </div>
       ) : null}
+      <FramingLine f={s.framing} />
     </section>
+  );
+}
+
+/** The newest light against its target's previous night: shift and rotation at the corners, against the dither. */
+function FramingLine({ f }: { f: LiveFraming | null | undefined }) {
+  if (!f) return null;
+  const level = framingLevel(f);
+  const prev = f.previousDate ? shortDate(f.previousDate) : f.previous;
+  const turned = Math.abs(f.rotation ?? 0) >= 0.1 ? `, rotated ${Math.abs(f.rotation ?? 0).toFixed(1)}°` : "";
+  let text = framingText(f);
+  if (f.status === "ready") {
+    const off = `${px(f.cornerPx)} at the corners${turned}`;
+    text =
+      f.level === "ok"
+        ? `Aligned with ${prev}: ${off}, within the ${px(f.tolerancePx)} dithering allows`
+        : f.level === "warn"
+          ? `A little off ${prev}: ${off}, beyond the ${px(f.tolerancePx)} dithering allows`
+          : `Off ${prev}: ${off}, over twice the ${px(f.tolerancePx)} dithering allows — check the centering and rotation`;
+  } else if (f.status === "first") {
+    text = `First night of ${f.target}: nothing to compare with yet`;
+  } else if (f.status === "no-target") {
+    text = `Not matched to a target in the library`;
+  } else if (f.status === "pending" && f.job) {
+    text = `Measuring the stars (${f.job.done}/${f.job.total})…`;
+  }
+  const title =
+    f.status === "ready"
+      ? `${f.frame} vs ${f.target} ${f.previous}: shifted ${px(f.shiftPx)}, rotated ${Math.abs(f.rotation ?? 0).toFixed(2)}°; ` +
+        `that night's dither spread ${px(f.previousSpreadPx)} (tonight's is taken to be the same)`
+      : f.error ?? f.frame;
+  return (
+    <div className={styles.framingLine} title={title}>
+      {level ? <StatusIcon level={level} size={13} /> : null}
+      <span className="eyebrow">Framing</span>
+      <span>{text}</span>
+    </div>
   );
 }
 

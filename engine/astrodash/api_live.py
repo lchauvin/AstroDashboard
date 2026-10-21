@@ -12,9 +12,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
-from .frames import canonical_filter
-from .ingest.planner import DOWNLOAD, NIGHT_DIR_RE, match_target
+from .frames import canonical_filter, normalize_kind
+from .headers import read_header
+from .ingest.planner import DOWNLOAD, NIGHT_DIR_RE, evening_of, match_target, split_panel
 from .ingest.service import IngestService
+from .library import slugify
 from .observatory import advisor as adv
 from .observatory import frames as obs_frames
 from .observatory.nina import NinaError, NinaUnavailable
@@ -98,7 +100,53 @@ def register(app: FastAPI, state) -> None:
 
     @app.get("/api/live/state")
     def live_state(graph: float = 180) -> dict[str, Any]:
-        return obs.snapshot(graph_s=min(max(graph, 30), 3600))
+        snap = obs.snapshot(graph_s=min(max(graph, 30), 3600))
+        try:
+            snap["framing"] = _latest_framing()
+        except Exception as exc:  # noqa: BLE001 — never at the cost of the live page
+            snap["framing"] = {"status": "unmeasured", "error": f"{type(exc).__name__}: {exc}"}
+        return snap
+
+    last_header: dict[str, Any] = {"key": None, "header": None}
+
+    def _latest_framing() -> dict[str, Any] | None:
+        """The newest light on disk against its target's previous night (None: no light to check)."""
+        latest = obs.latest_frame()
+        path = (latest.get("path") if latest["source"] == "file" else latest.get("fallback")) if latest else None
+        lib = state.library
+        if not path or lib is None:
+            return None
+        key = (path, os.path.getsize(path))
+        if last_header["key"] != key:
+            last_header["key"], last_header["header"] = key, read_header(Path(path))
+        header = last_header["header"]
+        if normalize_kind(header.get("IMAGETYP"), None, Path(path).name) != "LIGHT":
+            return None
+        night = evening_of(header.get("DATE-LOC")) or evening_of(header.get("DATE-OBS"))
+        obj, panel = split_panel(header.get("OBJECT"))
+        return state.framing.live(path, _revision_of(path, obj, night, lib), panel, night.isoformat() if night else None)
+
+    def _revision_of(path: str, obj: str | None, night, lib) -> str | None:
+        """Where auto-ingest sends this light: its target folder once ingested, else tonight's choice,
+        the ingest plan's routing, or the NINA object matched to a target."""
+        try:
+            rel = Path(path).resolve().relative_to(state.cfg.data_root.resolve())
+        except ValueError:
+            rel = None
+        if rel is not None and rel.parts and rel.parts[0] != DOWNLOAD:
+            rid = slugify(rel.parts[0])
+            return rid if rid in lib.revisions else None
+        if night is None or not obj:
+            return None
+        chosen = service.assignments().get(night.isoformat()) or {}
+        rid = (chosen.get("objects") or {}).get(obj.casefold()) or chosen.get("all")
+        if rid in lib.revisions:
+            return rid
+        planned = ((service.last_plan.objects if service.last_plan else {}).get(night.isoformat()) or {}).get(obj) or {}
+        if planned.get("revisionId") in lib.revisions:
+            return planned["revisionId"]
+        target, _ = match_target(obj, service.targets(lib), service.object_map(lib), True)
+        return target.revision_id if target else None
 
     @app.get("/api/live/frames")
     def live_frames(filter: str | None = None, all: bool = False, limit: int = 100) -> dict[str, Any]:  # noqa: A002

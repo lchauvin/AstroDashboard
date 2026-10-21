@@ -45,6 +45,8 @@ class DiagnosticsJobs:
         self.resolve = resolve          # (revision id, session folder) -> library session dict
         self.runner = runner
         self.after = after              # run once a result is saved, before the job reads as done
+        # (revision, session, progress) → measure the night's framing; set by the engine, not in tests.
+        self.framing: Callable[[str, str, Callable[[str, int, int], None]], None] | None = None
         self._ids = itertools.count(1)
         self._queue: deque[dict[str, Any]] = deque()
         self._jobs: dict[int, dict[str, Any]] = {}
@@ -110,3 +112,8 @@ class DiagnosticsJobs:
             # (frames removed or moved since the last scan), so target pages agree with the diagnostic.
             progress("updating library", 0, 0)
             self.after()
+        if self.framing:
+            try:
+                self.framing(job["revisionId"], job["session"], progress)
+            except Exception:  # noqa: BLE001 — the analysis is saved; the framing is measured again on demand
+                log.exception("framing failed for %s / %s", job["revisionId"], job["session"])

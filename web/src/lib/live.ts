@@ -1,5 +1,6 @@
 /** Live payloads: the engine's own NINA + PHD2 connection (PLAN §5.3), and auto-ingest. */
 
+import type { LiveFraming } from "./framing";
 import type { SkyMonitorSettings } from "./planning/types";
 import type { Level } from "./types";
 export type { Level };
@@ -200,6 +201,8 @@ export type LiveState = {
   polar?: Polar;
   /** Absent from engines older than the sky monitor. */
   sky?: SkyState;
+  /** The newest light on disk against its target's previous night; null when there is no light to check. */
+  framing?: LiveFraming | null;
 };
 
 // ---------------------------------------------------------------- auto-ingest

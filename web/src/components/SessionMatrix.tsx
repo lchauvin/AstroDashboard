@@ -3,6 +3,7 @@ import { Moon } from "lucide-react";
 
 import { exposure, FILTER_ORDER, filterLabel, hours, num, settingsLabel, shortDate } from "@/lib/format";
 import type { DarkStatus, FlatStatus, LightGroup, Level, Revision, Session } from "@/lib/types";
+import { FramingCell, FramingKey, FramingProvider } from "./Framing";
 import { Badge, FilterChip, StatusIcon, Tip } from "./ui";
 import styles from "./SessionMatrix.module.css";
 
@@ -233,73 +234,78 @@ export function SessionMatrix({ rev }: { rev: Revision }) {
   );
   if (!rev.sessions.length) return <p className="muted">No sessions yet.</p>;
   return (
-    <div className={styles.scroller}>
-      <table className={`table ${styles.matrix}`}>
-        <thead>
-          <tr>
-            <th>Night</th>
-            {filters.map((f) => (
-              <th key={f} title={filterLabel(f)}>
-                <FilterChip filter={f} long />
-              </th>
-            ))}
-            <th style={{ textAlign: "right" }}>Total</th>
-            <th style={{ textAlign: "right" }} title="Integration left after diagnostics rejection">
-              Usable
-            </th>
-            <th>Conditions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rev.sessions.map((s) => (
-            <tr key={s.id}>
-              <td className={styles.night}>
-                <div className={styles.date}>
-                  {s.totals.lights ? (
-                    <Link
-                      href={`/diagnostics/${rev.id}/${encodeURIComponent(s.folder)}`}
-                      className={styles.dateLink}
-                      title={s.diagnostic ? "Open the night's diagnostic" : "Open the night's diagnostic (not analysed yet)"}
-                    >
-                      {shortDate(s.date)}
-                    </Link>
-                  ) : (
-                    shortDate(s.date)
-                  )}
-                </div>
-                <div className={styles.folder}>
-                  <span className="mono">{s.folder}</span>
-                  {s.naming === "legacy" ? <Badge tone="muted">legacy name</Badge> : null}
-                </div>
-                {s.nightMismatch ? (
-                  <div className={styles.note}>
-                    <StatusIcon level="info" size={12} /> headers say {s.headerNights.join(", ")}
-                  </div>
-                ) : null}
-              </td>
+    <FramingProvider revId={rev.id}>
+      <div className={styles.scroller}>
+        <table className={`table ${styles.matrix}`}>
+          <thead>
+            <tr>
+              <th>Night</th>
               {filters.map((f) => (
-                <Cell key={f} session={s} filter={f} panels={rev.panels} />
+                <th key={f} title={filterLabel(f)}>
+                  <FilterChip filter={f} long />
+                </th>
               ))}
-              <td className={`num ${styles.total}`}>
-                <Tip tip={`Total frames: ${s.totals.lights}`}>{hours(s.totals.seconds)}</Tip>
-              </td>
-              <td className={`num ${styles.total}`}>
-                {s.diagnostic ? (
-                  <Tip tip={`Rejected frames: ${s.diagnostic.rejected}`}>
-                    <span className={styles.usable}>{hours(s.diagnostic.acceptedSeconds)}</span>
-                  </Tip>
-                ) : (
-                  <span className="muted" aria-label="Not analysed">—</span>
-                )}
-              </td>
-              <ConditionsCell s={s} />
+              <th style={{ textAlign: "right" }}>Total</th>
+              <th style={{ textAlign: "right" }} title="Integration left after diagnostics rejection">
+                Usable
+              </th>
+              <th title="Framing against the previous night: shift and rotation, within the dither">Framing</th>
+              <th>Conditions</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className={styles.key}>
-        <StatusIcon level="ok" size={12} /> F flats / D master dark present · <StatusIcon level="warn" size={12} /> needs a look (focus moved, flats not calibratable, borrowed) · <StatusIcon level="bad" size={12} /> missing. Hover a cell for details.
-      </p>
-    </div>
+          </thead>
+          <tbody>
+            {rev.sessions.map((s) => (
+              <tr key={s.id}>
+                <td className={styles.night}>
+                  <div className={styles.date}>
+                    {s.totals.lights ? (
+                      <Link
+                        href={`/diagnostics/${rev.id}/${encodeURIComponent(s.folder)}`}
+                        className={styles.dateLink}
+                        title={s.diagnostic ? "Open the night's diagnostic" : "Open the night's diagnostic (not analysed yet)"}
+                      >
+                        {shortDate(s.date)}
+                      </Link>
+                    ) : (
+                      shortDate(s.date)
+                    )}
+                  </div>
+                  <div className={styles.folder}>
+                    <span className="mono">{s.folder}</span>
+                    {s.naming === "legacy" ? <Badge tone="muted">legacy name</Badge> : null}
+                  </div>
+                  {s.nightMismatch ? (
+                    <div className={styles.note}>
+                      <StatusIcon level="info" size={12} /> headers say {s.headerNights.join(", ")}
+                    </div>
+                  ) : null}
+                </td>
+                {filters.map((f) => (
+                  <Cell key={f} session={s} filter={f} panels={rev.panels} />
+                ))}
+                <td className={`num ${styles.total}`}>
+                  <Tip tip={`Total frames: ${s.totals.lights}`}>{hours(s.totals.seconds)}</Tip>
+                </td>
+                <td className={`num ${styles.total}`}>
+                  {s.diagnostic ? (
+                    <Tip tip={`Rejected frames: ${s.diagnostic.rejected}`}>
+                      <span className={styles.usable}>{hours(s.diagnostic.acceptedSeconds)}</span>
+                    </Tip>
+                  ) : (
+                    <span className="muted" aria-label="Not analysed">—</span>
+                  )}
+                </td>
+                <FramingCell folder={s.folder} />
+                <ConditionsCell s={s} />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className={styles.key}>
+          <StatusIcon level="ok" size={12} /> F flats / D master dark present · <StatusIcon level="warn" size={12} /> needs a look (focus moved, flats not calibratable, borrowed) · <StatusIcon level="bad" size={12} /> missing. Hover a cell for details.
+        </p>
+        <FramingKey />
+      </div>
+    </FramingProvider>
   );
 }
