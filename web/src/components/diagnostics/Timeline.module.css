@@ -70,6 +70,21 @@
   fill: var(--text-muted);
 }
 
+/* Reference lines (the dither, a tolerance): dashed, labelled at the right end. */
+.ref {
+  stroke: var(--color-accent);
+  stroke-width: 1.2;
+  stroke-dasharray: 5 4;
+}
+
+.refLabel {
+  font: 400 10px var(--font-mono);
+  fill: var(--color-accent-700);
+  paint-order: stroke;
+  stroke: var(--color-bg);
+  stroke-width: 3px;
+}
+
 .twilight {
   fill: color-mix(in srgb, var(--status-warn) 10%, transparent);
 }

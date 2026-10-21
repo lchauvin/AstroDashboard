@@ -95,7 +95,7 @@ function LatestFrame({ s, adv }: { s: LiveState; adv: boolean }) {
   );
 }
 
-/** The newest light against its target's previous night: shift and rotation at the corners, against the dither. */
+/** The newest light against its target's previous night: shift and rotation at the corners, against that night's spread. */
 function FramingLine({ f }: { f: LiveFraming | null | undefined }) {
   if (!f) return null;
   const level = framingLevel(f);
@@ -106,10 +106,10 @@ function FramingLine({ f }: { f: LiveFraming | null | undefined }) {
     const off = `${px(f.cornerPx)} at the corners${turned}`;
     text =
       f.level === "ok"
-        ? `Aligned with ${prev}: ${off}, within the ${px(f.tolerancePx)} dithering allows`
+        ? `Aligned with ${prev}: ${off}, within ${px(f.tolerancePx)} (twice that night's spread)`
         : f.level === "warn"
-          ? `A little off ${prev}: ${off}, beyond the ${px(f.tolerancePx)} dithering allows`
-          : `Off ${prev}: ${off}, over twice the ${px(f.tolerancePx)} dithering allows — check the centering and rotation`;
+          ? `A little off ${prev}: ${off}, beyond ${px(f.tolerancePx)} (twice that night's spread)`
+          : `Off ${prev}: ${off}, over twice ${px(f.tolerancePx)} (that night's spread, doubled) — check the centering and rotation`;
   } else if (f.status === "first") {
     text = `First night of ${f.target}: nothing to compare with yet`;
   } else if (f.status === "no-target") {
@@ -120,7 +120,7 @@ function FramingLine({ f }: { f: LiveFraming | null | undefined }) {
   const title =
     f.status === "ready"
       ? `${f.frame} vs ${f.target} ${f.previous}: shifted ${px(f.shiftPx)}, rotated ${Math.abs(f.rotation ?? 0).toFixed(2)}°; ` +
-        `that night's dither spread ${px(f.previousSpreadPx)} (tonight's is taken to be the same)`
+        `that night's spread ${px(f.previousSpreadPx)}, dither and drift (tonight's is taken to be the same)`
       : f.error ?? f.frame;
   return (
     <div className={styles.framingLine} title={title}>

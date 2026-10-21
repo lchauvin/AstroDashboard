@@ -10,7 +10,7 @@ import { hours, num, relativeTime } from "@/lib/format";
 import { FilterChip, Marks, StatusIcon } from "../ui";
 import { Calibration, flatLevel } from "./Calibration";
 import { Findings } from "./Findings";
-import { FramingBlock, framesOf, useSessionFraming } from "./Framing";
+import { FramingBlock, framesOf, framingMetrics, useSessionFraming } from "./Framing";
 import { FrameTable } from "./FrameTable";
 import { PreviewModal } from "./PreviewModal";
 import { byFilter, calibrationEntries, groupFindings, panelsOf, scopeFindings, worst } from "./scope";
@@ -103,6 +103,7 @@ export function SessionDiagnostics({
   const panel = panels.find((p) => p.label === panelId) ?? null;
   // The Library's panel number ("2") of the selected panel, for its framing.
   const framingPanel = panel ? (/(\d+)\s*$/.exec(panel.label)?.[1] ?? null) : null;
+  const timelineFraming = useMemo(() => framingMetrics(framing.data, framingPanel), [framing.data, framingPanel]);
   const lights = panel ? allLights.filter((g) => g.target === panel.id) : allLights;
   const panelOfPath = useMemo(() => {
     const m = new Map<string, string>();
@@ -138,7 +139,7 @@ export function SessionDiagnostics({
       `FWHM ${num(f.fwhm_median, 2)}″`,
       `${num(f.n_stars)} stars`,
       `score ${num(f.score, 2)}`,
-      frameFraming[f.path] ? `framing ${Math.round(frameFraming[f.path].cornerPx)} px` : "",
+      frameFraming[f.path]?.cornerPx != null ? `framing ${Math.round(frameFraming[f.path].cornerPx ?? 0)} px` : "",
       found.length ? `findings: ${found.join(", ")}` : "",
     ]
       .filter(Boolean)
@@ -322,7 +323,7 @@ export function SessionDiagnostics({
 
           {section === "night" ? (
             <section className={styles.block}>
-              <Timeline groups={lights} onSelect={openFrames} events={analysis?.events ?? []} flags={flags} />
+              <Timeline groups={lights} onSelect={openFrames} events={analysis?.events ?? []} flags={flags} framing={timelineFraming} />
             </section>
           ) : null}
 
@@ -335,7 +336,7 @@ export function SessionDiagnostics({
                 panelOf={panels.length && !panel ? (p) => panelOfPath.get(p) : undefined}
                 onDecide={decide}
                 deciding={deciding}
-                framing={Object.keys(frameFraming).length ? frameFraming : undefined}
+                framing={Object.values(frameFraming).some((x) => x.cornerPx != null) ? frameFraming : undefined}
               />
             </section>
           ) : null}

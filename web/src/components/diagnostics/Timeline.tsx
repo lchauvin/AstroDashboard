@@ -7,7 +7,27 @@ import { FLAG_LABELS, filterLetter, reasonLabel } from "@/lib/diagnostics";
 import { filterColor, filterLabel, num } from "@/lib/format";
 import styles from "./Timeline.module.css";
 
-const METRICS: { key: keyof LightFrame; label: string; unit: string; digits: number }[] = [
+/** A value per frame, optionally with reference lines (e.g. the dither) and a note for the frame's tooltip. */
+export type Metric = {
+  key: string;
+  label: string;
+  unit: string;
+  digits: number;
+  value: (f: LightFrame) => number | null;
+  lines?: { value: number; label: string }[];
+  /** Keep 0 on the axis (offsets). */
+  zero?: boolean;
+  note?: (f: LightFrame) => string | null;
+};
+
+const field =
+  (key: keyof LightFrame) =>
+  (f: LightFrame): number | null => {
+    const v = f[key];
+    return typeof v === "number" ? v : null;
+  };
+
+const METRICS: Metric[] = [
   { key: "fwhm_median", label: "FWHM", unit: "″", digits: 2 },
   { key: "n_stars", label: "Stars", unit: "", digits: 0 },
   { key: "background_median", label: "Background", unit: " ADU", digits: 0 },
@@ -17,7 +37,7 @@ const METRICS: { key: keyof LightFrame; label: string; unit: string; digits: num
   { key: "noise_mad", label: "Noise", unit: " ADU", digits: 1 },
   { key: "score", label: "Score", unit: "", digits: 2 },
   { key: "altitude_deg", label: "Altitude", unit: "°", digits: 0 },
-];
+].map((m) => ({ ...m, value: field(m.key as keyof LightFrame) }));
 
 const H = 300;
 const PAD = { l: 56, r: 16, t: 14, b: 30 };
@@ -40,13 +60,17 @@ export function Timeline({
   onSelect,
   events = [],
   flags = {},
+  framing = [],
 }: {
   groups: LightGroupResult[];
   onSelect: (frames: LightFrame[], index: number) => void;
   events?: { kind: "flip" | "focus"; time: string; label: string }[];
   flags?: Record<string, string[]>;
+  /** Framing metrics (Framing group of the selector), present once the night's framing is measured. */
+  framing?: Metric[];
 }) {
-  const [metric, setMetric] = useState(METRICS[0]);
+  const [metricKey, setMetricKey] = useState(METRICS[0].key);
+  const metric = [...METRICS, ...framing].find((m) => m.key === metricKey) ?? METRICS[0];
   const [hover, setHover] = useState<{ f: LightFrame; x: number; y: number } | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(900);
@@ -61,13 +85,15 @@ export function Timeline({
 
   const all = useMemo(() => groups.flatMap((g) => g.frames).filter((f) => Number.isFinite(timeOf(f))), [groups]);
   const sorted = useMemo(() => [...all].sort((a, b) => timeOf(a) - timeOf(b)), [all]);
-  const vals = all.map((f) => f[metric.key]).filter((v): v is number => typeof v === "number");
+  const vals = all.map(metric.value).filter((v): v is number => v !== null && Number.isFinite(v));
   if (!all.length || !vals.length) return <p className="muted">No timed frames to plot.</p>;
 
   const t0 = timeOf(sorted[0]);
   const t1 = Math.max(timeOf(sorted[sorted.length - 1]), t0 + 60_000);
-  const lo = Math.min(...vals);
-  const hi = Math.max(...vals);
+  // Reference lines and (for offsets) zero stay on the axis, so a dither line shows even when every frame is under it.
+  const span = [...vals, ...(metric.lines ?? []).map((l) => l.value), ...(metric.zero ? [0] : [])];
+  const lo = Math.min(...span);
+  const hi = Math.max(...span);
   const padY = (hi - lo) * 0.08 || Math.abs(hi) * 0.1 || 1;
   const yTicks = niceTicks(lo - padY, hi + padY);
   const y0 = Math.min(lo - padY, yTicks[0]);
@@ -97,12 +123,21 @@ export function Timeline({
         <h2 className="section-title">Through the night</h2>
         <label className={styles.metric}>
           <span className="eyebrow">Metric</span>
-          <select value={metric.key} onChange={(e) => setMetric(METRICS.find((m) => m.key === e.target.value) ?? METRICS[0])}>
+          <select value={metric.key} onChange={(e) => setMetricKey(e.target.value)}>
             {METRICS.map((m) => (
               <option key={m.key} value={m.key}>
                 {m.label}
               </option>
             ))}
+            {framing.length ? (
+              <optgroup label="Framing">
+                {framing.map((m) => (
+                  <option key={m.key} value={m.key}>
+                    {m.label}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
           </select>
         </label>
       </div>
@@ -169,6 +204,14 @@ export function Timeline({
             </text>
           ))}
           <line x1={PAD.l} x2={W - PAD.r} y1={H - PAD.b} y2={H - PAD.b} className={styles.axis} />
+          {(metric.lines ?? []).map((l, i) => (
+            <g key={`${l.label}${i}`}>
+              <line x1={PAD.l} x2={W - PAD.r} y1={y(l.value)} y2={y(l.value)} className={styles.ref} />
+              <text x={W - PAD.r - 4} y={y(l.value) - 4} className={styles.refLabel} textAnchor="end">
+                {l.label}
+              </text>
+            </g>
+          ))}
           {events.map((e, i) => {
             const t = Date.parse(e.time);
             if (!Number.isFinite(t) || t < t0 || t > t1) return null;
@@ -185,9 +228,9 @@ export function Timeline({
           })}
           {groups.map((g) =>
             g.frames.map((f, i) => {
-              const v = f[metric.key];
+              const v = metric.value(f);
               const t = timeOf(f);
-              if (typeof v !== "number" || !Number.isFinite(t)) return null;
+              if (v === null || !Number.isFinite(v) || !Number.isFinite(t)) return null;
               const color = filterColor(filterLetter(g.filter));
               const cx = x(t);
               const cy = y(v);
@@ -226,9 +269,15 @@ export function Timeline({
             </strong>
             <br />
             <span className="num">
-              {metric.label} {num(hover.f[metric.key] as number | null, metric.digits)}
+              {metric.label} {num(metric.value(hover.f), metric.digits)}
               {metric.unit}
             </span>
+            {metric.note?.(hover.f) ? (
+              <>
+                <br />
+                {metric.note(hover.f)}
+              </>
+            ) : null}
             <br />
             {hover.f.rejected ? `Rejected: ${hover.f.reasons.map(reasonLabel).join(", ")}` : "Kept"}
             {flags[hover.f.path]?.length ? (

@@ -14,6 +14,7 @@ framing.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 import time
@@ -222,7 +223,7 @@ class FramingService:
 
     def _compare(self, ref: tuple[_Night, tuple, Night] | None, n: _Night, key: tuple, cur: Night) -> dict[str, Any]:
         base = {"frames": len(cur.poses), "outliers": len(cur.outliers), "failed": len(cur.failed),
-                "spreadPx": round(cur.spread, 1)}
+                "spreadPx": round(cur.spread, 1), "ditherPx": round(cur.dither, 1), "rotationDeg": round(cur.rotation_span, 3)}
         if ref is None:
             return {"status": "first", **base}
         rn, rkey, rnight = ref
@@ -310,11 +311,24 @@ class FramingService:
             upto = next((i for i, n in enumerate(chain) if n.folder == folder), None)
             if upto is None:
                 continue
-            verdicts, need, _ = self._evaluate(chain[: upto + 1], full=folder)
+            verdicts, need, ref = self._evaluate(chain[: upto + 1], full=folder)
             missing |= need
             v = dict(verdicts[-1])
-            frames = {self._rel(p): x for p, x in (v.pop("byFrame", None) or {}).items()}
-            out.append({"panel": panel, "verdict": v, "frames": frames})
+            # Through the night (every night, the first one too): each light against the night's own framing.
+            night = ref[2] if ref and ref[0].folder == folder else None
+            frames: dict[str, dict[str, Any]] = {}
+            for p in (night.poses if night else {}):
+                corner, shift, rot = night.offsets(p)
+                frames[self._rel(p)] = {"nightPx": round(corner, 1), "nightShiftPx": round(shift, 1), "nightRotation": round(rot, 3),
+                                        "nightRotationPx": round(math.radians(rot) * night.half_diagonal, 1), "outlier": p in night.outliers}
+            for p, x in (v.pop("byFrame", None) or {}).items():
+                frames.setdefault(self._rel(p), {}).update(x)
+            course = None
+            if night:
+                span = night.rotation_span
+                course = {"spreadPx": round(night.spread, 1), "ditherPx": round(night.dither, 1), "rotationDeg": round(span, 3),
+                          "rotationPx": round(math.radians(span) * night.half_diagonal, 1), "frames": len(night.poses)}
+            out.append({"panel": panel, "verdict": v, "frames": frames, "night": course})
         return out, missing
 
     def prepare_session(self, rev_id: str, folder: str, progress: Callable[[str, int, int], None]) -> None:

@@ -103,7 +103,7 @@ export function FrameTable({
               <th>Findings</th>
               {framing ? (
                 <th
-                  title="Largest corner shift from the previous night's framing (px): within its dither and this night's, up to twice that, beyond"
+                  title="Largest corner shift from the previous night's framing (px): within both nights' spread, up to twice that, beyond"
                   aria-sort={sort.key === "framing" ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
                   onClick={() => setSort((s) => ({ key: "framing", dir: s.key === "framing" ? ((-s.dir) as 1 | -1) : 1 }))}
                   style={{ textAlign: "right" }}
@@ -176,18 +176,7 @@ export function FrameTable({
                 </td>
                 {framing ? (
                   <td className="num" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                    {framing[f.path] ? (
-                      <span
-                        style={{ display: "inline-flex", gap: 5, alignItems: "center" }}
-                        title={framing[f.path].outlier ? "Framed differently from the rest of this night" : undefined}
-                      >
-                        {framing[f.path].level !== "ok" ? <StatusIcon level={framing[f.path].level} size={12} /> : null}
-                        {Math.round(framing[f.path].cornerPx)}
-                        {framing[f.path].outlier ? "*" : ""}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
+                    <FramingValue x={framing[f.path]} />
                   </td>
                 ) : null}
                 {COLS.map((c) => (
@@ -205,5 +194,17 @@ export function FrameTable({
         </table>
       </div>
     </div>
+  );
+}
+
+/** A frame against the previous night's framing: px, with a mark when beyond both nights' spread. */
+function FramingValue({ x }: { x: FrameFraming | undefined }) {
+  if (x?.cornerPx == null) return <>—</>;
+  return (
+    <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }} title={x.outlier ? "Framed differently from the rest of this night" : undefined}>
+      {x.level && x.level !== "ok" ? <StatusIcon level={x.level} size={12} /> : null}
+      {Math.round(x.cornerPx)}
+      {x.outlier ? "*" : ""}
+    </span>
   );
 }

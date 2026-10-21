@@ -6,8 +6,10 @@ frame's field sits in the other's pixels: its *pose*, the centre plus the rotati
 ±90° (a meridian flip turns the image half a turn, and stacking does not care).
 
 A night's framing is the median pose of its lights (every filter) relative to one of them, the
-*anchor*. Dithering scatters the lights around that median, and the night's *dither spread* is
-the 90th percentile of their distances from it. The distance between two poses is the largest
+*anchor*. Its *spread* is the 90th percentile of the lights' distances from that median: dither
+and drift together. Dithering only shifts the frame, so the *dither* is the same percentile of
+their shifts alone, and a change of rotation through the night is drift (field rotation) or the
+framing being redone (a meridian flip, a re-centring). The distance between two poses is the largest
 corner shift: how far a corner of one field lies from the same corner of the other, so a shift
 and a rotation are judged in the same pixels, the ones the stack loses at its edges.
 
@@ -311,28 +313,31 @@ def centre_shift(a: Pose, b: Pose) -> float:
     return float(math.hypot(b.x - a.x, b.y - a.y))
 
 
-def _consensus(poses: dict[str, Pose], w: int, h: int) -> tuple[Pose, float, list[str]]:
-    """A night's framing from its frames' poses → (median pose, dither spread, frames framed differently).
+def _median_pose(ps: list[Pose]) -> Pose:
+    """Median centre and rotation; rotations are taken relative to the first pose's, so a framing near ±90°
+    does not straddle the fold."""
+    r0 = ps[0].rot
+    return Pose(float(np.median([p.x for p in ps])), float(np.median([p.y for p in ps])),
+                fold(r0 + float(np.median([fold(p.rot - r0) for p in ps]))))
+
+
+def _consensus(poses: dict[str, Pose], w: int, h: int) -> tuple[Pose, list[str]]:
+    """A night's framing from its frames' poses → (median pose, frames framed differently).
 
     The frame closest to all the others (the medoid) stands for the night; a frame further from it
     than OUTLIER_PX and OUTLIER_FACTOR × the typical distance was framed differently (a failed
-    centering, the camera turned) and counts neither in the median nor in the spread.
+    centering, the camera turned) and counts neither in the median nor in the spreads.
     """
     paths = list(poses)
     if len(paths) == 1:
-        return poses[paths[0]], 0.0, []
+        return poses[paths[0]], []
     ps = [poses[p] for p in paths]
     dist = _corner_shifts(ps, ps, w, h)
     m = int(np.argmin(np.median(dist, axis=1)))
     typical = float(np.median(np.delete(dist[m], m)))
     inside = dist[m] <= max(OUTLIER_PX, OUTLIER_FACTOR * typical)
-    kept = [p for p, ok in zip(ps, inside) if ok]
-    # Rotations relative to the medoid's, so a framing near ±90° does not straddle the fold.
-    r0 = ps[m].rot
-    med = Pose(float(np.median([p.x for p in kept])), float(np.median([p.y for p in kept])),
-               fold(r0 + float(np.median([fold(p.rot - r0) for p in kept]))))
-    spread = float(np.percentile(_corner_shifts([med], kept, w, h)[0], SPREAD_PERCENTILE)) if len(kept) > 1 else 0.0
-    return med, spread, [p for p, ok in zip(paths, inside) if not ok]
+    kept = [ps[m]] + [p for i, (p, ok) in enumerate(zip(ps, inside)) if ok and i != m]
+    return _median_pose(kept), [p for p, ok in zip(paths, inside) if not ok]
 
 
 # ---------------------------------------------------------------------------- nights
@@ -346,9 +351,27 @@ class Night:
     h: int
     poses: dict[str, Pose]       # every registered frame, the anchor included
     median: Pose                 # the night's framing (frames framed differently left out)
-    spread: float                # dither spread (px); 0 with a single frame
+    spread: float                # how far the frames sit from it (px, largest corner shift): dither and drift
+    dither: float                # the same for their shifts alone (px): dithering only moves the frame
     failed: list[str]            # frames whose stars did not match the anchor's
     outliers: list[str]          # frames framed differently from the rest of the night
+
+    @property
+    def half_diagonal(self) -> float:
+        return math.hypot(self.w, self.h) / 2
+
+    def offsets(self, path: str) -> tuple[float, float, float]:
+        """A frame against the night's framing → (largest corner shift px, shift of its centre px, rotation °)."""
+        q = self.poses[path]
+        return corner_shift(self.median, q, self.w, self.h), centre_shift(self.median, q), fold(q.rot - self.median.rot)
+
+    @property
+    def rotation_span(self) -> float:
+        """How much the rotation changed over the night (°; frames framed differently left out): never dither,
+        so drift (a steady turn: field rotation from the polar alignment) or the framing redone (a step: a meridian
+        flip, a re-centring)."""
+        rots = [fold(q.rot - self.median.rot) for p, q in self.poses.items() if p not in self.outliers]
+        return max(rots) - min(rots) if rots else 0.0
 
 
 def night(stars: dict[str, Stars], order: list[str] | None = None) -> Night | None:
@@ -377,8 +400,11 @@ def night(stars: dict[str, Stars], order: list[str] | None = None) -> Night | No
                 failed.append(p)
             else:
                 poses[p] = pose_in_ref(fit, stars[p])
-        med, spread, outliers = _consensus(poses, a.w, a.h)
-        candidate = Night(anchor, a.w, a.h, poses, med, spread, failed, outliers)
+        med, outliers = _consensus(poses, a.w, a.h)
+        kept = [q for p, q in poses.items() if p not in outliers]
+        spread = float(np.percentile(_corner_shifts([med], kept, a.w, a.h)[0], SPREAD_PERCENTILE)) if len(kept) > 1 else 0.0
+        dither = float(np.percentile([centre_shift(med, q) for q in kept], SPREAD_PERCENTILE)) if len(kept) > 1 else 0.0
+        candidate = Night(anchor, a.w, a.h, poses, med, spread, dither, failed, outliers)
         if best is None or len(candidate.poses) > len(best.poses):
             best = candidate
         if len(best.poses) * 2 > len(paths):

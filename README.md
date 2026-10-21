@@ -22,8 +22,9 @@ against a noise floor from the sets' even/odd half masters, shown stretched hard
 
 **Framing** (Library → target → Sessions, each night's Diagnostics, Live): every night is checked against the previous
 night of the same target (and mosaic panel) by matching stars. ✓ when the shift and rotation, measured at the frame
-corners, stay within the dither spread; ⚠ up to twice it; ✗ beyond. Live checks the newest light the same way, so a
-mis-centred or turned framing shows on the first frame of the night (PLAN.md §4.4).
+corners, stay within the nights' spread (dither and drift); ⚠ up to twice it; ✗ beyond. Live checks the newest light the
+same way, so a mis-centred or turned framing shows on the first frame of the night. A night's Diagnostics plots each light's
+framing through the night against its dither (shifts only), so a drift such as field rotation stands out (PLAN.md §4.4).
 
 ## Run
 

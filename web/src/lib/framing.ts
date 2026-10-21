@@ -21,8 +21,12 @@ export interface FramingVerdict {
   rotation?: number;
   tolerancePx?: number;
   frameTolerancePx?: number;
+  /** How far this night's frames sit from its framing (dither and drift), and the night before's. */
   spreadPx?: number;
   previousSpreadPx?: number;
+  /** This night's dither (the spread of its shifts alone) and how much its rotation changed (°). */
+  ditherPx?: number;
+  rotationDeg?: number;
   matches?: number;
   /** Lights measured that night, those framed differently from the rest, those whose stars did not match. */
   frames?: number;
@@ -48,17 +52,33 @@ export interface RevisionFraming {
 }
 
 export interface FrameFraming {
-  cornerPx: number;
-  level: FramingLevel;
+  /** Against the previous night's framing (absent on a first night). */
+  cornerPx?: number;
+  level?: FramingLevel;
   /** Framed differently from the rest of its own night. */
   outlier: boolean;
+  /** Against its own night's framing: largest corner shift, shift of the centre (px), rotation (° and px at the corners, signed). */
+  nightPx?: number;
+  nightShiftPx?: number;
+  nightRotation?: number;
+  nightRotationPx?: number;
+}
+
+/** How a night's framing moved: the spread of its frames (dither and drift), of their shifts alone (dither: it
+ *  never rotates the frame), and how much the rotation changed (drift, or a meridian flip's step). */
+export interface NightCourse {
+  spreadPx: number;
+  ditherPx: number;
+  rotationDeg: number;
+  rotationPx: number;
+  frames: number;
 }
 
 export interface SessionFraming {
   revisionId: string;
   session: string;
   /** Frames keyed like Diagnostics' frame paths (relative to the data root). */
-  panels: { panel: string | null; verdict: FramingVerdict; frames: Record<string, FrameFraming> }[];
+  panels: { panel: string | null; verdict: FramingVerdict; frames: Record<string, FrameFraming>; night?: NightCourse | null }[];
   job: FramingJob | null;
   minTolerancePx: number;
 }
@@ -76,7 +96,7 @@ export interface LiveFraming extends FramingVerdict {
 export const framingBusy = (job: FramingJob | null | undefined) => !!job && job.status !== "failed";
 
 export const px = (v: number | null | undefined) => (v == null ? "?" : `${Math.round(v)} px`);
-const deg = (v: number | null | undefined) => (v == null ? "?" : `${Math.abs(v).toFixed(Math.abs(v) < 1 ? 2 : 1)}°`);
+export const deg = (v: number | null | undefined) => (v == null ? "?" : `${Math.abs(v).toFixed(Math.abs(v) < 1 ? 2 : 1)}°`);
 
 /** Status icon level; null when there is nothing to judge (first night, still measuring…). */
 export function framingLevel(v: FramingVerdict | null | undefined): Level | null {
@@ -101,9 +121,9 @@ export function framingText(v: FramingVerdict): string {
     case "no-target":
       return "Not matched to a target in the library";
     default:
-      if (v.level === "ok") return `Aligned with ${night(v)}: ${px(v.cornerPx)} at the corners, within the ${px(v.tolerancePx)} dither`;
-      if (v.level === "warn") return `A little off ${night(v)}: ${px(v.cornerPx)} at the corners, beyond the ${px(v.tolerancePx)} dither`;
-      return `Off ${night(v)}: ${px(v.cornerPx)} at the corners, over twice the ${px(v.tolerancePx)} dither`;
+      if (v.level === "ok") return `Aligned with ${night(v)}: ${px(v.cornerPx)} at the corners, within the nights' ${px(v.tolerancePx)} spread`;
+      if (v.level === "warn") return `A little off ${night(v)}: ${px(v.cornerPx)} at the corners, beyond the nights' ${px(v.tolerancePx)} spread`;
+      return `Off ${night(v)}: ${px(v.cornerPx)} at the corners, over twice the nights' ${px(v.tolerancePx)} spread`;
   }
 }
 
@@ -113,7 +133,7 @@ export function framingDetails(v: FramingVerdict, minTolerancePx = 10): string[]
   if (v.status === "ready") {
     out.push(`Shifted ${px(v.shiftPx)}, rotated ${deg(v.rotation)} from ${v.previous}`);
     out.push(
-      `Dither spread ${px(v.spreadPx)} this night, ${px(v.previousSpreadPx)} the night before` +
+      `Spread ${px(v.spreadPx)} this night (dither ${px(v.ditherPx)}, rotation changed ${deg(v.rotationDeg)}), ${px(v.previousSpreadPx)} the night before` +
         ((v.tolerancePx ?? 0) <= minTolerancePx ? ` (tolerance never below ${px(minTolerancePx)})` : ""),
     );
   }

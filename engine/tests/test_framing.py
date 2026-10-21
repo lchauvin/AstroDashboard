@@ -101,6 +101,26 @@ def test_night_sets_a_differently_framed_frame_aside():
     assert 5 < night.spread < 35
 
 
+def test_dither_is_the_shifts_and_rotation_through_the_night_is_drift():
+    sky = _sky()
+    rng = np.random.default_rng(5)
+    order = [f"t{i:02d}" for i in range(30)]
+
+    def night_with(rotation_deg):
+        stars = {p: _view(sky, rotation_deg * (i / 29 - 0.5), tuple(rng.uniform(-15, 15, 2)), seed=40 + i)
+                 for i, p in enumerate(order)}
+        return fr.night(stars, order)
+
+    turning, steady = night_with(1.0), night_with(0.0)
+    # The dither is the same either way: the field rotation does not count as dither, but it widens the spread.
+    assert 10 < turning.dither < 25 and 10 < steady.dither < 25
+    assert turning.rotation_span == pytest.approx(1.0, abs=0.05) and steady.rotation_span < 0.05
+    assert turning.spread > turning.dither + 8 and steady.spread == pytest.approx(steady.dither, abs=3)
+    corner, shift, rot = turning.offsets(order[-1])
+    assert rot == pytest.approx(-0.5, abs=0.1) and corner >= shift      # the last frame: half the turn, the other way
+    assert turning.half_diagonal == pytest.approx(math.hypot(W, H) / 2)
+
+
 def test_compare_judges_shift_and_rotation_against_the_dither():
     sky = _sky()
     rng = np.random.default_rng(11)
@@ -201,6 +221,13 @@ def test_framing_api_compares_each_night_with_the_one_before(tmp_path):
         assert set(panel["frames"]) == {f"NGC 1 (Test)/.SessionData/NIGHT_2026-09-03/LIGHT/{f}/2026-09-03_{i}.fits"
                                         for i, f in enumerate(["H", "H", "O"])}
         assert {x["level"] for x in panel["frames"].values()} == {"bad"}
+        assert all(x["nightPx"] < 20 and abs(x["nightRotation"]) < 0.05 for x in panel["frames"].values())
+        assert panel["night"]["ditherPx"] < 20 and panel["night"]["rotationDeg"] < 0.05
+
+        # The first night has no previous one, but its course through the night is there.
+        first = client.get("/api/framing/sessions/ngc-1-test/NIGHT_2026-09-01").json()["panels"][0]
+        assert first["verdict"]["status"] == "first" and first["night"]["frames"] == 3
+        assert all("nightShiftPx" in x and "level" not in x for x in first["frames"].values())
         assert client.get("/api/framing/sessions/ngc-1-test/NIGHT_1999-01-01").status_code == 404
 
         # Live: a light of the next night, back on the first night's framing (it lands next to the target folder).

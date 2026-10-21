@@ -99,7 +99,7 @@ export function FramingKey() {
   const job = data?.job;
   return (
     <p className={styles.key}>
-      Framing vs the previous night (shift and rotation, at the corners): <StatusIcon level="ok" size={12} /> within the dither ·{" "}
+      Framing vs the previous night (shift and rotation, at the corners): <StatusIcon level="ok" size={12} /> within the nights&apos; spread (dither and drift) ·{" "}
       <StatusIcon level="warn" size={12} /> up to twice it · <StatusIcon level="bad" size={12} /> beyond; ref = first night.
       {job && job.status !== "failed" ? (
         <span>
