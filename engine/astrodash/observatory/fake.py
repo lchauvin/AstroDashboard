@@ -38,6 +38,16 @@ X_RATE, Y_RATE = 3.912, 3.705  # calibrated guide rates, px/s
 PA_ALT, PA_AZ, LATITUDE = 8.0, -15.0, 45.5  # polar axis error (′, + = too high / east of the pole) and site
 RA_H, DEC_DEG, LST0_H = 0.7122, 41.27, 23.3006  # M 31, and the sidereal time when the simulator starts
 FILTERS = ("L", "R", "G", "B", "Ha", "OIII", "SII")
+# Each algorithm's parameters as PHD2 names them, with the defaults a switch in the Brain starts from.
+ALGORITHM_PARAMS = {
+    "Hysteresis": {"minMove": 0.15, "hysteresis": 0.10, "aggression": 0.70},
+    "Lowpass": {"minMove": 0.15, "slopeWeight": 5.0},
+    "Lowpass2": {"minMove": 0.15, "aggressiveness": 0.80},
+    "ResistSwitch": {"minMove": 0.20, "fastSwitch": 1.0, "aggression": 1.00},
+    "Predictive PEC": {"minMove": 0.20, "predictiveWeight": 0.50, "reactiveWeight": 1.00, "periodLength": 440.0},
+    "ZFilter": {"minMove": 0.15, "expFactor": 4.0},
+}
+UNIT_PARAMS = {"aggression", "aggressiveness", "hysteresis", "fastSwitch", "predictiveWeight", "reactiveWeight"}
 
 
 class Sim:
@@ -65,13 +75,21 @@ class Sim:
         self.cloud_until = 0.0  # /fake-nina/v2/api/sim/cloud: the guide star is lost until then
         self.haze_until, self.haze = 0.0, 1.0  # /fake-nina/v2/api/sim/haze: the guide star dimmed to `haze` until then
         self.safe: Optional[Callable[[], bool]] = None  # the dashboard's sky monitor, as NINA's safety monitor
+        self.config_changed = False  # /fake-nina/v2/api/sim/algorithm: PHD2 sends ConfigurationChange on its next frame
+
+    def switch_algorithm(self, axis: str, name: str) -> None:
+        """As picking it in PHD2's Brain does: the new algorithm starts from its default parameters."""
+        self.algorithms[axis], self.params[axis] = name, dict(ALGORITHM_PARAMS[name])
+        self.config_changed = True
 
     def step(self) -> dict:
         self.frame += 1
         self.seeing = max(0.9, min(4.5, self.seeing + random.gauss(0, 0.03)))
         noise = self.seeing * 0.24
         t = time.time() - self.started
-        self.ra_err += random.gauss(0, noise) + 0.10 * math.sin(t / 70)
+        # The periodic error; Predictive PEC learns it and cancels its predictable part.
+        ppec = self.params["ra"].get("predictiveWeight", 0.0) if self.algorithms["ra"] == "Predictive PEC" else 0.0
+        self.ra_err += random.gauss(0, noise) + 0.10 * math.sin(t / 70) * (1 - 0.8 * ppec)
         # A positive residual is corrected northwards: it is the pointing lying south of the lock.
         self.dec_err += random.gauss(0, noise * 0.8) - self.polar_drift() * self.exposure_ms / 60000
         jitter = self.seeing * 0.16
@@ -82,7 +100,8 @@ class Sim:
             if abs(measured) < p["minMove"] * self.scale:
                 return 0.0
             h = p.get("hysteresis", 0.0)
-            return p["aggression"] * measured * (1 - h) + h * prev
+            gain = p.get("aggression", p.get("aggressiveness", p.get("reactiveWeight", 0.7)))
+            return gain * measured * (1 - h) + h * prev
 
         ra_c = correction("ra", ra_m, self.prev_ra)
         dec_c = correction("dec", dec_m, 0.0) if self.dec_mode != "Off" else 0.0
@@ -232,7 +251,7 @@ class FakePhd2:
             axis, name, value = p[0], p[1], float(p[2])
             if name not in s.params.get(axis, {}):
                 return err(f"invalid param name {name}")
-            s.params[axis][name] = max(0.0, min(value, 1.0 if name != "minMove" else 5.0))
+            s.params[axis][name] = max(0.0, min(value, 1.0 if name in UNIT_PARAMS else 5.0 if name == "minMove" else 10000.0))
             log.info("[sim] %s.%s = %g", axis, name, s.params[axis][name])
         elif m == "guide":
             s.state = "Guiding"
@@ -268,6 +287,9 @@ class FakePhd2:
         next_dither = time.time() + 300
         while True:
             await asyncio.sleep(self.sim.exposure_ms / 1000)
+            if self.sim.config_changed:
+                self.sim.config_changed = False
+                await self.broadcast({"Event": "ConfigurationChange"})
             if self.sim.state != "Guiding":
                 continue
             if time.time() < self.sim.cloud_until:
@@ -340,6 +362,16 @@ def nina_router(sim: Sim) -> APIRouter:
         """Not NINA: thin cloud for the simulator. PHD2 keeps its star, at `pct` % of its brightness, for `seconds`."""
         sim.haze_until, sim.haze = time.time() + seconds, max(0.01, min(1.0, pct / 100))
         return ok(f"haze at {pct:g} % for {seconds:g} s")
+
+    @router.get("/api/sim/algorithm")
+    async def sim_algorithm(axis: str = "ra", name: str = "Predictive PEC"):
+        """Not NINA: switch a PHD2 algorithm, as you would in its Brain (PHD2's server cannot)."""
+        if axis not in sim.algorithms or name not in ALGORITHM_PARAMS:
+            return {"Response": None, "Error": f"axis ra|dec, name one of {', '.join(ALGORITHM_PARAMS)}", "StatusCode": 400,
+                    "Success": False, "Type": "API"}
+        sim.switch_algorithm(axis, name)
+        log.info("[sim] %s algorithm %s", axis, name)
+        return ok(f"{axis} algorithm {name}")
 
     @router.get("/api/sequence/state")
     async def sequence_state():

@@ -128,7 +128,12 @@ export type Phd2 = {
   lastAlert?: { type?: string; msg?: string; at?: number } | null;
 };
 
-export type Suggestion = { id: string; axis: "ra" | "dec"; param: string; current: number; value: number; why: string; note: string | null; status: "open" | "applied" | "dismissed" | "stale" };
+/** `param` ALGORITHM switches the axis's algorithm: `current`/`value` (a change's `old`/`new`) are then algorithm names. */
+export const ALGORITHM = "algorithm";
+/** PHD2 reports "ResistSwitch"; its Brain lists "Resist Switch". */
+export const algorithmLabel = (name: string | null | undefined) => (name === "ResistSwitch" ? "Resist Switch" : name ?? "—");
+
+export type Suggestion = { id: string; axis: "ra" | "dec"; param: string; current: number | string; value: number | string; why: string; note: string | null; status: "open" | "applied" | "dismissed" | "stale" };
 export type Brief = { total: number; ra: number; dec: number; n: number; se: number; hfdPx: number };
 export type Analysis = {
   id: string;
@@ -151,8 +156,8 @@ export type Change = {
   t: number;
   axis: string;
   param: string;
-  old: number;
-  new: number;
+  old: number | string;
+  new: number | string;
   source: "manual" | "ai" | "revert" | "auto" | "auto-revert";
   reverted?: boolean;
   before: Brief | null;

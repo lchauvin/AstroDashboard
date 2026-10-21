@@ -82,6 +82,7 @@ class Observatory:
         self.advisor_check: dict | None = None  # last periodic decision (no model call), for the UI
         self._wake_frames = asyncio.Event()
         self._wake_history = asyncio.Event()
+        self._switches: dict[str, dict] = {}  # axis → an algorithm switch that follows a suggestion, until you click Done
 
     # ------------------------------------------------------------------ config
 
@@ -115,7 +116,7 @@ class Observatory:
     async def start(self) -> None:
         self.nina = NinaRest(self.nina_root())
         host, port = self.phd2_addr()
-        self.phd2 = Phd2Client(host, port, on_event=self._on_phd2_event)
+        self.phd2 = Phd2Client(host, port, on_event=self._on_phd2_event, on_algorithms=self._on_algorithms)
         self.nina_status["url"] = self.nina_root()
         self.tasks = [
             asyncio.create_task(self._supervise("phd2", self._run_phd2), name="obs-phd2"),
@@ -355,6 +356,50 @@ class Observatory:
         entry = self.advisor.record_change(axis, name, old, stored, source, before, suggestion)
         return {"stored": stored, "requested": value, "change": entry}
 
+    def _on_algorithms(self, old: dict, new: dict) -> None:
+        """An axis's algorithm was switched in PHD2's Brain (its server has no command for it). A switch of your own
+        is logged and measured at once, like a parameter change. One that follows an open suggestion waits for
+        your Done (`algorithm_done`); the guiding before it is kept meanwhile, so "before" is the old algorithm's."""
+        for axis in ("ra", "dec"):
+            a, b = old.get(axis), new.get(axis)
+            if not a or not b or a == b:
+                continue
+            before = self.recent_stats()
+            self.dist.mark("parameter change", label=f"{axis.upper()} algorithm {a}→{b}")
+            log.info("PHD2 %s algorithm switched: %s → %s", axis.upper(), a, b)
+            if self._algorithm_suggestion(axis, b):
+                if axis not in self._switches:  # back and forth in the Brain: the guiding before the first switch
+                    self._switches[axis] = {"t": time.time(), "old": a, "before": before}
+                continue
+            self._switches.pop(axis, None)
+            self.advisor.record_change(axis, adv.ALGORITHM, a, b, "manual", before)
+
+    def _algorithm_suggestion(self, axis: str, name: str) -> dict | None:
+        return next((s for an in reversed(self.advisor.analyses) for s in an.get("suggestions", [])
+                     if s["status"] == "open" and s["axis"] == axis and s["param"] == adv.ALGORITHM and s["value"] == name), None)
+
+    async def algorithm_done(self, sid: str) -> dict:
+        """You switched the algorithm a suggestion asked for, in PHD2's Brain: measure it from now on."""
+        sg = self.advisor.suggestion(sid)
+        if sg is None or sg["param"] != adv.ALGORITHM:
+            raise LookupError("No such algorithm suggestion")
+        if sg["status"] != "open":
+            raise ValueError(f"This suggestion is {sg['status']}")
+        phd2 = self._require_phd2()
+        await phd2.refresh_params()  # PHD2's word, not the last ConfigurationChange's
+        live = phd2.state.algorithms.get(sg["axis"])
+        if live != sg["value"]:
+            raise ValueError(f"PHD2 still reports {live or 'no algorithm'} for {sg['axis'].upper()}: pick {sg['value']} "
+                             "in PHD2's Brain (Algorithms tab) first")
+        seen = self._switches.pop(sg["axis"], None)
+        if seen:
+            before = seen["before"]
+        else:  # switched while the engine was not watching: the guiding the advisor analysed
+            an = next((a for a in self.advisor.analyses if any(s["id"] == sid for s in a.get("suggestions", []))), None)
+            before = an.get("stats") if an else None
+        entry = self.advisor.record_change(sg["axis"], adv.ALGORITHM, sg["current"], sg["value"], "ai", before, sid)
+        return {"change": entry}
+
     async def set_exposure(self, ms: int) -> dict:
         phd2 = self._require_phd2()
         old = phd2.state.exposure_ms
@@ -441,6 +486,11 @@ class Observatory:
     async def _auto_apply(self, entry: dict) -> None:
         """Auto-apply: the top suggestion only, so the before/after measurement is that change's alone."""
         sg = entry["suggestions"][0]
+        if sg["param"] == adv.ALGORITHM:
+            entry["auto"] = (f"Not applied automatically: PHD2 has no command to switch the algorithm. Pick {sg['value']} for "
+                             f"{sg['axis'].upper()} in PHD2's Brain (Algorithms tab), then click Done to measure it.")
+            self.advisor.save()
+            return
         name = f"{sg['axis'].upper()} {sg['param']} {sg['current']:g} → {sg['value']:g}"
         if reason := self._auto_skip(sg):
             entry["auto"] = f"Not applied automatically: {reason}."

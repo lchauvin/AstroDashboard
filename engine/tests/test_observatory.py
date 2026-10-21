@@ -457,3 +457,136 @@ def test_tonight_leaves_out_unsaved_snapshots():
                            {"ImageType": "SNAPSHOT", "Filename": "s.fits"}])
     assert [r["index"] for r in rows] == [2, 0]
 
+
+PHD_ALGOS = {**PHD, "algorithms": {"ra": "Hysteresis", "dec": "ResistSwitch"}}
+
+
+def test_validate_takes_one_algorithm_switch_and_drops_that_axis_parameters():
+    _, ok, notes = adv.validate({"assessment": "RA periodic", "suggestions": [
+        {"axis": "ra", "param": "aggression", "value": 0.8},  # the old algorithm's: goes with the switch
+        {"axis": "ra", "param": "algorithm", "value": "ppec", "why": "periodic error"},
+        {"axis": "dec", "param": "algorithm", "value": "Lowpass2"},  # a second switch
+        {"axis": "dec", "param": "minMove", "value": 0.25},
+    ]}, PHD_ALGOS)
+    assert [(s["axis"], s["param"], s["current"], s["value"]) for s in ok] == [
+        ("ra", "algorithm", "Hysteresis", "Predictive PEC"), ("dec", "minMove", 0.3, 0.25)]
+    assert any("one algorithm switch" in n for n in notes) and any("replaces" in n for n in notes)
+
+    _, ok, notes = adv.validate({"suggestions": [
+        {"axis": "dec", "param": "algorithm", "value": "Predictive PEC"},  # RA only in PHD2
+        {"axis": "dec", "param": "dec algorithm", "value": "Resist Switch"},  # already in use
+        {"axis": "ra", "param": "algorithmName", "value": "Lowpass"},  # left to you
+    ]}, PHD_ALGOS)
+    assert ok == [] and len(notes) == 3
+
+
+def test_prompt_lists_the_algorithms_and_tonight_switches():
+    st = {"hfdPx": 2.0, "snr": 20.0, "mass": 5000, "total": 1.0, "se": 0.03, "n": 150, "seconds": 300, "oscillation": 1.7,
+          **{a: {"rms": 0.7, "peak": 2.0, "mean": 0.0, "lag1": 0.6, "idle": 0.1, "flips": 0.3, "pulseMs": 100, "limited": 0.0}
+             for a in ("ra", "dec")}}
+    ctx = {"stats": st, "diagnosis": {"axes": [], "caveats": []}, "phd2": PHD_ALGOS, "targetRms": 0.8,
+           "changes": [{"axis": "ra", "param": "algorithm", "old": "Hysteresis", "new": "Predictive PEC", "source": "ai",
+                        "outcome": "measuring…"}]}
+    prompt = adv.build_prompt(ctx)
+    assert "  ra [Hysteresis] | Lowpass2 | ResistSwitch | Predictive PEC" in prompt
+    assert "  dec [ResistSwitch] | Lowpass2 | Hysteresis" in prompt
+    assert "ra.algorithm Hysteresis -> Predictive PEC (ai)" in prompt
+
+
+def test_algorithm_switch_waits_for_done_when_suggested_and_is_logged_at_once_when_not(monkeypatch, tmp_path):
+    from astrodash.observatory import runtime
+
+    obs = runtime.Observatory(lambda: {}, _Store(), tmp_path)
+    phd = _FakePhd2({"ra": {"minMove": 0.2}, "dec": {}})
+    phd.state.algorithms = {"ra": "Hysteresis", "dec": "ResistSwitch"}
+
+    async def refresh_params():
+        pass
+
+    phd.refresh_params = refresh_params
+    obs.phd2 = phd
+    old_algo = {"total": 1.2, "ra": {"rms": 0.9}, "dec": {"rms": 0.6}, "n": 150, "se": 0.03, "hfdPx": 2.0}
+    monkeypatch.setattr(obs, "recent_stats", lambda: old_algo)
+    sg = {"id": "s1", "axis": "ra", "param": "algorithm", "current": "Hysteresis", "value": "Predictive PEC", "status": "open"}
+    other = {"id": "s2", "axis": "ra", "param": "aggression", "current": 0.9, "value": 0.8, "status": "open"}
+    obs.advisor.analyses.append({"t": time.time(), "stats": None, "suggestions": [sg, other]})
+
+    with pytest.raises(ValueError, match="still reports Hysteresis"):  # Done before the switch
+        asyncio.run(obs.algorithm_done("s1"))
+    obs._on_algorithms({"ra": "Hysteresis", "dec": "ResistSwitch"}, {"ra": "Predictive PEC", "dec": "ResistSwitch"})
+    assert obs.advisor.changes == [] and sg["status"] == "open"  # seen, waiting for Done
+    phd.state.algorithms["ra"] = "Predictive PEC"
+    monkeypatch.setattr(obs, "recent_stats", lambda: None)  # by Done, the guiding is the new algorithm's
+
+    asyncio.run(obs.algorithm_done("s1"))
+    c = obs.advisor.changes[-1]
+    assert (c["axis"], c["param"], c["old"], c["new"], c["source"], c["suggestion"]) == (
+        "ra", "algorithm", "Hysteresis", "Predictive PEC", "ai", "s1")
+    assert c["before"]["total"] == 1.2 and c["verdict"] == "pending"  # the guiding before the switch
+    assert c["settleS"] == adv.ALGORITHM_SETTLE_S["Predictive PEC"] and c["measureAt"] - c["t"] > 600
+    assert (sg["status"], other["status"]) == ("applied", "stale")  # the old algorithm's suggestion is moot
+    with pytest.raises(ValueError, match="applied"):
+        asyncio.run(obs.algorithm_done("s1"))
+
+    obs._on_algorithms({"dec": "ResistSwitch"}, {"dec": "Lowpass2"})  # a switch of your own: no Done needed
+    assert obs.advisor.changes[-1]["source"] == "manual" and len(obs.advisor.changes) == 2
+
+
+def test_done_without_a_seen_switch_measures_against_the_analysed_guiding(tmp_path):
+    from astrodash.observatory import runtime
+
+    obs = runtime.Observatory(lambda: {}, _Store(), tmp_path)
+    phd = _FakePhd2({"ra": {}, "dec": {"minMove": 0.2}})
+    phd.state.algorithms = {"ra": "Hysteresis", "dec": "Lowpass2"}  # switched while the engine was down
+
+    async def refresh_params():
+        pass
+
+    phd.refresh_params = refresh_params
+    obs.phd2 = phd
+    brief = {"total": 1.1, "ra": 0.7, "dec": 0.8, "n": 140, "se": 0.04, "hfdPx": 2.1}
+    obs.advisor.analyses.append({"t": time.time(), "stats": brief, "suggestions": [
+        {"id": "d1", "axis": "dec", "param": "algorithm", "current": "ResistSwitch", "value": "Lowpass2", "status": "open"}]})
+    asyncio.run(obs.algorithm_done("d1"))
+    assert obs.advisor.changes[-1]["before"] == brief
+
+
+def test_phd2_client_reports_an_algorithm_switch_once():
+    from astrodash.observatory.phd2 import Phd2Client
+
+    seen = []
+    client = Phd2Client("x", 1, on_algorithms=lambda old, new: seen.append((dict(old), dict(new))))
+    phd = {"ra": "Hysteresis", "dec": "ResistSwitch"}
+
+    async def call(method, params=None, **_k):
+        if method == "get_algo_param_names":
+            return ["algorithmName", "minMove"]
+        return phd[params[0]] if params[1] == "algorithmName" else 0.2
+
+    client.call = call
+
+    async def run():
+        await client.refresh_params()  # the first read on connect: nothing to report
+        phd["ra"] = "Predictive PEC"
+        await asyncio.gather(client.refresh_params(), client.refresh_params())  # a ConfigurationChange burst
+    asyncio.run(run())
+    assert seen == [({"ra": "Hysteresis", "dec": "ResistSwitch"}, {"ra": "Predictive PEC", "dec": "ResistSwitch"})]
+
+
+def test_auto_apply_leaves_an_algorithm_switch_to_you(monkeypatch, tmp_path):
+    from astrodash.observatory import runtime
+
+    settings = {"advisor": {"enabled": True, "model": "ollama/m", "autoApply": True}}
+    obs = runtime.Observatory(lambda: settings, _Store(), tmp_path)
+    obs.phd2 = _FakePhd2({"ra": {"aggression": 0.7}, "dec": {}})
+    monkeypatch.setattr(obs, "recent_stats", lambda: {"total": 1.0, "ra": {"rms": 0.7}, "dec": {"rms": 0.6}, "n": 150, "se": 0.03, "hfdPx": 2.0})
+    reply = '{"assessment": "RA periodic", "suggestions": [{"axis": "ra", "param": "algorithm", "value": "Predictive PEC"}]}'
+    monkeypatch.setattr(runtime.llm, "call", lambda *a, **k: {"text": reply, "latencyMs": 1, "model": "m", "note": ""})
+    monkeypatch.setattr(obs, "_context", lambda st, diag: {})
+    monkeypatch.setattr(runtime.adv, "build_prompt", lambda ctx: "p")
+    monkeypatch.setattr(runtime.guiding, "diagnose", lambda st, target: {"actionable": True})
+    monkeypatch.setattr(obs, "_phd2_dict", lambda: {"params": obs.phd2.state.params, "algorithms": {"ra": "Hysteresis", "dec": "ResistSwitch"}})
+
+    entry = asyncio.run(obs.analyze(manual=False))
+    assert entry["suggestions"][0]["value"] == "Predictive PEC"
+    assert "Brain" in entry["auto"] and obs.advisor.changes == []

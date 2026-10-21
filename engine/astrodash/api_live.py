@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from .frames import canonical_filter
 from .ingest.planner import DOWNLOAD, NIGHT_DIR_RE, match_target
 from .ingest.service import IngestService
+from .observatory import advisor as adv
 from .observatory import frames as obs_frames
 from .observatory.nina import NinaError, NinaUnavailable
 from .observatory.runtime import PHD2_ERRORS, Observatory
@@ -207,12 +208,25 @@ def register(app: FastAPI, state) -> None:
             raise HTTPException(404, detail="No such suggestion")
         if s["status"] != "open":
             raise HTTPException(409, detail=f"This suggestion is {s['status']}")
+        if s["param"] == adv.ALGORITHM:
+            raise HTTPException(409, detail=f"PHD2 has no command to switch the algorithm: pick {s['value']} for {s['axis'].upper()} "
+                                            "in PHD2's Brain (Algorithms tab), then click Done")
         current = ((obs.phd2.state.params if obs.phd2 else {}).get(s["axis"]) or {}).get(s["param"])
         if current is None or abs(current - s["current"]) > 1e-6:
             s["status"] = "stale"
             obs.advisor.save()
             raise HTTPException(409, detail="The parameter changed since this suggestion was made; ask again")
         return await _phd2(obs.set_param(s["axis"], s["param"], s["value"], source="ai", suggestion=sid))
+
+    @app.post("/api/live/advisor/suggestions/{sid}/done")
+    async def advisor_done(sid: str) -> dict[str, Any]:
+        """An algorithm switch, made by you in PHD2's Brain: measured from now on."""
+        try:
+            return await _phd2(obs.algorithm_done(sid))
+        except LookupError as exc:
+            raise HTTPException(404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
 
     @app.post("/api/live/advisor/suggestions/{sid}/dismiss")
     def advisor_dismiss(sid: str) -> dict[str, Any]:
@@ -223,6 +237,8 @@ def register(app: FastAPI, state) -> None:
         c = next((c for c in obs.advisor.changes if c["id"] == cid), None)
         if c is None or c["axis"] not in ("ra", "dec"):
             raise HTTPException(404, detail="No such parameter change")
+        if c["param"] == adv.ALGORITHM:
+            raise HTTPException(409, detail=f"PHD2 has no command to switch the algorithm: pick {c['old']} again in PHD2's Brain")
         return await _phd2(obs.set_param(c["axis"], c["param"], c["old"], source="revert"))
 
     # ------------------------------------------------------------------ ingest

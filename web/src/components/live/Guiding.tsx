@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { ago, clock, duration, enginePost, fmt, type Analysis, type Change, type LiveState, type Polar, type Suggestion } from "@/lib/live";
+import { ago, ALGORITHM, algorithmLabel, clock, duration, enginePost, fmt, type Analysis, type Change, type LiveState, type Polar, type Suggestion } from "@/lib/live";
 import { Marks, StatusIcon, Tip } from "../ui";
 import { LiveBar, NotConnected } from "./LiveBar";
 import styles from "./live.module.css";
@@ -517,19 +517,38 @@ function AnalysisView({ an, act, busy, adv, params, info }: { an: Analysis; act:
 }
 
 function SuggestionRow({ sg, first, act, busy, live, label, adv }: { sg: Suggestion; first: boolean; act: Act; busy: boolean; live: number | undefined; label: string; adv: boolean }) {
-  const dir = sg.value > sg.current ? "raise" : "lower";
+  const algo = sg.param === ALGORITHM;
+  const what = algo
+    ? `switch ${sg.axis.toUpperCase()} algorithm ${algorithmLabel(String(sg.current))} → ${algorithmLabel(String(sg.value))}`
+    : `${Number(sg.value) > Number(sg.current) ? "raise" : "lower"} ${sg.axis.toUpperCase()} ${label.toLowerCase()} ${sg.current} → ${sg.value}`;
   return (
     <div className={`${styles.suggestion} ${sg.status !== "open" ? styles.suggestionDone : ""}`}>
       <div>
         <strong>
           {first && sg.status === "open" ? "Suggested: " : ""}
-          {dir} {sg.axis.toUpperCase()} {label.toLowerCase()} {sg.current} → {sg.value}
+          {what}
         </strong>
-        {adv && label !== sg.param ? <span className={styles.hint}> ({sg.param})</span> : null}
+        {adv && !algo && label !== sg.param ? <span className={styles.hint}> ({sg.param})</span> : null}
         {sg.why ? <div className={styles.hint}>{sg.why}</div> : null}
         {sg.note ? <div className={styles.hint}>{sg.note}</div> : null}
+        {algo && sg.status === "open" ? (
+          <div className={styles.hint}>
+            PHD2 has no command for this: pick {algorithmLabel(String(sg.value))} for {sg.axis === "ra" ? "RA" : "Dec"} in PHD2&apos;s Brain (Algorithms tab),
+            then click Done to measure it.
+          </div>
+        ) : null}
       </div>
-      {sg.status === "open" ? (
+      {sg.status === "open" && algo ? (
+        <span className={styles.suggestActions}>
+          <button type="button" className="button button-primary" disabled={busy}
+            onClick={() => act(() => enginePost(`/api/live/advisor/suggestions/${sg.id}/done`), `${sg.axis === "ra" ? "RA" : "Dec"} on ${algorithmLabel(String(sg.value))}. Measuring; the result shows under Changes tonight.`)}>
+            Done
+          </button>
+          <button type="button" className={styles.link} disabled={busy} onClick={() => act(() => enginePost(`/api/live/advisor/suggestions/${sg.id}/dismiss`))}>
+            Dismiss
+          </button>
+        </span>
+      ) : sg.status === "open" ? (
         <span className={styles.suggestActions}>
           <button type="button" className="button button-primary" disabled={busy || live === undefined}
             onClick={() => act(() => enginePost(`/api/live/advisor/suggestions/${sg.id}/apply`), `${sg.axis.toUpperCase()} ${label.toLowerCase()} set to ${sg.value}. Measuring for 5 minutes…`)}>
@@ -579,9 +598,12 @@ function Params({ s, act, busy, adv }: { s: LiveState; act: Act; busy: boolean; 
           return (
             <div key={axis} className={`framed ${styles.card}`}>
               <Marks />
-              <div className={styles.cardHead}>
-                <span className="eyebrow">{axis === "ra" ? "RA" : "Dec"}</span>
-                <span className={styles.hint}>{p.algorithms?.[axis] ?? "—"}</span>
+              <span className="eyebrow">{axis === "ra" ? "RA" : "Dec"}</span>
+              <div className={`${styles.paramRow} ${styles.paramRowFixed}`}>
+                <Tip tip={`How PHD2 turns the measured error into a correction. Switched in PHD2's Brain (Algorithms tab): PHD2 has no command for it. When the AI advisor suggests a switch, make it there and click Done on the suggestion to measure it; a switch of your own is noticed and measured by itself.${adv && p.algorithms?.[axis] ? ` (PHD2: ${p.algorithms[axis]})` : ""}`}>
+                  <span className={styles.paramLabel}>Algorithm</span>
+                </Tip>
+                <span className={styles.paramFixed}>{algorithmLabel(p.algorithms?.[axis])}</span>
               </div>
               {names.length ? (
                 names.map((n) => {
@@ -677,7 +699,8 @@ function Params({ s, act, busy, adv }: { s: LiveState; act: Act; busy: boolean; 
         </div>
       </div>
       <p className={styles.hint}>
-        Changes go to PHD2 immediately (PHD2 may clamp a value; the stored one is shown). The algorithm itself is chosen in PHD2&apos;s Brain.
+        Changes go to PHD2 immediately (PHD2 may clamp a value; the stored one is shown). The algorithm is switched in PHD2&apos;s Brain (click Done on
+        an AI suggestion once you have; a switch of your own is measured by itself).
       </p>
     </section>
   );
@@ -707,7 +730,15 @@ function Changes({ changes, act, busy, connected, adv }: { changes: Change[]; ac
                 <td className="num">{clock(c.t)}</td>
                 <td>
                   {c.axis === "both" ? "" : `${c.axis.toUpperCase()} `}
-                  {c.param} <span className="num">{c.old} → {c.new}</span>
+                  {c.param === ALGORITHM ? (
+                    <>
+                      algorithm {algorithmLabel(String(c.old))} → {algorithmLabel(String(c.new))}
+                    </>
+                  ) : (
+                    <>
+                      {c.param} <span className="num">{c.old} → {c.new}</span>
+                    </>
+                  )}
                 </td>
                 <td className={styles.hint}>{SOURCE_LABEL[c.source] ?? "you"}</td>
                 <td>
@@ -721,7 +752,9 @@ function Changes({ changes, act, busy, connected, adv }: { changes: Change[]; ac
                   ) : null}
                 </td>
                 <td>
-                  {connected && (c.axis === "ra" || c.axis === "dec") ? (
+                  {c.param === ALGORITHM ? (
+                    <span className={styles.hint}>switch back in PHD2</span>
+                  ) : connected && (c.axis === "ra" || c.axis === "dec") ? (
                     <button type="button" className={styles.link} disabled={busy} onClick={() => act(() => enginePost(`/api/live/advisor/changes/${c.id}/revert`), `Reverted ${c.param} to ${c.old}.`)}>
                       Revert to {c.old}
                     </button>

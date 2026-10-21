@@ -10,6 +10,11 @@ Order of reasoning, and why the model is not first:
 4. Every suggestion is validated: a whitelisted parameter the current algorithm actually exposes,
    inside its range, a step no larger than `max_step`. Out-of-range proposals are dropped.
 
+The model may also suggest switching an axis's algorithm (`param` "algorithm", one per answer). PHD2's
+server has no command for that (`set_algo_param` only takes numbers), so you switch it in PHD2's Brain;
+the switch writes PHD2's profile, PHD2 sends ConfigurationChange, and the runtime logs and measures it
+like any change, after a longer settle (Predictive PEC has to learn the period first).
+
 The periodic run skips the model call when the diagnosis says nothing is actionable (healthy or
 seeing-limited, or a caveat such as low SNR): most guiding error is seeing and wind, which no
 parameter fixes. "Analyze now" always asks.
@@ -59,11 +64,26 @@ PARAM_INFO = {
     "SE1KLengthScale": ("SE1 length scale", "PPEC kernel parameter."),
     "SE1KSignalVariance": ("SE1 signal variance", "PPEC kernel parameter."),
     "PKPeriodLength": ("Period length", "PPEC: the periodic error's period (s)."),
+    "predictiveWeight": ("Predictive weight", "PPEC: weight of the predicted periodic correction."),
+    "reactiveWeight": ("Reactive weight", "PPEC: weight of the ordinary correction of the measured error."),
+    "periodLength": ("Period length", "PPEC: the periodic error's period (s); PPEC refines it as it learns."),
+    "expFactor": ("Exponential factor", "ZFilter: smoothing of the corrections."),
 }
 BASIC_PARAMS = {"aggression", "aggressiveness", "hysteresis", "minMove"}
 
+# Switching the algorithm: the names PHD2 reports (`algorithmName`), the ones the advisor may pick per axis
+# (Predictive PEC is RA only in PHD2; Lowpass and ZFilter are left to you), and the Brain's own spelling.
+ALGORITHM = "algorithm"  # the `param` of a suggestion or change that switches the algorithm
+ALGORITHMS = {"ra": ("Hysteresis", "Lowpass2", "ResistSwitch", "Predictive PEC"),
+              "dec": ("ResistSwitch", "Lowpass2", "Hysteresis")}
+ALGORITHM_LABEL = {"ResistSwitch": "Resist Switch"}
+_ALGORITHM_ALIASES = {"hysteresis": "Hysteresis", "lowpass2": "Lowpass2", "resistswitch": "ResistSwitch",
+                      "predictivepec": "Predictive PEC", "ppec": "Predictive PEC", "gaussianprocess": "Predictive PEC"}
+
 WINDOW_S = 300.0  # before/after measurement windows and the analysis window
 SETTLE_S = 20.0  # after a change, before the after-window starts
+ALGORITHM_SETTLE_S = {"Predictive PEC": 600.0}  # PPEC learns the period over its first minutes
+ALGORITHM_SETTLE_DEFAULT_S = 120.0  # the other algorithms start from fresh state too
 MIN_EFFECT_SIGMA = 1.5
 HFD_CONFOUND = 0.20
 
@@ -76,6 +96,18 @@ def resolved_bounds(param: str, scale: float | None) -> dict[str, float] | None:
     if scale and "lo_arcsec" in b:
         b["lo"], b["hi"] = round(b["lo_arcsec"] / scale, 2), round(b["hi_arcsec"] / scale, 2)
     return b
+
+
+def algorithm_name(value: Any) -> str | None:
+    """"ppec", "Resist Switch", "Predictive PEC" … → PHD2's name, or None."""
+    key = "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+    return _ALGORITHM_ALIASES.get(key)
+
+
+def settle_s(param: str, new: Any) -> float:
+    if param == ALGORITHM:
+        return ALGORITHM_SETTLE_S.get(str(new), ALGORITHM_SETTLE_DEFAULT_S)
+    return SETTLE_S
 
 
 SYSTEM = """\
@@ -110,13 +142,30 @@ in the assessment (e.g. low SNR → longer exposure; stale calibration → recal
 it; it calls for a parameter only when Dec is under-correcting. Mention re-aligning in the assessment only \
 when the error exceeds about 10′ or a SHIFT was detected (the mount moved).
 
+ALGORITHM: you may also switch an axis's guide algorithm: param "algorithm", value one of the names listed \
+under ALGORITHMS for that axis. It is a bigger step than a parameter: suggest it only when the current \
+algorithm cannot fix what the diagnosis shows (its parameter is at its limit, or tonight's changes on that \
+axis measured no better), at most ONE switch per answer and no parameter change on the same axis with it \
+(the new algorithm brings its own parameters). The usual cases:
+- RA slow periodic wander (lag1 above +0.5, osc low) that tonight's aggressiveness/min-move changes did not \
+fix: the periodic error of a gear mount. Predictive PEC learns and anticipates it (guide exposures of a few \
+seconds at most; it needs ~10 min to learn). Predictive PEC that measured worse: back to Hysteresis.
+- Dec chasing seeing (many reversals, white noise) on Hysteresis or Lowpass2: ResistSwitch, which resists \
+reversals. Dec slow drift corrected in jerks on ResistSwitch: Lowpass2.
+- Never switch back an algorithm that tonight's log shows measured BETTER.
+
 Reply with ONE JSON object and nothing else:
 {"assessment": "<what limits guiding now, <=200 chars>",
- "suggestions": [{"axis": "ra"|"dec", "param": "<name>", "value": <number>, "why": "<=160 chars>"}]}"""
+ "suggestions": [{"axis": "ra"|"dec", "param": "<name>", "value": <number, or an algorithm name>, "why": "<=160 chars>"}]}"""
 
 
 def _fmt(v: Any, d: int = 2) -> str:
     return "?" if v is None else f"{v:.{d}f}" if isinstance(v, (int, float)) else str(v)
+
+
+def _val(v: Any) -> str:
+    """A change's old/new: a number, or an algorithm name."""
+    return f"{v:g}" if isinstance(v, (int, float)) else str(v)
 
 
 def build_prompt(ctx: dict) -> str:
@@ -165,10 +214,16 @@ def build_prompt(ctx: dict) -> str:
             rng = f" [{b['lo']:g},{b['hi']:g}] max_step {b['max_step']:g}  TUNABLE" if b else "  (not tunable)"
             lines.append(f"  {axis} {name} {value:g}{rng}")
     lines.append("")
+    lines.append("ALGORITHMS (param \"algorithm\"; current in brackets):")
+    for axis, names in ALGORITHMS.items():
+        current = phd["algorithms"].get(axis)
+        lines.append(f"  {axis} " + " | ".join(f"[{n}]" if n == current else n for n in names)
+                     + ("" if current in names or current is None else f"  (now {current})"))
+    lines.append("")
     log = ctx.get("changes") or []
     lines.append("TONIGHT'S CHANGES (oldest first):" if log else "TONIGHT'S CHANGES: none yet.")
     for c in log[-8:]:
-        lines.append(f"  {c['axis']}.{c['param']} {c['old']:g} -> {c['new']:g} ({c['source']}): {c['outcome']}")
+        lines.append(f"  {c['axis']}.{c['param']} {_val(c['old'])} -> {_val(c['new'])} ({c['source']}): {c['outcome']}")
     lines.append("")
     lines.append("Reply with the JSON object only.")
     return "\n".join(lines)
@@ -206,6 +261,10 @@ def validate(parsed: dict | None, phd: dict) -> tuple[str, list[dict], list[str]
         for sep in (" ", "."):
             if param.lower().startswith(axis + sep):
                 param = param[len(axis) + 1:].strip()
+        if param.lower() in (ALGORITHM, "algorithmname", "guide algorithm"):
+            if sg := _validate_algorithm(axis, s, phd, out, notes):
+                out.append(sg)
+            continue
         current = (phd["params"].get(axis) or {}).get(param)
         b = resolved_bounds(param, scale)
         try:
@@ -238,15 +297,39 @@ def validate(parsed: dict | None, phd: dict) -> tuple[str, list[dict], list[str]
             "id": uuid.uuid4().hex[:10], "axis": axis, "param": param, "current": current, "value": clamped,
             "why": str(s.get("why") or s.get("rationale") or "")[:240], "note": adjusted, "status": "open",
         })
+    switched = {s["axis"] for s in out if s["param"] == ALGORITHM}
+    for s in [s for s in out if s["axis"] in switched and s["param"] != ALGORITHM]:
+        notes.append(f"Dropped {s['axis']}.{s['param']}: it belongs to the algorithm the switch replaces.")
+        out.remove(s)
     return assessment, out[:2], notes
+
+
+def _validate_algorithm(axis: str, s: dict, phd: dict, out: list[dict], notes: list[str]) -> dict | None:
+    current = (phd.get("algorithms") or {}).get(axis)
+    wanted = algorithm_name(s.get("value"))
+    if axis not in ALGORITHMS or current is None:
+        notes.append(f"Dropped {axis}.algorithm: PHD2 did not report the current {axis.upper() or '?'} algorithm.")
+    elif wanted not in ALGORITHMS[axis]:
+        notes.append(f"Dropped {axis}.algorithm = {s.get('value')!r}: not one of {', '.join(ALGORITHMS[axis])}.")
+    elif wanted == current:
+        notes.append(f"Dropped {axis}.algorithm: {current} is already in use.")
+    elif any(x["param"] == ALGORITHM for x in out):
+        notes.append(f"Dropped {axis}.algorithm = {wanted}: one algorithm switch at a time.")
+    else:
+        return {"id": uuid.uuid4().hex[:10], "axis": axis, "param": ALGORITHM, "current": current, "value": wanted,
+                "why": str(s.get("why") or s.get("rationale") or "")[:240], "note": None, "status": "open"}
+    return None
 
 
 # ---------------------------------------------------------------------- change log
 
 
 def _brief(st: dict | None) -> dict | None:
+    """Full stats → the before/after summary; a summary already (an analysis's `stats`) passes as it is."""
     if not st:
         return None
+    if not isinstance(st.get("ra"), dict):
+        return st
     return {"total": st["total"], "ra": st["ra"]["rms"], "dec": st["dec"]["rms"], "n": st["n"], "se": st["se"], "hfdPx": st["hfdPx"]}
 
 
@@ -272,9 +355,11 @@ class Advisor:
         cutoff = time.time() - hours * 3600
         return [c for c in self.changes if c["t"] >= cutoff], [a for a in self.analyses if a["t"] >= cutoff]
 
-    def record_change(self, axis: str, param: str, old: float, new: float, source: str, before: dict | None,
+    def record_change(self, axis: str, param: str, old: float | str, new: float | str, source: str, before: dict | None,
                       suggestion: str | None = None) -> dict:
+        """`param` ALGORITHM: `old`/`new` are algorithm names, and every open suggestion for that axis goes stale."""
         now = time.time()
+        settle = settle_s(param, new)
         for c in self.changes:  # a newer change spoils the measurement of a pending one
             if c["verdict"] == "pending":
                 c["verdict"], c["outcome"] = "void", "superseded by a newer change before it could be measured"
@@ -282,12 +367,12 @@ class Advisor:
             "id": uuid.uuid4().hex[:10], "t": now, "axis": axis, "param": param, "old": old, "new": new, "source": source,
             "suggestion": suggestion, "before": _brief(before), "after": None, "verdict": "pending" if before else "void",
             "outcome": "measuring…" if before else "not measured (no clean guiding before the change)",
-            "measureAt": now + SETTLE_S + WINDOW_S,
+            "settleS": settle, "measureAt": now + settle + WINDOW_S,
         }
         self.changes.append(entry)
         for a in self.analyses:
             for s in a.get("suggestions", []):
-                if s["status"] == "open" and s["axis"] == axis and s["param"] == param:
+                if s["status"] == "open" and s["axis"] == axis and (s["param"] == param or param == ALGORITHM):
                     s["status"] = "applied" if s["id"] == suggestion else "stale"
         self.save()
         return entry
@@ -298,7 +383,7 @@ class Advisor:
         for c in self.changes:
             if c["verdict"] != "pending" or now < c["measureAt"]:
                 continue
-            start = c["t"] + SETTLE_S
+            start = c["t"] + c.get("settleS", SETTLE_S)
             samples = buffer.window(start, start + WINDOW_S, dist)
             after = guiding.stats(samples, dist.clean_seconds(start, start + WINDOW_S))
             changed = True

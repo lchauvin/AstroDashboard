@@ -86,14 +86,18 @@ class Phd2Client:
     """One connection. `run()` connects, seeds state and reads until the socket drops (then raises)."""
 
     def __init__(self, host: str, port: int, *, on_event: Callable[[dict], None] | None = None,
+                 on_algorithms: Callable[[dict, dict], None] | None = None,
                  connect_timeout: float = 5.0, rpc_timeout: float = 10.0) -> None:
+        """`on_algorithms(old, new)`: an axis's algorithm changed while connected (in PHD2's Brain)."""
         self.host, self.port = host, port
         self.connect_timeout, self.rpc_timeout = connect_timeout, rpc_timeout
         self.state = Phd2State()
         self._on_event = on_event
+        self._on_algorithms = on_algorithms
         self._writer: asyncio.StreamWriter | None = None
         self._reader: asyncio.StreamReader | None = None
         self._lock = asyncio.Lock()
+        self._params_lock = asyncio.Lock()  # one ConfigurationChange burst queues several refreshes: one at a time
         self._ids = itertools.count(1)
         self._pending: dict[int, asyncio.Future] = {}
 
@@ -286,6 +290,17 @@ class Phd2Client:
             pass
 
     async def refresh_params(self) -> None:
+        async with self._params_lock:
+            old = self.state.algorithms
+            await self._read_params()
+            new = self.state.algorithms
+        if old and new and old != new and self._on_algorithms:
+            try:
+                self._on_algorithms(old, new)
+            except Exception:  # noqa: BLE001 — like a bad event handler
+                log.exception("PHD2 algorithm-change handler failed")
+
+    async def _read_params(self) -> None:
         params: dict[str, dict[str, float]] = {}
         algos: dict[str, str] = {}
         for axis in ("ra", "dec"):

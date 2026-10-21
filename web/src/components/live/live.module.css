@@ -743,6 +743,15 @@
   grid-template-columns: 1fr 140px;
 }
 
+.paramRowFixed {
+  grid-template-columns: 1fr auto;
+  min-height: 32px;
+}
+
+.paramFixed {
+  font: 400 13px var(--font-mono);
+}
+
 .paramLabel {
   font-size: 14px;
   border-bottom: 1px dotted var(--text-muted);
