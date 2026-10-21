@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, Moon, Play } from "lucide-react";
+import { Moon } from "lucide-react";
 
 import { exposure, FILTER_ORDER, filterLabel, hours, num, settingsLabel, shortDate } from "@/lib/format";
 import type { DarkStatus, FlatStatus, LightGroup, Level, Revision, Session } from "@/lib/types";
@@ -248,16 +248,25 @@ export function SessionMatrix({ rev }: { rev: Revision }) {
               Usable
             </th>
             <th>Conditions</th>
-            <th>
-              <span className="sr-only">Diagnostic</span>
-            </th>
           </tr>
         </thead>
         <tbody>
           {rev.sessions.map((s) => (
             <tr key={s.id}>
               <td className={styles.night}>
-                <div className={styles.date}>{shortDate(s.date)}</div>
+                <div className={styles.date}>
+                  {s.totals.lights ? (
+                    <Link
+                      href={`/diagnostics/${rev.id}/${encodeURIComponent(s.folder)}`}
+                      className={styles.dateLink}
+                      title={s.diagnostic ? "Open the night's diagnostic" : "Open the night's diagnostic (not analysed yet)"}
+                    >
+                      {shortDate(s.date)}
+                    </Link>
+                  ) : (
+                    shortDate(s.date)
+                  )}
+                </div>
                 <div className={styles.folder}>
                   <span className="mono">{s.folder}</span>
                   {s.naming === "legacy" ? <Badge tone="muted">legacy name</Badge> : null}
@@ -284,20 +293,6 @@ export function SessionMatrix({ rev }: { rev: Revision }) {
                 )}
               </td>
               <ConditionsCell s={s} />
-              <td className={styles.diagCell}>
-                {s.diagnostic ? (
-                  <Link href={`/diagnostics/${rev.id}/${encodeURIComponent(s.folder)}`} className={styles.diagLink}>
-                    <Activity size={11} strokeWidth={1.8} aria-hidden="true" /> Diagnostic
-                  </Link>
-                ) : s.totals.lights ? (
-                  <Link
-                    href={`/diagnostics/${rev.id}/${encodeURIComponent(s.folder)}?run=1`}
-                    className={`${styles.diagLink} ${styles.diagRun}`}
-                  >
-                    <Play size={10} strokeWidth={1.8} aria-hidden="true" /> Run diagnostic
-                  </Link>
-                ) : null}
-              </td>
             </tr>
           ))}
         </tbody>

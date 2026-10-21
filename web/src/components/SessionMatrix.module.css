@@ -16,6 +16,10 @@
   min-width: 170px;
 }
 
+.dateLink:hover {
+  color: var(--color-accent-700);
+}
+
 .date {
   font-family: var(--font-heading);
   font-weight: var(--font-heading-weight);
@@ -132,38 +136,7 @@
   color: var(--text-muted);
 }
 
-.diagLink {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 20px;
-  padding: 0 7px;
-  font: 500 9.5px/1 var(--font-mono);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  color: var(--text-muted);
-  border: 1px solid var(--color-divider);
-  transition: border-color var(--transition), color var(--transition);
-}
-
-.diagLink:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent-700);
-}
-
-/* Not analysed yet: the call to action reads in the accent. */
-.diagRun {
-  color: var(--color-accent-700);
-  border-style: dashed;
-}
-
 .usable {
   display: block;
   color: var(--color-accent-700);
-}
-
-.diagCell {
-  text-align: right;
-  white-space: nowrap;
 }
