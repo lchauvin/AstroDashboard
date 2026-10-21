@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Lightbulb } from "lucide-react";
 
 import { DismissControl } from "@/components/DismissControl";
 import { EngineNotice } from "@/components/EngineNotice";
@@ -217,7 +217,12 @@ export default async function CalibrationPage() {
       </section>
 
       <section className={styles.block}>
-        <h2 className="section-title">Library builds</h2>
+        <div className={styles.blockHead}>
+          <h2 className="section-title">Library builds</h2>
+          <Link href="/library/calibration/leaks" className="button">
+            <Lightbulb size={13} strokeWidth={1.8} aria-hidden="true" /> Light-leak finder
+          </Link>
+        </div>
         <div className={styles.builds}>
           {lib.builds.map((b) => (
             <div key={b.build} className={`framed ${styles.build}`}>

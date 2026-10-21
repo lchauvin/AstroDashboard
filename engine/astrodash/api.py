@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import __version__, api_live, api_organizer, api_planning, api_telescopius, planning
+from . import __version__, api_leaks, api_live, api_organizer, api_planning, api_telescopius, planning
 from .cache import HeaderCache
 from .config import Config
 from .diagnostics.detectors import analyse as analyse_frames, horizon_samples, learn_horizon
@@ -370,6 +370,7 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
         app.include_router(sim_router)
     api_organizer.register(app, state)
     api_telescopius.register(app, state)
+    api_leaks.register(app, state)
     return app
 
 

@@ -35,6 +35,15 @@
   margin-bottom: 14px;
 }
 
+.blockHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
 .note {
   font-size: 14px;
   color: var(--text-muted);

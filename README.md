@@ -11,14 +11,14 @@ migration plans you read operation by operation and approve by typing the plan i
 `.Trash\<plan>`), journaled in `G:\Astro\.Dashboard\journal.jsonl`, and undoable. Nothing has been applied to
 `G:\Astro` yet; that is your call, target by target (PLAN.md §3.3).
 
-Planning vendors AstroPlanner's SNR and ephemeris modules (`web/src/lib/snr`, `web/src/lib/astro`) and its deep-sky
-catalog (`web/data/catalog`, OpenNGC CC-BY-SA-4.0 + VizieR) — copied once with provenance headers, never read from
-the sibling at runtime. Hα survey values come from the CDS hips2fits service (public, read-only) and are cached in
-`var/`. The sites map uses OpenStreetMap tiles.
-
-Diagnostics use the sibling checkout `D:\Python\AstroSubQualityEvaluation` (set `[diagnostics] astro_eval_path`
-in `astrodashboard.toml` to move it). It is loaded by path, not installed, and only its measuring/scoring code
-is used — its report writers are never called, so nothing is written next to your frames.
+The **Light-leak finder** (Library → Calibration library → Light-leak finder) works in two phases. **Phase 1, spot
+checks:** single frames (scope capped, e.g. 60 s Luminance), each with a flashlight sweeping over one spot of the rig,
+plus a few with the flashlight off. Each frame is judged on its own against those: light raises the level *and* the
+pixel noise (its shot noise), while this camera's bias steps raise the level only, so the noise tells a leak from a
+step even when the moving flashlight leaves no pattern. **Phase 2, dark sets:** the rig as it is, then a set after
+each fix, each with a comment saying what changed and compared with the set before it: frame levels and noise, plus
+the structure of the difference of the two masters (gradient, edges beyond the gradient, 3×3 zones, patchiness), each
+against a noise floor from the sets' even/odd half masters, shown stretched hard with profiles and per-frame charts.
 
 ## Run
 
@@ -59,8 +59,9 @@ frames from `.Download` into targets' `.SessionData\NIGHT_<date>` folders (and c
 confined to `engine/astrodash/ingest/fileops.py`, never overwrites or deletes, and is journaled and undoable per night.
 Organizer plans you approve are applied by `engine/astrodash/organizer/apply.py` under the same rules.
 Otherwise the engine only lists directories and reads FITS/XISF *headers* (plus the pixels of a
-few raw biases for the sky pedestal, and of frames you preview). Its own files (header cache, thumbnails, sites, goals,
-settings) live in `var/`. `engine/tests/test_safety.py` fails if any module gains a
+few raw biases for the sky pedestal, of frames you preview, and of the dark sets you add to a light-leak test, which
+may sit outside the data root). Its own files (header cache, thumbnails, sites, goals, settings, light-leak arrays in
+`var/leaks`) live in `var/`. `engine/tests/test_safety.py` fails if any module gains a
 file-mutating call outside the allow-list.
 
 ## Tests

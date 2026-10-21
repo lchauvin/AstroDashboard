@@ -25,6 +25,8 @@ WRITE_ALLOWED = {
     ("api.py", "tmp.replace(out)"),
     # var/previews only
     ("preview.py", "tmp.replace(out)"),
+    # var/leaks only: a dark set's arrays, named by a generated set id
+    ("api_leaks.py", '(out_dir / f"{set_id}.npz").unlink(missing_ok=True)'),
 }
 
 

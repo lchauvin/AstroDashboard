@@ -78,6 +78,11 @@ CREATE TABLE IF NOT EXISTS organizer_plans (
     data      TEXT NOT NULL,
     result    TEXT
 );
+CREATE TABLE IF NOT EXISTS leak_tests (
+    id      TEXT PRIMARY KEY,
+    created REAL NOT NULL,
+    data    TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -298,6 +303,31 @@ class HeaderCache:
 
     def plan(self, plan_id: str) -> dict[str, Any] | None:
         return next((p for p in self.plans(10000) if p["id"] == plan_id), None)
+
+    # ------------------------------------------------------------------ light-leak tests
+
+    def leak_tests(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT id, created, data FROM leak_tests ORDER BY created DESC").fetchall()
+        return [{**json.loads(d), "id": i, "created": c} for i, c, d in rows]
+
+    def leak_test(self, test_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute("SELECT created, data FROM leak_tests WHERE id = ?", (test_id,)).fetchone()
+        return {**json.loads(row[1]), "id": test_id, "created": row[0]} if row else None
+
+    def save_leak_test(self, test_id: str, data: dict[str, Any]) -> None:
+        body = {k: v for k, v in data.items() if k not in ("id", "created")}
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO leak_tests(id, created, data) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+                (test_id, data.get("created") or time.time(), json.dumps(body)),
+            )
+
+    def delete_leak_test(self, test_id: str) -> bool:
+        """Removes the test record from the dashboard database (the dark frames are never touched)."""
+        with self._lock, self._conn:
+            return self._conn.execute("DELETE FROM leak_tests WHERE id = ?", (test_id,)).rowcount > 0
 
     def remap_diagnostics(self, revision: str, moves: list[tuple[str, str]], session_renames: dict[str, str]) -> int:
         """After an organizer plan: point stored diagnostics at the frames' new paths and session names.
