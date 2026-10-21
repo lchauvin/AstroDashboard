@@ -27,8 +27,6 @@ log = logging.getLogger(__name__)
 
 # Devices polled for the equipment panel. Anything not configured in the NINA profile answers
 # with an error and is simply not shown.
-FILTER_POLL_S = 1.0
-
 DEVICES = ("camera", "mount", "focuser", "filterwheel", "rotator", "guider", "flatdevice",
            "weather", "safetymonitor", "dome", "switch")
 
@@ -122,48 +120,6 @@ class NinaRest:
             raise NinaError(f"{path}: {err}")
         return resp.content, ctype
 
-    async def sequence_stop(self) -> None:
-        await self.get("/sequence/stop")
-
-    async def sequence_start(self, skip_validation: bool = True) -> None:
-        """Without `skip_validation` NINA would ask its pre-sequence checklist on the observatory PC and
-        this call would wait for someone to click."""
-        await self.get("/sequence/start", skipValidation=skip_validation)
-
-    async def filterwheel(self) -> dict | None:
-        """Its info (SelectedFilter, AvailableFilters with their Id), None without a wheel in the profile."""
-        try:
-            fw = await self.get("/equipment/filterwheel/info")
-        except NinaError:
-            return None
-        return fw if isinstance(fw, dict) and fw.get("Connected") else None
-
-    async def change_filter(self, filter_id: int, wait_s: float = 60.0) -> None:
-        """Move the wheel and wait until it reports the filter in place. The plugin only starts the move and
-        answers at once; a capture started meanwhile takes the filter still selected and moves the wheel back."""
-        await self.get("/equipment/filterwheel/change-filter", filterId=filter_id)
-        deadline = time.monotonic() + wait_s
-        while time.monotonic() < deadline:
-            await asyncio.sleep(FILTER_POLL_S)
-            fw = await self.filterwheel()
-            if fw and not fw.get("IsMoving") and (fw.get("SelectedFilter") or {}).get("Id") == filter_id:
-                return
-        raise NinaError(f"the filter wheel did not reach filter {filter_id} within {wait_s:.0f} s")
-
-    async def capture(self, seconds: float) -> Any:
-        """One frame NINA does not save (the Imaging panel's snapshot with Save off); returns once it is in.
-        "Capture already in progress" comes back as a plain string, a busy camera as an error."""
-        return await self.get("/equipment/camera/capture", duration=seconds, save="false", imageType="SNAPSHOT",
-                              waitForResult="true", omitImage="true", timeout=seconds + 120)
-
-    async def capture_statistics(self) -> dict:
-        """The last captured image: Stars, HFR, Median, Mean, StDev …"""
-        stats = await self.get("/equipment/camera/capture/statistics")
-        return stats if isinstance(stats, dict) else {}
-
-    async def abort_exposure(self) -> None:
-        await self.get("/equipment/camera/abort-exposure")
-
     async def equipment(self) -> dict[str, Any]:
         """Every device at once (concurrently: a stalled focuser must not delay the camera)."""
 
@@ -207,15 +163,6 @@ async def listen(url: str, on_event: Callable[[str, dict], Awaitable[None]],
                 except Exception:  # noqa: BLE001 — a bad handler must not drop the socket
                     log.exception("NINA event handler failed")
     raise ConnectionError("NINA websocket closed")
-
-
-LUMINANCE = {"l", "lum", "luminance", "clear", "c"}
-
-
-def same_filter(name: Any, wanted: str) -> bool:
-    """A filter wheel slot name against a setting, ignoring case; L, Lum, Luminance and Clear are one filter."""
-    a, b = str(name or "").strip().casefold(), wanted.strip().casefold()
-    return bool(a) and (a == b or (a in LUMINANCE and b in LUMINANCE))
 
 
 # ---------------------------------------------------------------------- sequence

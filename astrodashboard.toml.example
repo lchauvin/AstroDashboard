@@ -15,6 +15,14 @@ host = "127.0.0.1"
 port = 3007
 # db_path = "D:/Python/AstroDashboard/var/astrodash.db"
 
+# The sky monitor, an ASCOM Alpaca safety monitor NINA connects to (Equipment > Safety Monitor).
+# It listens on every interface so that NINA on the observatory PC reaches it; port 0 turns it off.
+# NINA finds it by Alpaca discovery (UDP 32227) when the firewall lets it through.
+[alpaca]
+host = "0.0.0.0"
+port = 3008
+discovery = true
+
 [camera]
 # Readout modes in which the camera ignores gain and offset. Frames in these modes are
 # grouped and matched on readout + exposure + temperature only. Verified on the

@@ -41,6 +41,9 @@ Open http://localhost:3006. For Live, enable NINA's Advanced API plugin and PHD2
 and set their addresses in Settings → Live · Ingest. To try Live in daylight, start the engine with
 `uv run astrodash-engine --fake-observatory` (simulated NINA and PHD2; the guiding reacts to its parameters).
 The Guiding page's AI advisor uses the model set in the same Settings tab; API keys go in `.env` (see `.env.example`).
+To have NINA react to clouds, connect its safety monitor (Equipment › Safety Monitor) to "AstroDashboard sky monitor",
+an ASCOM Alpaca device the engine serves on port 3008 (found by Alpaca discovery; allow it through this PC's firewall),
+and use Loop While Safe / Loop While Unsafe in the sequence. The steps are in Settings → Live · Ingest.
 For the weather forecast on the Planning page, set `ASTROSPHERIC_API_KEY` (an Astrospheric Professional key, from
 My Profile) in `.env` at the project root (copy `.env.example`; git-ignored) or in the engine's environment; forecasts are cached per site for an hour and only cover the RDPS domain
 (North America, Greenland, Iceland, Ireland, UK). Optionally set `TELESCOPIUS_API_KEY` (Telescopius → account settings →

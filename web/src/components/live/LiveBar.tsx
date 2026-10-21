@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import { ago, clock, enginePost, type GuardState, type LiveState } from "@/lib/live";
+import { ago, clock, enginePost, type LiveState, type SkyState } from "@/lib/live";
 import { StatusIcon } from "../ui";
 import styles from "./live.module.css";
 import { useAdvanced } from "./useLive";
@@ -54,42 +54,50 @@ export function LiveBar({ s, offline, tab }: { s: LiveState | null; offline: boo
           ))}
         </div>
       ) : null}
-      {s?.guard ? <GuardRow g={s.guard} now={s.serverTime} /> : null}
+      {s?.sky ? <SkyRow k={s.sky} now={s.serverTime} /> : null}
     </div>
   );
 }
 
-/** The sequence guard, when it has something to say: a star being lost, a stopped sequence waiting to resume, or what it just did. */
-function GuardRow({ g, now }: { g: GuardState; now: number }) {
+/** The sky monitor, when it has something to say: clouds (NINA told unsafe), a star being lost or dimmed, an obstruction, or what it just did. */
+function SkyRow({ k, now }: { k: SkyState; now: number }) {
   const [error, setError] = useState<string | null>(null);
-  const last = g.log[0];
-  const cancel = async () => {
+  const last = k.log[0];
+  const clearNow = async () => {
     setError(null);
     try {
-      await enginePost("/api/live/guard/cancel");
+      await enginePost("/api/live/sky/clear");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   };
+  const dimmed = k.brightnessPct !== null && k.brightnessPct < k.clearNeedPct;
   let body: React.ReactNode = null;
-  if (g.state === "paused" && g.pausedAt) {
-    const sky = g.sky?.active ? g.sky : null;
+  if (k.state === "cloudy" && k.cloudySince) {
+    const steady = Math.min(k.steadyForS ?? 0, k.clearAfterS);
     body = (
       <>
-        <span title={pausedDetail(g)}>
-          <StatusIcon level="warn" size={13} /> Sequence stopped at {clock(g.pausedAt)}: guide star lost.{" "}
-          {sky ? `Valid resuming frames: ${sky.valid}/${g.skySamples}` : `Steady guiding: ${Math.min(g.steadyForS ?? 0, g.resumeAfterS)}/${g.resumeAfterS} s`}
-          {g.sky?.error ? " (sky check off)" : ""}
+        <span title={`Gives up at ${clock(k.giveUpAt)}: unsafe for ${k.giveUpMin} min without a break is more likely an obstruction, so NINA is then told clear until the next guiding run.`}>
+          <StatusIcon level="warn" size={13} /> Cloudy since {clock(k.cloudySince)}: {k.reason}. NINA is told unsafe. Clear after {k.clearAfterS} s steady
+          {k.baselineKnown ? ` at ${k.clearNeedPct}% brightness or more` : ""}: {steady}/{k.clearAfterS} s
+          {k.brightnessPct !== null ? `, star at ${k.brightnessPct}%` : ""}.
         </span>{" "}
-        <button type="button" className={styles.link} onClick={() => void cancel()}>
-          Don&apos;t resume
+        <button type="button" className={styles.link} title="Tell NINA it is clear until the next guiding run: an obstruction, or you know better." onClick={() => void clearNow()}>
+          Report clear
         </button>
       </>
     );
-  } else if (g.state === "lost") {
+  } else if (k.state === "watching" && (k.lostS > 0 || dimmed)) {
+    const parts = [k.lostS > 0 ? `lost ${k.lostS} s of the last ${k.windowS} s (${k.lostSharePct}%)` : null, dimmed ? `at ${k.brightnessPct}% of its clear-sky brightness` : null];
     body = (
       <>
-        <StatusIcon level="warn" size={13} /> Guide star lost {g.lostS} s of the last {g.stopAfterS} s ({g.lostPct}%): the sequence stops at {g.stopLostPct}%.
+        <StatusIcon level="warn" size={13} /> Guide star {parts.filter(Boolean).join(", ")}: unsafe at {k.lostPct}% lost or under {k.dimPct}%.
+      </>
+    );
+  } else if (k.state === "obstructed" && k.obstructed) {
+    body = (
+      <>
+        <StatusIcon level="info" size={13} /> {k.obstructed}: not cloud, NINA is told clear.
       </>
     );
   } else if (last && now - last.t < 900) {
@@ -99,33 +107,18 @@ function GuardRow({ g, now }: { g: GuardState; now: number }) {
       </>
     );
   }
-  if (!body && !g.error && !error) return null;
+  const serverError = k.enabled ? k.server.error : null;
+  if (!body && !serverError && !error) return null;
   return (
     <div className={styles.lostRow} role="status">
       {body ? <span className={styles.lost}>{body}</span> : null}
-      {g.error || error ? (
+      {serverError || error ? (
         <span className={styles.lost}>
-          <StatusIcon level="bad" size={13} /> {error ?? g.error}
+          <StatusIcon level="bad" size={13} /> {error ?? `Sky monitor not served to NINA: ${serverError}`}
         </span>
       ) : null}
     </div>
   );
-}
-
-/** The whole resume rule and where it stands, for the paused line's tooltip. */
-function pausedDetail(g: GuardState): string {
-  const steady = g.steadyForS !== null ? `steady for ${g.steadyForS} s` : "PHD2 has not found the star yet";
-  const parts = [`Resumes after ${g.resumeAfterS} s of steady guiding (${steady})`];
-  if (g.sky?.active) {
-    const counts = g.sky.samples.slice(-6).map((x) => x.stars);
-    parts.push(
-      `and ${g.skySamples} test frames (${g.sky.filter ?? "current filter"}, ${g.skyExposureS} s) above ${g.skyMinStars} stars, within 20% of each other` +
-        (counts.length ? `: ${counts.join(" → ")} so far` : ": taking the first"),
-    );
-  } else if (g.sky?.error) {
-    parts.push(`(sky check stopped: ${g.sky.error}; resuming on guiding alone)`);
-  }
-  return `${parts.join(" ")}. Gives up at ${clock(g.giveUpAt)}.`;
 }
 
 function Conn({ ok, name, detail, where }: { ok: boolean; name: string; detail: string; where: string | null }) {

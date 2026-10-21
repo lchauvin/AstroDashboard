@@ -4,11 +4,20 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import type { IngestStatus } from "@/lib/live";
-import type { AdvisorSettings, GuardSettings, ObservatorySettings, ReasoningEffort } from "@/lib/planning/types";
+import type { IngestStatus, SkyServer } from "@/lib/live";
+import type { AdvisorSettings, ObservatorySettings, ReasoningEffort, SkyMonitorSettings } from "@/lib/planning/types";
 import styles from "./settings.module.css";
 
-export type LiveConn = { nina: boolean; ninaError: string | null; phd2: boolean; phd2Error: string | null; simulated: boolean; key: { ok: boolean; message: string } };
+export type LiveConn = {
+  nina: boolean;
+  ninaError: string | null;
+  phd2: boolean;
+  phd2Error: string | null;
+  simulated: boolean;
+  key: { ok: boolean; message: string };
+  /** The sky monitor's Alpaca server, and how long ago NINA last read it ("" when it has not). */
+  sky: { server: SkyServer; ninaRead: string } | null;
+};
 
 async function send(path: string, method: string, body?: unknown) {
   const res = await fetch(`/engine${path}`, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -18,11 +27,11 @@ async function send(path: string, method: string, body?: unknown) {
 }
 
 /** Settings → Live · Ingest: where NINA and PHD2 run, the AI advisor's model, and the NINA object → target table. */
-export function LiveIngestSettings({ observatory, advisor, guard, conn, ingest }: { observatory: ObservatorySettings; advisor: AdvisorSettings; guard: GuardSettings; conn: LiveConn | null; ingest: IngestStatus | null }) {
+export function LiveIngestSettings({ observatory, advisor, skyMonitor, conn, ingest }: { observatory: ObservatorySettings; advisor: AdvisorSettings; skyMonitor: SkyMonitorSettings; conn: LiveConn | null; ingest: IngestStatus | null }) {
   const router = useRouter();
   const [obs, setObs] = useState(observatory);
   const [adv, setAdv] = useState(advisor);
-  const [grd, setGrd] = useState(guard);
+  const [sky, setSky] = useState(skyMonitor);
   const [object, setObject] = useState("");
   const [rev, setRev] = useState(ingest?.targets.find((t) => t.stage === "acquiring")?.id ?? "");
   const [msg, setMsg] = useState<string | null>(null);
@@ -127,62 +136,42 @@ export function LiveIngestSettings({ observatory, advisor, guard, conn, ingest }
         Guiding page; the automatic check does not ask the model while both axes are within it.
       </p>
 
-      <h3 className="eyebrow" style={{ marginTop: 28 }}>Pause the sequence when guiding is lost</h3>
+      <h3 className="eyebrow" style={{ marginTop: 28 }}>Tell NINA when it is cloudy</h3>
       <p className={styles.hint} style={{ marginTop: 6 }}>
-        When the guide star has been lost (clouds, a tree) for at least <b>Stop at</b> of the last <b>Over</b> seconds, the dashboard stops the
-        NINA sequence; the star does not have to stay lost, so broken cloud that PHD2 keeps losing and finding again counts too. Once PHD2 has
-        guided for <b>Resume after</b> without losing it, it starts the sequence again. NINA picks up at the first unfinished instruction and
-        retakes the interrupted exposure. Its pre-sequence checklist (“… continue anyway?”, e.g. with the flat panel unplugged) is skipped on
-        resume, so it cannot hold up the night. A deliberate guiding stop (meridian flip, autofocus, centering) never counts. PHD2 has to find
-        its star again by itself: if the star drifted out of its search region meanwhile, guiding does not come back, and neither does the
-        sequence.
+        The dashboard is a safety monitor NINA connects to, “AstroDashboard sky monitor” (an ASCOM Alpaca device on port {conn?.sky?.server.port ?? 3008} of this PC).
+        It says <b>unsafe</b> while PHD2&apos;s guide star has been lost for at least <b>Unsafe at</b> of the last <b>Window</b>, or its brightness
+        there is under <b>Dim below</b> of what it was in clear sky: thin cloud and haze dim the star long before PHD2 loses it. It says
+        <b> clear</b> again once PHD2 has guided <b>Clear after</b> seconds without losing the star, back at {Math.min(95, sky.dimPct + 15)}% of its
+        brightness or more. It never stops, starts or changes anything in NINA: your sequence decides what unsafe means.
       </p>
       <div className={styles.rowActions} style={{ marginTop: 10 }}>
-        <label className={styles.field} style={{ width: 130 }}>
-          <span>Stop at (% lost)</span>
-          <input className={styles.input} type="number" min={50} max={100} step={5} value={grd.stopLostPct} onChange={(e) => setGrd({ ...grd, stopLostPct: Number(e.target.value) })} />
-        </label>
-        <label className={styles.field} style={{ width: 130 }}>
-          <span>Over (s)</span>
-          <input className={styles.input} type="number" min={15} max={1800} step={15} value={grd.stopAfterS} onChange={(e) => setGrd({ ...grd, stopAfterS: Number(e.target.value) })} />
+        <label className={styles.field} style={{ width: 120 }}>
+          <span>Window (s)</span>
+          <input className={styles.input} type="number" min={15} max={1800} step={15} value={sky.windowS} onChange={(e) => setSky({ ...sky, windowS: Number(e.target.value) })} />
         </label>
         <label className={styles.field} style={{ width: 140 }}>
-          <span>Resume after (s)</span>
-          <input className={styles.input} type="number" min={15} max={1800} step={15} value={grd.resumeAfterS} onChange={(e) => setGrd({ ...grd, resumeAfterS: Number(e.target.value) })} />
+          <span>Unsafe at (% lost)</span>
+          <input className={styles.input} type="number" min={50} max={100} step={5} value={sky.lostPct} onChange={(e) => setSky({ ...sky, lostPct: Number(e.target.value) })} />
+        </label>
+        <label className={styles.field} style={{ width: 150 }}>
+          <span>Dim below (% of clear)</span>
+          <input className={styles.input} type="number" min={10} max={90} step={5} value={sky.dimPct} onChange={(e) => setSky({ ...sky, dimPct: Number(e.target.value) })} />
+        </label>
+        <label className={styles.field} style={{ width: 130 }}>
+          <span>Clear after (s)</span>
+          <input className={styles.input} type="number" min={15} max={1800} step={15} value={sky.clearAfterS} onChange={(e) => setSky({ ...sky, clearAfterS: Number(e.target.value) })} />
         </label>
         <label className={styles.field} style={{ width: 150 }}>
           <span>Give up after (min)</span>
-          <input className={styles.input} type="number" min={5} max={720} step={5} value={grd.maxWaitMin} onChange={(e) => setGrd({ ...grd, maxWaitMin: Number(e.target.value) })} />
-        </label>
-      </div>
-      <div className={styles.rowActions} style={{ marginTop: 10 }}>
-        <label className={styles.switch}>
-          <input type="checkbox" checked={grd.skyCheck} onChange={(e) => setGrd({ ...grd, skyCheck: e.target.checked })} />
-          Check the sky before resuming
-        </label>
-        <label className={styles.field} style={{ width: 90 }}>
-          <span>Filter</span>
-          <input className={styles.input} value={grd.skyFilter} disabled={!grd.skyCheck} onChange={(e) => setGrd({ ...grd, skyFilter: e.target.value })} />
-        </label>
-        <label className={styles.field} style={{ width: 120 }}>
-          <span>Exposure (s)</span>
-          <input className={styles.input} type="number" min={5} max={600} step={5} value={grd.skyExposureS} disabled={!grd.skyCheck} onChange={(e) => setGrd({ ...grd, skyExposureS: Number(e.target.value) })} />
-        </label>
-        <label className={styles.field} style={{ width: 120 }}>
-          <span>Min. stars</span>
-          <input className={styles.input} type="number" min={1} max={10000} step={10} value={grd.skyMinStars} disabled={!grd.skyCheck} onChange={(e) => setGrd({ ...grd, skyMinStars: Number(e.target.value) })} />
-        </label>
-        <label className={styles.field} style={{ width: 110 }}>
-          <span>Frames</span>
-          <input className={styles.input} type="number" min={2} max={10} step={1} value={grd.skySamples} disabled={!grd.skyCheck} onChange={(e) => setGrd({ ...grd, skySamples: Number(e.target.value) })} />
+          <input className={styles.input} type="number" min={5} max={720} step={5} value={sky.giveUpMin} onChange={(e) => setSky({ ...sky, giveUpMin: Number(e.target.value) })} />
         </label>
         <button
           type="button"
           className="button button-primary"
           onClick={() =>
             run(() => {
-              const { enabled: _enabled, ...timings } = grd;
-              return send("/api/settings", "PUT", { guard: { ...timings, skyFilter: grd.skyFilter.trim() || "L" } });
+              const { enabled: _enabled, ...thresholds } = sky;
+              return send("/api/settings", "PUT", { skyMonitor: thresholds });
             }, "Saved.")
           }
         >
@@ -190,18 +179,53 @@ export function LiveIngestSettings({ observatory, advisor, guard, conn, ingest }
         </button>
       </div>
       <p className={styles.hint}>
-        Sky check: while the sequence is stopped, the dashboard takes test frames through <b>Filter</b> that NINA does not save (like the
-        Imaging panel with Save off) and reads NINA&apos;s star count. The sequence resumes only once the last <b>Frames</b> counts are all
-        above <b>Min. stars</b> and within 20% of each other, so the sky has stopped clearing; PHD2 can hold its one bright star through haze
-        that would ruin the subs. The sequence&apos;s filter is put back before it resumes. NINA must count stars on captures (HFR / star
-        detection on in its imaging options); without a count the guard says so and resumes on guiding alone. Pick <b>Min. stars</b> from a
-        clear test frame of your field.
+        Never unsafe: while PHD2 is not guiding (a flip, an autofocus, a slew: no evidence), while the mount points below the horizon profile of the
+        site (<Link href="/settings?tab=sites">Settings › Sites</Link>; a building is not cloud), and after <b>Give up after</b> minutes unsafe without a
+        break (more likely an obstruction the profile lacks). The last two say clear until the next guiding run, as does <b>Report clear</b> on the
+        Live bar. Turn it on or off on <Link href="/live">Live › Overview</Link> (Sequence card, off by default{skyMonitor.enabled ? "; on now" : ""}).
       </p>
       <p className={styles.hint}>
-        Give up: if guiding has not been steady again within this time, the sequence stays stopped. Starting the sequence yourself meanwhile
-        cancels the resume. Turn it on or off on <Link href="/live">Live › Overview</Link> (Sequence card, off by default{guard.enabled ? "; on now" : ""});
-        its state shows at the top of the Live pages.
+        {conn?.sky
+          ? conn.sky.server.error
+            ? `Not served to NINA: ${conn.sky.server.error}.`
+            : conn.sky.server.running
+              ? `Served on port ${conn.sky.server.port}${conn.sky.server.discovery ? ", with Alpaca discovery" : " (no discovery: add it in NINA by address)"}; ${conn.sky.ninaRead ? `NINA last read it ${conn.sky.ninaRead}` : "NINA has not connected to it yet"}.`
+              : "Not served to NINA (the engine runs without it)."
+          : null}
       </p>
+      <p className={styles.hint} style={{ marginBottom: 4 }}>
+        <b>In NINA</b>
+      </p>
+      <ol className={styles.hint} style={{ marginTop: 0, paddingLeft: 20 }}>
+        <li>
+          Equipment › Safety Monitor: pick <b>AstroDashboard sky monitor</b> (Alpaca discovery finds it; rescan the device list) and connect. Not
+          listed? Let Python through this PC&apos;s firewall (TCP {conn?.sky?.server.port ?? 3008}, UDP 32227).
+        </li>
+        <li>
+          In the target&apos;s imaging loop (the container with <b>Loop Until Time</b> or altitude), put the exposures and their Dither in a
+          Sequential Instruction Set with the condition <b>Loop While Safe</b>: NINA interrupts the exposure when unsafe and does not save it.
+        </li>
+        <li>
+          Below it, in the same loop, a second Sequential Instruction Set with the condition <b>Loop While Unsafe</b>, holding one <b>Wait for
+          Time Span</b> of 1 min. Short waits rather than one Wait until Safe: NINA checks triggers between instructions only, so the meridian
+          flip still gets its chance every minute through a long cloudy spell.
+        </li>
+        <li>
+          Keep PHD2 guiding meanwhile: its star is how the dashboard sees the sky clear. <b>Center After Drift</b> and <b>Restore Guiding</b> on
+          the imaging loop re-center and restart guiding after a cloud. Stop guiding when the target ends, so its evidence does not carry over to
+          the next one. The loop&apos;s own time or altitude condition ends a wait that lasts too long, and the end of the sequence runs as usual.
+        </li>
+      </ol>
+      <pre className={`${styles.hint} mono`} style={{ marginTop: 4, overflowX: "auto" }}>
+        {[
+          "Imaging            ⟲ Loop Until Time    ⚡ Restore Guiding, Center After Drift",
+          "├─ Clear sky            ⟲ Loop While Safe",
+          "│  ├─ Smart Exposure …  (each filter)",
+          "│  └─ Dither",
+          "└─ Wait for clear sky   ⟲ Loop While Unsafe",
+          "   └─ Wait for Time Span  1 min",
+        ].join("\n")}
+      </pre>
 
       <h3 className="eyebrow" style={{ marginTop: 28 }}>NINA object → target</h3>
       <p className={styles.hint}>

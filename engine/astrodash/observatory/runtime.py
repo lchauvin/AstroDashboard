@@ -7,6 +7,7 @@ Tasks (each restarts with backoff when its connection drops):
 * ``nina_poll`` equipment + sequence every few seconds (NINA has no per-step event), image history
 * ``advisor``   measures applied changes; closes polar-alignment windows; asks the model when enabled and worth it
 * ``frames``    notices the newest file in .Download (cheap: a directory walk, no reads)
+* ``sky``       re-decides the sky monitor's verdict, which NINA reads as a safety monitor (``alpaca.py``)
 
 Everything runs on the engine's event loop. Reads from HTTP handlers only touch plain dicts.
 """
@@ -16,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -24,9 +24,9 @@ from typing import Any, Callable
 from . import advisor as adv
 from . import equipment as eq
 from . import frames as fr
-from . import guard as gd
-from . import guiding, llm, polar
-from .nina import NinaError, NinaRest, NinaUnavailable, listen, parse_sequence, same_filter, state_targets
+from ..planning import nearest_site
+from . import guiding, llm, polar, sky
+from .nina import NinaError, NinaRest, NinaUnavailable, listen, parse_sequence, state_targets
 from .phd2 import Phd2Client, Phd2Disconnected, Phd2Error
 
 log = logging.getLogger(__name__)
@@ -35,16 +35,15 @@ DEFAULTS = {
     "observatory": {"ninaHost": "127.0.0.1", "ninaPort": 1888, "phd2Host": "127.0.0.1", "phd2Instance": 1},
     "advisor": {"enabled": False, "model": "ollama/llama3.1:8b", "ollamaUrl": "http://localhost:11434",
                 "intervalMin": 10, "targetRms": 0.8, "effort": "none", "autoApply": False},
-    "guard": dict(gd.DEFAULTS),
+    "skyMonitor": dict(sky.DEFAULTS),
 }
 
 POLL_S = 4.0
 HISTORY_S = 30.0
 ADVISOR_TICK_S = 20.0
-GUARD_TICK_S = 5.0
+SKY_TICK_S = 5.0
 LOST_KEEP_S = 1800.0
 PHD2_ERRORS = (Phd2Error, Phd2Disconnected, asyncio.TimeoutError)
-CAMERA_BUSY = re.compile(r"expos|in progress|busy", re.IGNORECASE)
 
 
 def _log_failure(task: asyncio.Task) -> None:
@@ -63,7 +62,8 @@ class Observatory:
         self.dist = guiding.Disturbances()
         self.advisor = adv.Advisor(store)
         self._analysis_task: asyncio.Task | None = None
-        self.guard = gd.SequenceGuard(store)
+        self.store = store
+        self.sky = sky.SkyMonitor(store)
         self.polar = polar.PolarTracker(store)
         self.phd2: Phd2Client | None = None
         self.nina: NinaRest | None = None
@@ -82,18 +82,14 @@ class Observatory:
         self.advisor_check: dict | None = None  # last periodic decision (no model call), for the UI
         self._wake_frames = asyncio.Event()
         self._wake_history = asyncio.Event()
-        self._sky_task: asyncio.Task | None = None
-        self._sky_busy = False  # a test frame (or the filter change before it) is under way: no resume meanwhile
-        self._sky_restore: dict | None = None  # the filter the sequence was using, while the test frames use another
-        self._guard_lock = asyncio.Lock()  # the guard loop and the sky check both tick: one resume, filter first
 
     # ------------------------------------------------------------------ config
 
     def adv_settings(self) -> dict:
         return {**DEFAULTS["advisor"], **(self._settings().get("advisor") or {})}
 
-    def guard_settings(self) -> dict:
-        return {**DEFAULTS["guard"], **(self._settings().get("guard") or {})}
+    def sky_settings(self) -> dict:
+        return {**DEFAULTS["skyMonitor"], **(self._settings().get("skyMonitor") or {})}
 
     def obs_settings(self) -> dict:
         return {**DEFAULTS["observatory"], **(self._settings().get("observatory") or {})}
@@ -126,7 +122,7 @@ class Observatory:
             asyncio.create_task(self._supervise("nina_ws", self._run_ws), name="obs-nina-ws"),
             asyncio.create_task(self._poll_nina(), name="obs-nina-poll"),
             asyncio.create_task(self._advisor_loop(), name="obs-advisor"),
-            asyncio.create_task(self._guard_loop(), name="obs-guard"),
+            asyncio.create_task(self._sky_loop(), name="obs-sky"),
             asyncio.create_task(self._frames_loop(), name="obs-frames"),
         ]
         log.info("observatory: NINA %s, PHD2 %s:%d%s", self.nina_root(), host, port, " (simulated)" if self.simulated else "")
@@ -177,12 +173,12 @@ class Observatory:
             await self.phd2.run()
         finally:
             self.dist.begin("disconnected")
-            self.guard.reset_signals()
+            self.sky.end_run("PHD2 disconnected")
 
     def _on_phd2_event(self, msg: dict) -> None:
         ev = msg.get("Event")
         d = self.dist
-        self.guard.on_phd2_event(ev, time.time())
+        self.sky.on_phd2_event(msg, time.time(), self.phd2.state.exposure_ms if self.phd2 else None)
         if ev == "GuideStep":
             if self.phd2 and self.phd2.state.pixel_scale:
                 self.buffer.scale = self.phd2.state.pixel_scale
@@ -528,136 +524,44 @@ class Observatory:
             except Exception:  # noqa: BLE001 — a bad tick must not kill the loop
                 log.exception("advisor tick failed")
 
-    # ------------------------------------------------------------------ sequence guard
+    # ------------------------------------------------------------------ sky monitor
 
-    async def _guard_loop(self) -> None:
+    async def _sky_loop(self) -> None:
         while True:
-            await asyncio.sleep(GUARD_TICK_S)
+            await asyncio.sleep(SKY_TICK_S)
             try:
-                await self.guard_tick()
-            except asyncio.CancelledError:
-                raise
+                self.sky_tick()
             except Exception:  # noqa: BLE001 — a bad tick must not kill the loop
-                log.exception("sequence guard tick failed")
+                log.exception("sky monitor tick failed")
 
-    async def guard_tick(self) -> None:
-        async with self._guard_lock:
-            await self._guard_tick()
+    def sky_tick(self, now: float | None = None) -> None:
+        """Re-decide the verdict NINA reads (`alpaca.py`); the dashboard sends NINA nothing."""
+        now = now or time.time()
+        was = self.sky.safe
+        self.sky.tick(now, self.sky_settings(), self._obstruction())
+        if self.sky.safe != was:
+            self.dist.events.append((now, "clear" if self.sky.safe else "clouds"))
+            log.warning("sky monitor: %s", self.sky.log[-1]["message"])
 
-    async def _guard_tick(self) -> None:
-        g, now = self.guard, time.time()
-        guiding = bool(self.phd2 and self.phd2.connected and self.phd2.state.app_state == "Guiding")
-        s = self.guard_settings()
-        action = g.decide(now, s, self.sequence_running(), guiding)
-        probing = self._sky_task is not None and not self._sky_task.done()
-        if g.paused_at is None:
-            if probing and self._sky_task is not asyncio.current_task():
-                self._sky_task.cancel()  # started by you, the guard turned off, or given up
-        elif g.sky_wanted(s) and not probing and self.nina:
-            self._sky_task = asyncio.create_task(self._sky_check(), name="obs-sky-check")
-        if not action or not self.nina or (action == "start" and self._sky_busy):
-            return
-        try:
-            if action == "stop":
-                await self.nina.sequence_stop()
-                g.stopped(now, g.lost_seconds(now, s["stopAfterS"]), s["stopAfterS"])
-                self.dist.events.append((now, "sequence stopped (guide star lost)"))
-                log.warning("sequence guard: guide star lost, sequence stopped")
-            else:
-                await self._restore_filter()
-                await self.nina.sequence_start(skip_validation=True)
-                g.started(now, now - (g.steady_since or now), g.sky_counts(s) if g.sky_wanted(s) else None)
-                self.dist.events.append((now, "sequence resumed"))
-                log.warning("sequence guard: guiding steady again, sequence resumed")
-        except NinaError as exc:
-            if action == "start" and "already running" in str(exc):
-                g.forget("The sequence was already running when the guard went to resume it.", now)
-            else:
-                g.error = f"Could not {action} the sequence: {exc}"
-        except NinaUnavailable as exc:
-            g.error = f"Could not {action} the sequence: NINA is not answering ({exc})"
-        self._wake_history.set()  # re-read NINA's state now rather than at the next poll
+    def _obstruction(self) -> str | None:
+        """What the mount points at when that is below the site's horizon profile (Settings › Sites), else None.
 
-    async def _sky_check(self) -> None:
-        """While the guard holds the sequence stopped: test frames NINA does not save, for its star count.
-
-        A guard tick follows each frame, the only moment a resume may happen (never mid-exposure).
-        Any failure ends the check with `sky_error`; the guard then resumes on guiding alone.
-        """
-        g = self.guard
-        try:
-            while self.sequence_running() is not False:  # NINA's stop takes a moment to show in the polled state
-                await asyncio.sleep(2)
-            self._sky_busy = True
-            await self._sky_filter(self.guard_settings())
-            while g.paused_at is not None and g.sky_wanted(s := self.guard_settings()):
-                stats = await self._sky_frame(float(s["skyExposureS"]))
-                stars, hfr = stats.get("Stars"), stats.get("HFR")
-                if not isinstance(stars, (int, float)) or isinstance(stars, bool):
-                    raise NinaError("NINA gave no star count for the test frame (is star detection on in its imaging options?)")
-                g.sky_add(time.time(), int(stars), round(float(hfr), 2) if isinstance(hfr, (int, float)) and hfr > 0 else None)
-                self._sky_busy = False
-                await self.guard_tick()
-                self._sky_busy = True
-        except asyncio.CancelledError:
-            raise
-        except (NinaError, NinaUnavailable) as exc:
-            g.sky_error = str(exc)
-            log.warning("sequence guard: sky check stopped: %s", exc)
-        except Exception as exc:  # noqa: BLE001 — the guard must keep working on guiding alone
-            g.sky_error = f"{type(exc).__name__}: {exc}"
-            log.exception("sequence guard: sky check failed")
-        finally:
-            self._sky_busy = False
-            if self._sky_restore and self.sequence_running() is not True:  # given up or turned off: the sequence's filter back
-                with contextlib.suppress(Exception):
-                    await asyncio.shield(self._restore_filter())
-
-    async def _sky_filter(self, s: dict) -> None:
-        """Put the sky-check filter in, remembering the sequence's. No wheel, or no such filter: the current one."""
-        assert self.nina is not None
-        fw = await self.nina.filterwheel()
-        if fw is None:
-            self.guard.sky_filter = None
-            return
-        current = fw.get("SelectedFilter") or {}
-        slots = [f for f in fw.get("AvailableFilters") or [] if isinstance(f, dict)]
-        wanted = next((f for f in slots if same_filter(f.get("Name"), s["skyFilter"])), None)
-        if wanted is None or wanted.get("Id") is None or wanted.get("Id") == current.get("Id"):
-            self.guard.sky_filter = current.get("Name")
-            if wanted is None:
-                log.info("sequence guard: no %r filter on the wheel, test frames through %s", s["skyFilter"], current.get("Name"))
-            return
-        self._sky_restore = {"Id": current["Id"], "Name": current.get("Name")} if current.get("Id") is not None else None
-        await self.nina.change_filter(int(wanted["Id"]))
-        self.guard.sky_filter = wanted.get("Name")
-
-    async def _restore_filter(self) -> None:
-        prev, self._sky_restore = self._sky_restore, None
-        if prev and self.nina:
-            try:
-                await self.nina.change_filter(int(prev["Id"]))
-            except (NinaError, NinaUnavailable) as exc:
-                self.guard.note(f"Could not put the {prev.get('Name')} filter back: {exc}")
-
-    async def _sky_frame(self, seconds: float) -> dict:
-        """One test frame and its statistics; waits out a camera still busy with the interrupted exposure."""
-        assert self.nina is not None
-        for _ in range(24):
-            try:
-                answer = await self.nina.capture(seconds)
-            except asyncio.CancelledError:
-                with contextlib.suppress(Exception):
-                    await asyncio.shield(self.nina.abort_exposure())
-                raise
-            except NinaError as exc:
-                if not CAMERA_BUSY.search(str(exc)):
-                    raise
-            else:
-                if not (isinstance(answer, str) and CAMERA_BUSY.search(answer)):
-                    return await self.nina.capture_statistics()
-            await asyncio.sleep(5)
-        raise NinaError("the camera stayed busy for 2 minutes")
+        The site is the one nearest the mount's own coordinates, else the default site."""
+        mount = self.equipment.get("mount")
+        sites = getattr(self.store, "sites", None)
+        if not isinstance(mount, dict) or not mount.get("Connected") or sites is None:
+            return None
+        alt, az = eq._num(eq._pick(mount, "Altitude")), eq._num(eq._pick(mount, "Azimuth"))
+        if alt is None or az is None:
+            return None
+        rows = sites()
+        lat, lon = eq._num(eq._pick(mount, "SiteLatitude")), eq._num(eq._pick(mount, "SiteLongitude"))
+        site = nearest_site(rows, lat, lon) or next((r for r in rows if r.get("isDefault")), rows[0] if rows else None)
+        horizon = sky.horizon_at((site or {}).get("horizon") or [], az)
+        if site is None or horizon is None or alt >= horizon:
+            return None
+        return (f"The mount points below the horizon of {site.get('name') or 'the site'} "
+                f"(altitude {alt:.0f}° at azimuth {az:.0f}°, horizon {horizon:.0f}°)")
 
     # ------------------------------------------------------------------ snapshot
 
@@ -738,6 +642,6 @@ class Observatory:
                 "check": self.advisor_check, "analyses": list(reversed(analyses[-10:])), "changes": list(reversed(changes)),
             },
             "polar": self.polar.summary(),
-            "guard": self.guard.as_dict(time.time(), self.guard_settings()),
+            "sky": self.sky.as_dict(time.time(), self.sky_settings()),
             "paramInfo": {k: {"label": v[0], "help": v[1], "basic": k in adv.BASIC_PARAMS} for k, v in adv.PARAM_INFO.items()},
         }

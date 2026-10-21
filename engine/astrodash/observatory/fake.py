@@ -9,6 +9,9 @@ The Dec drift is a polar axis 8′ too high and 15′ west of the pole, at the s
 for the polar-alignment estimate to find (in windows of 5 minutes; the fit needs hours).
 Seeing wanders, dithers happen every few minutes, the star is occasionally lost, a frame is
 "saved" every 40 s. Nothing is written to disk: frame previews are rendered in memory.
+Fake NINA's safety monitor is the dashboard's own sky monitor, and its sequence saves no frame
+while that says unsafe (as Loop While Safe + Loop While Unsafe would); /fake-nina/v2/api/sim/cloud
+and /sim/haze bring the weather.
 
 No `from __future__ import annotations` here: FastAPI must resolve the WebSocket annotation.
 """
@@ -21,7 +24,7 @@ import math
 import random
 import time
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
@@ -35,7 +38,6 @@ X_RATE, Y_RATE = 3.912, 3.705  # calibrated guide rates, px/s
 PA_ALT, PA_AZ, LATITUDE = 8.0, -15.0, 45.5  # polar axis error (′, + = too high / east of the pole) and site
 RA_H, DEC_DEG, LST0_H = 0.7122, 41.27, 23.3006  # M 31, and the sidereal time when the simulator starts
 FILTERS = ("L", "R", "G", "B", "Ha", "OIII", "SII")
-SKY_STARS, SKY_CLEARS_S = 900, 150  # a clear test frame's star count; how long the sky takes to clear after a cloud
 
 
 class Sim:
@@ -61,15 +63,8 @@ class Sim:
         self.exposure_started = time.time()
         self.sequence_running = True
         self.cloud_until = 0.0  # /fake-nina/v2/api/sim/cloud: the guide star is lost until then
-        self.capture_stats: Optional[dict] = None  # the last /equipment/camera/capture
-        self.filter_moving = False
-
-    def sky_stars(self) -> int:
-        """A test frame's star count: a few under the cloud, then rising as the sky clears behind it."""
-        since = time.time() - self.cloud_until
-        if since < 0:
-            return random.randint(0, 25)
-        return int(SKY_STARS * min(1.0, 0.05 + since / SKY_CLEARS_S) * random.uniform(0.94, 1.06))
+        self.haze_until, self.haze = 0.0, 1.0  # /fake-nina/v2/api/sim/haze: the guide star dimmed to `haze` until then
+        self.safe: Optional[Callable[[], bool]] = None  # the dashboard's sky monitor, as NINA's safety monitor
 
     def step(self) -> dict:
         self.frame += 1
@@ -95,14 +90,15 @@ class Sim:
         self.ra_err -= ra_c * GAIN
         self.dec_err -= dec_c
         ms = lambda c, rate: round(abs(c) / self.scale / rate * 1000)  # noqa: E731
+        dim = self.haze if time.time() < self.haze_until else 1.0
         return {
             "Event": "GuideStep", "Timestamp": time.time(), "Host": "sim", "Inst": 1, "Frame": self.frame, "Time": t,
             "Mount": "Sim Mount", "dx": ra_m / self.scale, "dy": dec_m / self.scale,
             "RADistanceRaw": ra_m / self.scale, "DECDistanceRaw": dec_m / self.scale,
             "RADuration": ms(ra_c, X_RATE), "RADirection": "East" if ra_c > 0 else "West",
             "DECDuration": ms(dec_c, Y_RATE), "DECDirection": "North" if dec_c > 0 else "South",
-            "StarMass": max(500.0, 5200 + random.gauss(0, 260)),
-            "SNR": max(3.0, 26 - (self.seeing - 2.0) * 5 + random.gauss(0, 1.5)),
+            "StarMass": max(100.0, (5200 + random.gauss(0, 260)) * dim),
+            "SNR": max(3.0, (26 - (self.seeing - 2.0) * 5 + random.gauss(0, 1.5)) * dim),
             "HFD": self.seeing / self.scale + random.gauss(0, 0.05),
             "AvgDist": math.hypot(ra_m, dec_m) / self.scale, "RALimited": False, "DecLimited": False,
         }
@@ -333,26 +329,17 @@ def nina_router(sim: Sim) -> APIRouter:
             {"GlobalTriggers": [{"Name": "Meridian Flip"}]},
         ])
 
-    @router.get("/api/sequence/stop")
-    async def sequence_stop():
-        sim.sequence_running = False
-        log.info("[sim] sequence stopped")
-        return ok("Sequence stopped")
-
-    @router.get("/api/sequence/start")
-    async def sequence_start(skipValidation: bool = False):  # noqa: N803 — the API's own name
-        if sim.sequence_running:
-            return {"Response": None, "Error": "Sequence is already running", "StatusCode": 409, "Success": False, "Type": "API"}
-        sim.sequence_running = True
-        log.info("[sim] sequence started (skipValidation=%s)", skipValidation)
-        return ok("Sequence started")
-
     @router.get("/api/sim/cloud")
     async def sim_cloud(seconds: float = 120):
-        """Not NINA: a cloud for the simulator. The guide star is lost for `seconds`; test frames show few stars
-        until then, and their count climbs back over the next SKY_CLEARS_S."""
+        """Not NINA: a cloud for the simulator. The guide star is lost for `seconds`."""
         sim.cloud_until = time.time() + seconds
         return ok(f"cloud for {seconds:g} s")
+
+    @router.get("/api/sim/haze")
+    async def sim_haze(seconds: float = 300, pct: float = 35):
+        """Not NINA: thin cloud for the simulator. PHD2 keeps its star, at `pct` % of its brightness, for `seconds`."""
+        sim.haze_until, sim.haze = time.time() + seconds, max(0.01, min(1.0, pct / 100))
+        return ok(f"haze at {pct:g} % for {seconds:g} s")
 
     @router.get("/api/sequence/state")
     async def sequence_state():
@@ -380,7 +367,7 @@ def nina_router(sim: Sim) -> APIRouter:
         elif device == "focuser":
             base.update(Name="Sim EAF", Position=sim.focus, Temperature=6.4, IsMoving=False, StepSize=4.5, TempComp=False)
         elif device == "filterwheel":
-            base.update(Name="Sim EFW", SelectedFilter={"Name": sim.filter, "Id": FILTERS.index(sim.filter)}, IsMoving=sim.filter_moving,
+            base.update(Name="Sim EFW", SelectedFilter={"Name": sim.filter, "Id": FILTERS.index(sim.filter)}, IsMoving=False,
                         AvailableFilters=[{"Name": n, "Id": i} for i, n in enumerate(FILTERS)])
         elif device == "rotator":
             base.update(Connected=False)
@@ -389,45 +376,8 @@ def nina_router(sim: Sim) -> APIRouter:
         elif device == "weather":
             base.update(Name="Sim weather", Temperature=7.2, DewPoint=3.1, Humidity=75.0, CloudCover=8.0, WindSpeed=2.4, SkyQuality=20.1)
         elif device == "safetymonitor":
-            base.update(Name="Sim safety", IsSafe=True)
+            base.update(Name="AstroDashboard sky monitor", Connected=sim.safe is not None, IsSafe=bool(sim.safe and sim.safe()))
         return ok(base)
-
-    @router.get("/api/equipment/filterwheel/change-filter")
-    async def change_filter(filterId: int):  # noqa: N803 — the API's own name
-        if not 0 <= filterId < len(FILTERS):
-            return {"Response": None, "Error": "Filter not available", "StatusCode": 409, "Success": False, "Type": "API"}
-        async def move() -> None:  # like the plugin: the move starts, the answer does not wait for it
-            sim.filter_moving = True
-            await asyncio.sleep(1.5)
-            sim.filter, sim.filter_moving = FILTERS[filterId], False
-            log.info("[sim] filter %s", sim.filter)
-
-        asyncio.create_task(move())
-        return ok("Filter changed")
-
-    @router.get("/api/equipment/camera/capture")
-    async def capture(duration: float = 2.0, save: bool = True, imageType: str = "SNAPSHOT"):  # noqa: N803
-        if sim.sequence_running:
-            return {"Response": None, "Error": "Camera currently exposing", "StatusCode": 409, "Success": False, "Type": "API"}
-        await asyncio.sleep(duration + 2)  # exposure + download
-        stars = sim.sky_stars()
-        sim.capture_stats = {"Stars": stars, "HFR": round(sim.seeing * 1.05, 2) if stars else 0.0, "Median": 980.0, "MedianAbsoluteDeviation": 30.0,
-                             "Mean": 990.0, "Max": 48000, "Min": 120, "StDev": 110.0}
-        # NINA lists an unsaved capture in its image history too, without a file.
-        sim.images.append({**stats(len(sim.images)), **sim.capture_stats, "ImageType": imageType.upper(), "ExposureTime": duration,
-                           "Filename": None if not save else f"D:\\Astro\\snapshot_{len(sim.images):04d}.fits"})
-        log.info("[sim] test frame %s %g s: %d stars", sim.filter, duration, stars)
-        return ok({"PlateSolveResult": None})
-
-    @router.get("/api/equipment/camera/capture/statistics")
-    async def capture_statistics():
-        if sim.capture_stats is None:
-            return {"Response": None, "Error": "No image available", "StatusCode": 400, "Success": False, "Type": "API"}
-        return ok(sim.capture_stats)
-
-    @router.get("/api/equipment/camera/abort-exposure")
-    async def abort_exposure():
-        return ok("Exposure aborted")
 
     @router.get("/api/image-history")
     async def history(all: str = "true", count: str = "false"):  # noqa: A002
@@ -453,8 +403,8 @@ def nina_router(sim: Sim) -> APIRouter:
     async def emit() -> None:
         while True:
             await asyncio.sleep(FRAME_EVERY_S)
-            if not sim.sequence_running:
-                continue
+            if not sim.sequence_running or (sim.safe and not sim.safe()):
+                continue  # Loop While Safe has interrupted the exposure; Loop While Unsafe waits
             sim.exposure_started = time.time()
             rec = stats(len(sim.images))
             sim.images.append(rec)

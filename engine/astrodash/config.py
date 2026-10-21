@@ -33,6 +33,10 @@ class Config:
     db_path: Path = PROJECT_ROOT / "var" / "astrodash.db"
     host: str = "127.0.0.1"
     port: int = 3007
+    # The sky monitor's ASCOM Alpaca device, for NINA on the observatory PC: every interface by default. 0 = off.
+    alpaca_host: str = "0.0.0.0"
+    alpaca_port: int = 3008
+    alpaca_discovery: bool = True  # answer Alpaca discovery (UDP 32227), so NINA finds it without an address
     filter_aliases: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_FILTER_ALIASES))
     # Flats and lights further apart than this (focuser steps) get a warning.
     focus_tolerance_steps: int = 100
@@ -109,6 +113,10 @@ def _apply(cfg: Config, raw: dict) -> None:
     cfg.port = int(server.get("port", cfg.port))
     if "db_path" in server:
         cfg.db_path = Path(server["db_path"])
+    alpaca = raw.get("alpaca", {})
+    cfg.alpaca_host = alpaca.get("host", cfg.alpaca_host)
+    cfg.alpaca_port = int(alpaca.get("port", cfg.alpaca_port))
+    cfg.alpaca_discovery = bool(alpaca.get("discovery", cfg.alpaca_discovery))
     diag = raw.get("diagnostics", {})
     if "astro_eval_path" in diag:
         cfg.astro_eval_path = Path(diag["astro_eval_path"])

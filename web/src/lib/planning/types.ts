@@ -79,8 +79,8 @@ export type DashSettings = {
   observatory?: ObservatorySettings;
   /** Live → Guiding: the AI advisor. Its API key is read from the engine's .env, never stored here. */
   advisor?: AdvisorSettings;
-  /** Live: stop the NINA sequence while the guide star is lost, resume it once guiding is steady. */
-  guard?: GuardSettings;
+  /** Live: the sky monitor NINA reads as its safety monitor (engine `sky.py`, served by `alpaca.py`). */
+  skyMonitor?: SkyMonitorSettings;
   /** Planning: push tonight's verdict to a phone through ntfy (see server/notify.ts). */
   notify?: NotifySettings;
 };
@@ -88,18 +88,16 @@ export type DashSettings = {
 export type NotifySettings = { enabled: boolean; ntfyServer: string; ntfyTopic: string; moonlit: boolean; dashboardUrl: string };
 
 export type ObservatorySettings = { ninaHost: string; ninaPort: number; phd2Host: string; phd2Instance: number };
-export type GuardSettings = {
+export type SkyMonitorSettings = {
   enabled: boolean;
-  stopAfterS: number;
-  stopLostPct: number;
-  resumeAfterS: number;
-  maxWaitMin: number;
-  /** While stopped: unsaved test frames, resume only once their star count has stopped rising. */
-  skyCheck: boolean;
-  skyFilter: string;
-  skyExposureS: number;
-  skyMinStars: number;
-  skySamples: number;
+  /** Unsafe when the guide star was lost `lostPct` of the last `windowS`, or its brightness there is under `dimPct` of clear sky. */
+  windowS: number;
+  lostPct: number;
+  dimPct: number;
+  /** Clear again once PHD2 has guided this long without losing the star, bright again. */
+  clearAfterS: number;
+  /** Unsafe this long without a break: clear until the next guiding run (an obstruction is more likely). */
+  giveUpMin: number;
 };
 export type ReasoningEffort = "none" | "low" | "medium" | "high";
 export type AdvisorSettings = { enabled: boolean; model: string; ollamaUrl: string; intervalMin: number; targetRms: number; effort: ReasoningEffort; autoApply: boolean };

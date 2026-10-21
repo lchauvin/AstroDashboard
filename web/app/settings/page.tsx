@@ -8,7 +8,7 @@ import { SitesManager, type LearnedBin, type SiteSky } from "@/components/settin
 import type { Suggestion } from "@/components/settings/SitesMap";
 import styles from "@/components/settings/settings.module.css";
 import { engineGet } from "@/lib/engine";
-import type { IngestStatus, LiveState } from "@/lib/live";
+import { ago, type IngestStatus, type LiveState } from "@/lib/live";
 import { NOTIFY_DEFAULTS } from "@/server/notify";
 import { loadPlanningData } from "@/server/planning";
 import pageStyles from "../library/library.module.css";
@@ -89,7 +89,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <LiveIngestSettings
           observatory={data.data.context.settings.observatory ?? { ninaHost: "127.0.0.1", ninaPort: 1888, phd2Host: "127.0.0.1", phd2Instance: 1 }}
           advisor={data.data.context.settings.advisor ?? { enabled: false, model: "ollama/llama3.1:8b", ollamaUrl: "http://localhost:11434", intervalMin: 10, targetRms: 0.8, effort: "none", autoApply: false }}
-          guard={data.data.context.settings.guard ?? { enabled: false, stopAfterS: 60, stopLostPct: 75, resumeAfterS: 60, maxWaitMin: 120, skyCheck: true, skyFilter: "L", skyExposureS: 60, skyMinStars: 50, skySamples: 3 }}
+          skyMonitor={data.data.context.settings.skyMonitor ?? { enabled: false, windowS: 60, lostPct: 75, dimPct: 50, clearAfterS: 120, giveUpMin: 120 }}
           conn={live?.ok ? liveConn(live.data) : null}
           ingest={ingest?.ok ? ingest.data : null}
         />
@@ -99,5 +99,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 }
 
 function liveConn(s: LiveState): LiveConn {
-  return { nina: s.nina.connected, ninaError: s.nina.error, phd2: s.phd2.connected, phd2Error: s.phd2.error, simulated: s.simulated, key: s.advisor.key };
+  return {
+    nina: s.nina.connected,
+    ninaError: s.nina.error,
+    phd2: s.phd2.connected,
+    phd2Error: s.phd2.error,
+    simulated: s.simulated,
+    key: s.advisor.key,
+    sky: s.sky ? { server: s.sky.server, ninaRead: s.sky.polled ? ago(s.sky.polled.t, s.serverTime) : "" } : null,
+  };
 }

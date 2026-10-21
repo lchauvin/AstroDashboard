@@ -192,11 +192,12 @@ def register(app: FastAPI, state) -> None:
             raise HTTPException(409, detail=str(exc)) from exc
         return {"started": True}
 
-    @app.post("/api/live/guard/cancel")
-    def guard_cancel() -> dict[str, Any]:
-        if obs.guard.paused_at is None:
-            raise HTTPException(409, detail="The guard has nothing to resume")
-        obs.guard.forget("Resume cancelled by you: the sequence stays stopped.")
+    @app.post("/api/live/sky/clear")
+    def sky_clear() -> dict[str, Any]:
+        """Tell NINA the sky is clear until the next guiding run (you know better: it is a building, or it is fine)."""
+        if obs.sky.safe:
+            raise HTTPException(409, detail="The sky monitor already says clear")
+        obs.sky.clear_now()
         return {"ok": True}
 
     @app.post("/api/live/advisor/suggestions/{sid}/apply")

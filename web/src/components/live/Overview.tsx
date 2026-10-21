@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Bot, Lightbulb } from "lucide-react";
 
-import { clock, duration, enginePost, filterLetterOf, fmt, type DeviceCard, type Frame, type IngestStatus, type LiveState, type SeqStep } from "@/lib/live";
+import { ago, clock, duration, enginePost, filterLetterOf, fmt, type DeviceCard, type Frame, type IngestStatus, type LiveState, type SeqStep, type SkyState } from "@/lib/live";
 import { FilterChip, Marks, StatusIcon, Tip } from "../ui";
 import { LiveBar, NotConnected } from "./LiveBar";
 import styles from "./live.module.css";
@@ -155,20 +155,20 @@ function SequenceCard({ s, adv, refresh }: { s: LiveState; adv: boolean; refresh
       ) : (
         <p className={styles.hint}>Waiting for NINA.</p>
       )}
-      {s.guard ? <GuardToggle g={s.guard} refresh={refresh} /> : null}
+      {s.sky ? <SkyToggle k={s.sky} now={s.serverTime} refresh={refresh} /> : null}
     </section>
   );
 }
 
-/** The sequence guard's on/off; its timings are in Settings → Live · Ingest, its state on the Live bar. */
-function GuardToggle({ g, refresh }: { g: NonNullable<LiveState["guard"]>; refresh: () => Promise<unknown> }) {
+/** The sky monitor's on/off and whether NINA reads it; its thresholds are in Settings → Live · Ingest, its state on the Live bar. */
+function SkyToggle({ k, now, refresh }: { k: SkyState; now: number; refresh: () => Promise<unknown> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const toggle = async (enabled: boolean) => {
     setBusy(true);
     setError(null);
     try {
-      await enginePost("/api/settings", { guard: { enabled } }, "PUT");
+      await enginePost("/api/settings", { skyMonitor: { enabled } }, "PUT");
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -177,19 +177,28 @@ function GuardToggle({ g, refresh }: { g: NonNullable<LiveState["guard"]>; refre
     }
   };
   return (
-    <div className={styles.guardToggle}>
-      <Tip tip="Stops the NINA sequence when the guide star has been lost (clouds) most of the time for a while, even if PHD2 keeps finding it again between clouds, and starts it again once PHD2 has guided steadily. NINA's pre-sequence checklist is skipped on resume. A meridian flip, autofocus or centering never counts.">
+    <div className={styles.skyToggle}>
+      <Tip tip="NINA reads the dashboard as its safety monitor: unsafe while PHD2's guide star is lost or dimmed by cloud, safe again once PHD2 has guided steadily with the star back at full brightness. The dashboard never stops or starts the sequence; a Loop While Safe and a Loop While Unsafe in it do (steps in Settings). A guiding stop (flip, autofocus, slew) and a building below the site's horizon profile never count.">
         <label className={styles.switch}>
-          <input type="checkbox" checked={g.enabled} disabled={busy} onChange={(e) => void toggle(e.target.checked)} />
-          <span>Pause when guiding is lost</span>
+          <input type="checkbox" checked={k.enabled} disabled={busy} onChange={(e) => void toggle(e.target.checked)} />
+          <span>Tell NINA when it is cloudy</span>
         </label>
       </Tip>
       <span className={styles.hint}>
-        stop at {g.stopLostPct}% lost over {g.stopAfterS} s · resume after {g.resumeAfterS} s steady{g.skyCheck ? ` and ${g.skySamples} clear test frames` : ""} · <Link href="/settings?tab=live">timings</Link>
+        unsafe at {k.lostPct}% lost or under {k.dimPct}% brightness over {k.windowS} s · clear after {k.clearAfterS} s steady · {ninaLink(k, now)} ·{" "}
+        <Link href="/settings?tab=live">settings</Link>
       </span>
       {error ? <span className={styles.error}>{error}</span> : null}
     </div>
   );
+}
+
+/** Whether NINA reads the sky monitor: its Alpaca server, and NINA's last IsSafe question. */
+function ninaLink(k: Pick<SkyState, "server" | "polled">, now: number): string {
+  if (k.server.error) return `not served to NINA: ${k.server.error}`;
+  if (!k.server.running) return "not served to NINA";
+  if (k.polled && now - k.polled.t < 30) return `NINA reads it (${ago(k.polled.t, now)})`;
+  return k.polled ? `NINA last read it ${ago(k.polled.t, now)}` : "NINA has not connected to it";
 }
 
 function Progress({ label, done, total, text }: { label: string; done: number; total: number; text: string }) {

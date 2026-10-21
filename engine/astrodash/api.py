@@ -131,9 +131,18 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
             sim_tasks.append(asyncio.create_task(sim_router.emit()))
             state.observatory._nina_override = f"http://127.0.0.1:{cfg.port}/fake-nina"
             state.observatory._phd2_override = ("127.0.0.1", port)
+            sim.safe = lambda: state.observatory.sky.safe
+        alpaca = None
         if run_observatory or fake_observatory:
             await state.observatory.start()
+            if cfg.alpaca_port:
+                from .observatory.alpaca import AlpacaServer
+
+                alpaca = AlpacaServer(state.observatory.sky, cfg.alpaca_host, cfg.alpaca_port, cfg.alpaca_discovery)
+                alpaca.start()
         yield
+        if alpaca is not None:
+            await asyncio.to_thread(alpaca.stop)
         if run_observatory or fake_observatory:
             await state.observatory.stop()
         for t in sim_tasks:

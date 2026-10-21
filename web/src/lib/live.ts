@@ -1,6 +1,6 @@
 /** Live payloads: the engine's own NINA + PHD2 connection (PLAN §5.3), and auto-ingest. */
 
-import type { GuardSettings } from "./planning/types";
+import type { SkyMonitorSettings } from "./planning/types";
 import type { Level } from "./types";
 export type { Level };
 
@@ -62,20 +62,32 @@ export type GuideGraph = {
   events: { t: number; label: string }[];
 };
 
-/** The sequence guard (engine `guard.py`): stops the NINA sequence while the guide star is lost most of the time, resumes it after steady guiding. */
-export type GuardState = GuardSettings & {
-  state: "off" | "watching" | "lost" | "paused";
-  error: string | null;
-  pausedAt: number | null;
-  /** How long the star was lost within the last `stopAfterS`, and that as a share. */
+/** The sky monitor (engine `sky.py`): what NINA's safety monitor says, from PHD2's guide star. The dashboard sends NINA nothing. */
+export type SkyState = SkyMonitorSettings & {
+  state: "off" | "idle" | "watching" | "cloudy" | "obstructed" | "gaveUp";
+  safe: boolean;
+  /** Why it is unsafe. */
+  reason: string | null;
+  cloudySince: number | null;
+  /** What the mount points at when below the site's horizon profile. */
+  obstructed: string | null;
+  /** How long the star was lost within the last `windowS`, and that as a share (`lostPct` is the threshold). */
   lostS: number;
-  lostPct: number;
+  lostSharePct: number;
+  /** The star's median brightness over the window, % of its clear-sky brightness (null until that is known). */
+  brightnessPct: number | null;
+  baselineKnown: boolean;
+  /** The brightness, %, the star must be back at before the sky counts as clear. */
+  clearNeedPct: number;
   steadyForS: number | null;
   giveUpAt: number | null;
-  /** The sky check of the current pause (null when not paused). */
-  sky: { active: boolean; filter: string | null; error: string | null; clear: boolean; valid: number; samples: { t: number; stars: number; hfr: number | null }[] } | null;
+  /** NINA's last IsSafe question. */
+  polled: { t: number; client: string | null } | null;
+  /** The Alpaca server NINA connects to. */
+  server: SkyServer;
   log: { t: number; message: string }[];
 };
+export type SkyServer = { running: boolean; port: number | null; error: string | null; discovery: boolean };
 
 /** Polar alignment read from PHD2's Dec corrections (engine `polar.py`). Rates are the pointing's Dec drift, ″/min, + = north. */
 export type PolarFit =
@@ -181,8 +193,8 @@ export type LiveState = {
   paramInfo: Record<string, { label: string; help: string; basic: boolean }>;
   /** Absent from engines older than the polar-alignment estimate. */
   polar?: Polar;
-  /** Absent from engines older than the sequence guard. */
-  guard?: GuardState;
+  /** Absent from engines older than the sky monitor. */
+  sky?: SkyState;
 };
 
 // ---------------------------------------------------------------- auto-ingest

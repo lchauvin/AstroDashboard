@@ -105,6 +105,14 @@ def test_sites_goals_settings_api(data_root, tmp_path):
         client.put("/api/notify/state", json={"date": "2026-10-18", "sent": True, "level": "excellent"})
         assert client.get("/api/notify/state").json()["state"]["sent"] is True
 
+        # The sky monitor: partial updates keep the defaults; the old sequence guard's settings are retired.
+        sky = client.put("/api/settings", json={"skyMonitor": {"enabled": True, "dimPct": 40}}).json()["settings"]["skyMonitor"]
+        assert sky == {"enabled": True, "windowS": 60, "lostPct": 75, "dimPct": 40, "clearAfterS": 120, "giveUpMin": 120}
+        assert client.put("/api/settings", json={"skyMonitor": {"dimPct": 95}}).status_code == 422
+        assert client.put("/api/settings", json={"skyMonitor": {"enabled": "yes"}}).status_code == 422
+        assert client.put("/api/settings", json={"skyMonitor": {"skyCheck": True}}).status_code == 422
+        assert client.put("/api/settings", json={"guard": {"enabled": True}}).status_code == 422
+
 
 def test_pointing_wraps_ra_through_zero():
     from astrodash.library import _pointing

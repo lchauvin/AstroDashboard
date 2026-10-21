@@ -1,4 +1,4 @@
-"""`uv run astrodash-engine [--port 3007] [--data-root G:/Astro] [--fake-observatory]`"""
+"""`uv run astrodash-engine [--port 3007] [--alpaca-port 3008] [--data-root G:/Astro] [--fake-observatory]`"""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="AstroDashboard engine")
     parser.add_argument("--host", help="bind address (default 127.0.0.1)")
     parser.add_argument("--port", type=int, help="port (default 3007)")
+    parser.add_argument("--alpaca-port", type=int, help="the sky monitor's Alpaca port for NINA (default 3008, 0 = off)")
     parser.add_argument("--data-root", type=Path, help="astro data root (default G:/Astro)")
     parser.add_argument("--config", type=Path, help="astrodashboard.toml path")
     parser.add_argument("--no-scan", action="store_true", help="do not scan on startup")
@@ -28,6 +29,8 @@ def main() -> None:
         cfg.host = args.host
     if args.port:
         cfg.port = args.port
+    if args.alpaca_port is not None:
+        cfg.alpaca_port = args.alpaca_port
     if args.data_root:
         cfg.data_root = args.data_root
 

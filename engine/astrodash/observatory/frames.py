@@ -76,7 +76,7 @@ def flag(frames: list[dict]) -> list[dict]:
 
 def tonight(history: list[dict], hours: float = 14) -> list[dict]:
     """NINA image history (oldest first, position = image index) → tonight's records, newest first."""
-    # A snapshot without a file is a test frame (the sequence guard's sky check), not part of the night.
+    # A snapshot without a file (the Imaging panel with Save off) is not part of the night.
     recs = [frame_record(r, i) for i, r in enumerate(history)
             if isinstance(r, dict) and not (str(r.get("ImageType") or "").upper() == "SNAPSHOT" and not r.get("Filename"))]
     cutoff = time.time() - hours * 3600
