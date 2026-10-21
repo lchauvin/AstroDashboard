@@ -115,6 +115,28 @@ def test_diagnostics_jobs_api(data_root, tmp_path):
     assert all(Path(c).name.startswith("NIGHT_") for c in calls)
 
 
+def test_diagnostics_run_brings_the_library_up_to_date(data_root, tmp_path):
+    def fake_runner(session_dir, data_root_, astro_eval_path, site=None, workers=None, progress=None):
+        return {"lights": [], "flats": [], "calibration": {"rows": []}, "errors": []}
+
+    cfg = Config(data_root=data_root, db_path=tmp_path / "var" / "fresh.db")
+    app = create_app(cfg, scan_on_start=False, diagnostics_runner=fake_runner)
+    rev, night = "ic-1848-soul-nebula", "NIGHT_2026-02-01"
+    with TestClient(app) as client:
+        app.state.engine._run_scan()
+        flat_status = lambda: next(s for s in client.get(f"/api/revisions/{rev}").json()["sessions"]  # noqa: E731
+                                   if s["folder"] == night)["flatStatus"]["H"]["status"]
+        assert flat_status() == "ok"
+        # The user removes the night's flats on disk, then reruns its diagnostic.
+        (data_root / "IC 1848 (Soul Nebula)" / ".SessionData" / night / "FLAT" / "H" / "f0.fits").unlink()
+        client.post("/api/diagnostics/run", json={"revisionId": rev, "session": night})
+        for _ in range(200):
+            if all(j["status"] == "done" for j in client.get("/api/diagnostics").json()["jobs"]):
+                break
+            time.sleep(0.05)
+        assert flat_status() == "missing"
+
+
 def test_preview_refuses_paths_outside_data_root(data_root, tmp_path):
     cfg = Config(data_root=data_root, db_path=tmp_path / "var" / "p.db")
     with TestClient(create_app(cfg, scan_on_start=False)) as client:

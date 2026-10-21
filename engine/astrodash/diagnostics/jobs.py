@@ -38,11 +38,12 @@ def summarize(result: dict[str, Any]) -> dict[str, Any]:
 
 class DiagnosticsJobs:
     def __init__(self, cfg: Config, cache: HeaderCache, resolve: Callable[[str, str], dict[str, Any] | None],
-                 runner: Callable[..., dict[str, Any]] = run_session):
+                 runner: Callable[..., dict[str, Any]] = run_session, after: Callable[[], None] | None = None):
         self.cfg = cfg
         self.cache = cache
         self.resolve = resolve          # (revision id, session folder) -> library session dict
         self.runner = runner
+        self.after = after              # run once a result is saved, before the job reads as done
         self._ids = itertools.count(1)
         self._queue: deque[dict[str, Any]] = deque()
         self._jobs: dict[int, dict[str, Any]] = {}
@@ -100,3 +101,8 @@ class DiagnosticsJobs:
             site=site, workers=self.cfg.diagnostics_workers or None, progress=progress,
         )
         self.cache.save_diagnostic(job["revisionId"], job["session"], time.time() - t0, summarize(result), result)
+        if self.after:
+            # astro-eval read the folder as it is now; bring the Library up to date with it too
+            # (frames removed or moved since the last scan), so target pages agree with the diagnostic.
+            progress("updating library", 0, 0)
+            self.after()

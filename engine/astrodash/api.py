@@ -50,7 +50,7 @@ class EngineState:
         self._lock = threading.Lock()
         self.loop = None  # the server's event loop (set in lifespan), for sync handlers that touch the observatory
         resolve =lambda rev, sess: self.library.session(rev, sess) if self.library else None  # noqa: E731
-        self.jobs = DiagnosticsJobs(cfg, self.cache, resolve, **({"runner": runner} if runner else {}))
+        self.jobs = DiagnosticsJobs(cfg, self.cache, resolve, after=self.rescan, **({"runner": runner} if runner else {}))
 
     def start_scan(self) -> bool:
         with self._lock:
@@ -59,6 +59,18 @@ class EngineState:
             self._scan_thread = threading.Thread(target=self._run_scan, name="scan", daemon=True)
             self._scan_thread.start()
             return True
+
+    def rescan(self) -> None:
+        """Scan now and wait for it. A scan already running may have walked the disk before the
+        latest change, so wait it out and scan again."""
+        while True:
+            with self._lock:
+                running = self._scan_thread if self._scan_thread and self._scan_thread.is_alive() else None
+            if running is None and self.start_scan():
+                self._scan_thread.join()
+                return
+            if running is not None:
+                running.join()
 
     def _run_scan(self) -> None:
         try:
