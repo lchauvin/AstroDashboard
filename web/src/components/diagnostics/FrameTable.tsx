@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 import type { LightFrame, LightGroupResult } from "@/lib/diagnostics";
-import { FLAG_LABELS, filterLetter, reasonLabel } from "@/lib/diagnostics";
+import { FLAG_LABELS, filterLetter, overrideNote, reasonLabel } from "@/lib/diagnostics";
 import { num } from "@/lib/format";
 import { FilterChip, StatusIcon } from "../ui";
 import styles from "./Diagnostics.module.css";
@@ -30,12 +30,18 @@ export function FrameTable({
   onSelect,
   flags = {},
   panelOf,
+  onDecide,
+  deciding,
 }: {
   groups: LightGroupResult[];
   onSelect: (frames: LightFrame[], index: number) => void;
   flags?: Record<string, string[]>;
   /** Mosaics: the panel label of a frame path (adds a Panel column). */
   panelOf?: (path: string) => string | undefined;
+  /** Keep or reject a frame by hand (adds a button to every row). */
+  onDecide?: (frame: LightFrame, reject: boolean) => void;
+  /** Path of the frame whose decision is being saved. */
+  deciding?: string | null;
 }) {
   const [tab, setTab] = useState<string>("all");
   const [sort, setSort] = useState<{ key: Col["key"]; dir: 1 | -1 }>({ key: "time", dir: 1 });
@@ -88,6 +94,7 @@ export function FrameTable({
               {panelOf ? <th>Panel</th> : null}
               <th>Filter</th>
               <th>Status</th>
+              {onDecide ? <th aria-label="Keep or reject" /> : null}
               <th>Findings</th>
               {COLS.map((c) => (
                 <th
@@ -119,10 +126,30 @@ export function FrameTable({
                   ) : (
                     <span style={{ display: "inline-flex", gap: 6 }}>
                       <StatusIcon level="ok" size={13} label="Kept" />
-                      {f.n_trails ? <span className={styles.reasonList}>{f.trail_type} trail</span> : null}
+                      {f.override ? (
+                        <span className={styles.reasonList}>{overrideNote(f)}</span>
+                      ) : f.n_trails ? (
+                        <span className={styles.reasonList}>{f.trail_type} trail</span>
+                      ) : null}
                     </span>
                   )}
                 </td>
+                {onDecide ? (
+                  <td>
+                    <button
+                      type="button"
+                      className={styles.decide}
+                      disabled={deciding === f.path}
+                      title={f.rejected ? "Keep this frame anyway" : "Reject this frame"}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDecide(f, !f.rejected);
+                      }}
+                    >
+                      {f.rejected ? "Keep" : "Reject"}
+                    </button>
+                  </td>
+                ) : null}
                 <td>
                   <span className={styles.flagBadges}>
                     {(flags[f.path] ?? []).map((code) => (

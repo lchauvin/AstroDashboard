@@ -20,6 +20,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
+from .diagnostics import overrides
 from .frames import Frame, parse_time
 
 EARTH_RADIUS_KM = 6371.0
@@ -318,7 +319,7 @@ def sky_samples(cache, library, cfg, per_session: int = 12) -> dict[str, Any]:
         if not stored or not session or not rev or not session.get("site"):
             continue
         used = False
-        for group in stored["result"].get("lights", []):
+        for group in overrides.apply(stored["result"]).get("lights", []):
             kept = [fr for fr in group.get("frames", []) if not fr.get("rejected")]
             step = max(1, len(kept) // per_session)
             for fr in kept[::step][:per_session]:

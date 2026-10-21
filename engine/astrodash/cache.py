@@ -147,6 +147,14 @@ class HeaderCache:
                 (revision, session, time.time(), duration, json.dumps(summary), json.dumps(result)),
             )
 
+    def update_diagnostic(self, revision: str, session: str, summary: dict, result: dict) -> bool:
+        """Rewrite a stored result in place (the user's own decisions), keeping when it was analysed."""
+        with self._lock, self._conn:
+            return self._conn.execute(
+                "UPDATE diagnostics SET summary = ?, result = ? WHERE revision = ? AND session = ?",
+                (json.dumps(summary), json.dumps(result), revision, session),
+            ).rowcount > 0
+
     def diagnostic_summaries(self) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute("SELECT revision, session, finished, duration, summary FROM diagnostics").fetchall()

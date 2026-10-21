@@ -135,6 +135,27 @@ export interface LightFrame {
   reasons: string[];
   warnings: string[];
   sunAlt: number | null;
+  /** Set when the user overruled astro-eval; its own verdict is then in autoRejected / autoReasons. */
+  override?: "keep" | "reject";
+  autoRejected?: boolean;
+  autoReasons?: string[];
+}
+
+/** What a frame's keep / reject button sends: null hands the frame back to astro-eval's verdict. */
+export type FrameDecision = "keep" | "reject" | null;
+
+/** astro-eval's own verdict, whatever the user decided. */
+export const autoRejected = (f: LightFrame) => (f.override ? Boolean(f.autoRejected) : f.rejected);
+
+/** The decision that leaves `f` rejected (or kept); no override when astro-eval already agrees. */
+export const decisionFor = (f: LightFrame, reject: boolean): FrameDecision =>
+  reject === autoRejected(f) ? null : reject ? "reject" : "keep";
+
+/** "by hand", plus what astro-eval had said when it rejected the frame. */
+export function overrideNote(f: LightFrame): string | null {
+  if (!f.override) return null;
+  const auto = (f.autoReasons ?? []).map(reasonLabel).join(", ");
+  return f.override === "keep" && auto ? `by hand · astro-eval: ${auto}` : "by hand";
 }
 
 export interface FlatFrame {
@@ -231,6 +252,7 @@ export const REASON_LABELS: Record<string, string> = {
   satellite_trail: "Satellite trail",
   low_score: "Low score",
   odd_settings: "Different settings",
+  manual: "By hand",
 };
 
 export function reasonLabel(r: string): string {

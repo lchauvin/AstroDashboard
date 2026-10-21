@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Play, RotateCw } from "lucide-react";
 
 import type { DiagDetail, DiagJob, LightFrame, LightGroupResult } from "@/lib/diagnostics";
-import { FLAG_LABELS, filterLetter, reasonLabel } from "@/lib/diagnostics";
+import { FLAG_LABELS, decisionFor, filterLetter, overrideNote, reasonLabel } from "@/lib/diagnostics";
 import { hours, num, relativeTime } from "@/lib/format";
 import { FilterChip, Marks, StatusIcon } from "../ui";
 import { Calibration, flatLevel } from "./Calibration";
@@ -39,13 +39,18 @@ export function SessionDiagnostics({
 }) {
   const router = useRouter();
   const [job, setJob] = useState<DiagJob | null>(detail.job);
-  const [selected, setSelected] = useState<{ list: { path: string; file: string; caption: string }[]; index: number } | null>(null);
+  const [selected, setSelected] = useState<{ paths: string[]; index: number } | null>(null);
+  // The night as last saved: keep / reject decisions replace it without a page reload.
+  const [current, setCurrent] = useState(detail);
+  const [deciding, setDeciding] = useState<string | null>(null);
+  const [decideError, setDecideError] = useState<string | null>(null);
   const [section, setSection] = useState<Section>(SECTIONS.some((s) => s.id === initialSection) ? (initialSection as Section) : "summary");
   const [panelId, setPanelId] = useState<string | null>(initialPanel ?? null);
   const active = job && (job.status === "queued" || job.status === "running");
   const url = `/engine/api/diagnostics/${detail.revision.id}/${encodeURIComponent(detail.session.folder)}`;
 
   useEffect(() => setJob(detail.job), [detail.job]);
+  useEffect(() => setCurrent(detail), [detail]);
   useEffect(() => {
     if (!active) return;
     const t = setTimeout(async () => {
@@ -79,13 +84,13 @@ export function SessionDiagnostics({
     const params = new URLSearchParams(window.location.search);
     params.delete("run");
     router.replace(`${window.location.pathname}${params.size ? `?${params}` : ""}`, { scroll: false });
-    if (!detail.stored && !(job && ["queued", "running"].includes(job.status))) void run();
+    if (!current.stored && !(job && ["queued", "running"].includes(job.status))) void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRun]);
 
-  const stored = detail.stored;
+  const stored = current.stored;
   const r = stored?.result;
-  const analysis = detail.analysis;
+  const analysis = current.analysis;
   const flags = useMemo(() => analysis?.flags ?? {}, [analysis]);
   const allLights = useMemo(() => r?.lights ?? [], [r]);
 
@@ -123,7 +128,7 @@ export function SessionDiagnostics({
     return [
       panels.length ? panelOfPath.get(f.path) : "",
       f.filter_name ?? "",
-      f.rejected ? "rejected: " + f.reasons.map(reasonLabel).join(", ") : "kept",
+      f.rejected ? "rejected: " + f.reasons.map(reasonLabel).join(", ") : f.override ? `kept ${overrideNote(f)}` : "kept",
       `FWHM ${num(f.fwhm_median, 2)}″`,
       `${num(f.n_stars)} stars`,
       `score ${num(f.score, 2)}`,
@@ -132,8 +137,35 @@ export function SessionDiagnostics({
       .filter(Boolean)
       .join(" · ");
   };
-  const openFrames = (frames: LightFrame[], index: number) =>
-    setSelected({ list: frames.map((f) => ({ path: f.path, file: f.file, caption: caption(f) })), index });
+  const frameByPath = useMemo(() => new Map(allLights.flatMap((g) => g.frames.map((f) => [f.path, f] as const))), [allLights]);
+  const openFrames = (frames: LightFrame[], index: number) => setSelected({ paths: frames.map((f) => f.path), index });
+  const previewItems = (selected?.paths ?? [])
+    .map((p) => frameByPath.get(p))
+    .filter((f): f is LightFrame => Boolean(f))
+    .map((f) => ({ path: f.path, file: f.file, caption: caption(f), rejected: f.rejected }));
+
+  async function decide(f: LightFrame, reject: boolean) {
+    if (deciding || f.rejected === reject) return;
+    setDeciding(f.path);
+    setDecideError(null);
+    try {
+      const res = await fetch(`${url}/frames`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: f.path, decision: decisionFor(f, reject) }),
+      });
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { detail?: string } | null)?.detail ?? res.statusText);
+      setCurrent((await res.json()) as DiagDetail);
+    } catch (e) {
+      setDecideError(`${f.file}: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDeciding(null);
+    }
+  }
+  const decidePath = (path: string, reject: boolean) => {
+    const f = frameByPath.get(path);
+    if (f) void decide(f, reject);
+  };
   const openPaths = (paths: string[]) => {
     const wanted = new Set(paths);
     const frames = allLights
@@ -166,6 +198,11 @@ export function SessionDiagnostics({
         {job?.status === "failed" ? (
           <span>
             <StatusIcon level="bad" /> Last run failed: {job.error}
+          </span>
+        ) : null}
+        {decideError ? (
+          <span>
+            <StatusIcon level="bad" /> Could not save the decision — {decideError}
           </span>
         ) : null}
         {stored ? (
@@ -285,6 +322,8 @@ export function SessionDiagnostics({
                 onSelect={openFrames}
                 flags={flags}
                 panelOf={panels.length && !panel ? (p) => panelOfPath.get(p) : undefined}
+                onDecide={decide}
+                deciding={deciding}
               />
             </section>
           ) : null}
@@ -293,7 +332,15 @@ export function SessionDiagnostics({
         </>
       )}
 
-      {selected ? <PreviewModal items={selected.list} index={selected.index} onClose={() => setSelected(null)} /> : null}
+      {selected && previewItems.length ? (
+        <PreviewModal
+          items={previewItems}
+          index={selected.index}
+          onClose={() => setSelected(null)}
+          onDecide={decidePath}
+          deciding={deciding}
+        />
+      ) : null}
     </>
   );
 }

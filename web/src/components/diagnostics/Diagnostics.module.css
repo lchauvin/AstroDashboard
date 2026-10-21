@@ -279,6 +279,33 @@
   color: var(--text-muted);
 }
 
+.decide {
+  height: 22px;
+  padding: 0 8px;
+  font: 400 9.5px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border: 1px solid var(--color-divider);
+  opacity: 0.6;
+  transition: opacity var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.frameTable tr:hover .decide,
+.decide:focus-visible {
+  opacity: 1;
+}
+
+.decide:hover {
+  color: var(--color-accent-700);
+  border-color: var(--color-accent);
+}
+
+.decide:disabled {
+  cursor: progress;
+  opacity: 0.4;
+}
+
 .reasonList {
   white-space: normal;
   font-size: 12px;

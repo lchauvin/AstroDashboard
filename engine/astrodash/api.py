@@ -6,7 +6,7 @@ import logging
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -16,7 +16,8 @@ from . import __version__, api_live, api_organizer, api_planning, api_telescopiu
 from .cache import HeaderCache
 from .config import Config
 from .diagnostics.detectors import analyse as analyse_frames, horizon_samples, learn_horizon
-from .diagnostics.jobs import DiagnosticsJobs
+from .diagnostics import overrides
+from .diagnostics.jobs import DiagnosticsJobs, summarize as summarize_diagnostic
 from .library import Library
 from .preview import preview as frame_preview
 from .scanner import Scanner
@@ -30,6 +31,12 @@ class Dismissal(BaseModel):
     key: str = Field(min_length=1, max_length=500)
     label: str | None = Field(default=None, max_length=500)
     note: str | None = Field(default=None, max_length=1000)
+
+
+class FrameDecision(BaseModel):
+    path: str = Field(min_length=1, max_length=1000)
+    # "keep" / "reject" overrule astro-eval for this frame; null goes back to its verdict.
+    decision: Literal["keep", "reject"] | None = None
 
 
 class DiagnosticsRequest(BaseModel):
@@ -217,7 +224,7 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
 
     def _analysis(rev_id: str, session: str, result: dict[str, Any]) -> dict[str, Any]:
         lib = state.require_library()
-        return analyse_frames(result, lib.light_headers, _site(rev_id, session))
+        return analyse_frames(overrides.apply(result), lib.light_headers, _site(rev_id, session))
 
     @app.get("/api/diagnostics")
     def diagnostics() -> dict[str, Any]:
@@ -241,7 +248,7 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
         for row in state.cache.diagnostic_summaries():
             stored = state.cache.diagnostic(row["revisionId"], row["session"])
             if stored:
-                s = horizon_samples(stored["result"], lib.light_headers, _site(row["revisionId"], row["session"]))
+                s = horizon_samples(overrides.apply(stored["result"]), lib.light_headers, _site(row["revisionId"], row["session"]))
                 samples += s
                 nights += bool(s)
         return {
@@ -304,9 +311,27 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
             "session": {k: sess[k] for k in ("folder", "date", "path", "totals", "conditions", "start", "end")},
             "sessions": [s["folder"] for s in rev["sessions"] if s["totals"]["lights"]],
             "job": jobs[-1] if jobs else None,
-            "stored": {**stored, "result": _user_rules(rev, stored["result"])} if stored else None,
+            "stored": {**stored, "result": _user_rules(rev, overrides.apply(stored["result"]))} if stored else None,
             "analysis": _analysis(rev_id, session, stored["result"]) if stored else None,
         }
+
+    @app.post("/api/diagnostics/{rev_id}/{session}/frames")
+    def decide_frame(rev_id: str, session: str, body: FrameDecision) -> dict[str, Any]:
+        """Keep or reject one light by hand, over astro-eval's verdict (survives re-runs)."""
+        stored = state.cache.diagnostic(rev_id, session)
+        if stored is None:
+            raise HTTPException(404, detail="This night has not been analysed")
+        result = stored["result"]
+        if body.path not in overrides.light_paths(result):
+            raise HTTPException(404, detail="No such frame in this analysis")
+        decided = dict(result.get("overrides") or {})
+        if body.decision is None:
+            decided.pop(body.path, None)
+        else:
+            decided[body.path] = body.decision
+        result["overrides"] = decided
+        state.cache.update_diagnostic(rev_id, session, summarize_diagnostic(overrides.apply(result)), result)
+        return diagnostic(rev_id, session)
 
     @app.get("/api/frames/preview.jpg")
     def preview(path: str):

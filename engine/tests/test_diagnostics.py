@@ -206,3 +206,56 @@ def test_hdr_flat_notes_hidden_on_finished_targets(data_root, tmp_path):
         assert finished["flats"][0]["summary"]["verdict"] == "good"
         acquiring = client.get("/api/diagnostics/ic-1848-soul-nebula/NIGHT_2026-02-01").json()["stored"]["result"]
         assert acquiring["calibration"]["rows"][0]["issues"] == [note]      # still reported where it matters
+
+
+def test_frames_kept_or_rejected_by_hand(data_root, tmp_path):
+    def row(name, rejected, reasons):
+        return {"file": name, "path": f"IC 1848 (Soul Nebula)/{name}", "obs_time": None, "exptime": 300,
+                "fwhm_median": 3.0, "score": 0.9, "rejected": rejected, "reasons": reasons}
+
+    def fake_runner(session_dir, data_root_, astro_eval_path, site=None, workers=None, progress=None):
+        frames = [row("a.fits", False, []), row("b.fits", True, ["partial_obstruction"]), row("c.fits", False, [])]
+        return {"lights": [{"key": "H", "filter": "H", "target": "IC 1848",
+                            "summary": {"frames": 3, "kept": 2, "rejected": 1, "keptSeconds": 600, "median": {"fwhm_median": 3.0}},
+                            "frames": frames}],
+                "flats": [], "calibration": {"rows": []}, "errors": []}
+
+    def run(client):
+        client.post("/api/diagnostics/run", json={"revisionId": rev, "session": night})
+        for _ in range(100):
+            if all(j["status"] == "done" for j in client.get("/api/diagnostics").json()["jobs"]):
+                break
+            time.sleep(0.05)
+
+    cfg = Config(data_root=data_root, db_path=tmp_path / "var" / "decide.db")
+    app = create_app(cfg, scan_on_start=False, diagnostics_runner=fake_runner)
+    rev, night = "ic-1848-soul-nebula", "NIGHT_2026-02-01"
+    url = f"/api/diagnostics/{rev}/{night}"
+    with TestClient(app) as client:
+        app.state.engine._run_scan()
+        assert client.post(f"{url}/frames", json={"path": "x", "decision": "keep"}).status_code == 404
+        run(client)
+        assert client.post(f"{url}/frames", json={"path": "nope.fits", "decision": "keep"}).status_code == 404
+        assert client.post(f"{url}/frames", json={"path": "x", "decision": "maybe"}).status_code == 422
+
+        b = "IC 1848 (Soul Nebula)/b.fits"
+        detail = client.post(f"{url}/frames", json={"path": b, "decision": "keep"}).json()
+        group = detail["stored"]["result"]["lights"][0]
+        fb = next(f for f in group["frames"] if f["path"] == b)
+        assert (fb["rejected"], fb["override"], fb["autoRejected"], fb["autoReasons"]) == (
+            False, "keep", True, ["partial_obstruction"])
+        assert group["summary"]["kept"] == 3 and group["summary"]["keptSeconds"] == 900
+        summary = lambda: next(r for r in client.get("/api/diagnostics").json()["results"]  # noqa: E731
+                               if r["session"] == night)["summary"]["lights"][0]
+        assert summary()["kept"] == 3
+
+        a = "IC 1848 (Soul Nebula)/a.fits"
+        client.post(f"{url}/frames", json={"path": a, "decision": "reject"})
+        run(client)                                     # a re-run keeps both decisions
+        frames = {f["path"]: f for f in client.get(url).json()["stored"]["result"]["lights"][0]["frames"]}
+        assert frames[a]["rejected"] and frames[a]["reasons"] == ["manual"] and not frames[b]["rejected"]
+        assert summary()["kept"] == 2
+
+        client.post(f"{url}/frames", json={"path": b, "decision": None})     # back to astro-eval's verdict
+        frames = {f["path"]: f for f in client.get(url).json()["stored"]["result"]["lights"][0]["frames"]}
+        assert frames[b]["rejected"] and "override" not in frames[b]

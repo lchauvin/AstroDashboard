@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from ..cache import HeaderCache
 from ..config import Config
+from . import overrides
 from .runner import run_session
 
 log = logging.getLogger(__name__)
@@ -100,7 +101,10 @@ class DiagnosticsJobs:
             Path(session["path"]), self.cfg.data_root, self.cfg.astro_eval_path,
             site=site, workers=self.cfg.diagnostics_workers or None, progress=progress,
         )
-        self.cache.save_diagnostic(job["revisionId"], job["session"], time.time() - t0, summarize(result), result)
+        previous = self.cache.diagnostic(job["revisionId"], job["session"])
+        overrides.carry_over(previous["result"] if previous else None, result)
+        self.cache.save_diagnostic(job["revisionId"], job["session"], time.time() - t0,
+                                   summarize(overrides.apply(result)), result)
         if self.after:
             # astro-eval read the folder as it is now; bring the Library up to date with it too
             # (frames removed or moved since the last scan), so target pages agree with the diagnostic.

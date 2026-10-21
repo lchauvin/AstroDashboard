@@ -1,19 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { Ban, Check, ChevronLeft, ChevronRight, X } from "lucide-react";
 
 import styles from "./Diagnostics.module.css";
 
-/** Stretched frame preview with ← / → stepping and Esc to close. */
+/** Stretched frame preview with ← / → stepping and Esc to close; K / R keep or reject when `onDecide` is given. */
 export function PreviewModal({
   items,
   index: start,
   onClose,
+  onDecide,
+  deciding,
 }: {
-  items: { path: string; file: string; caption: string }[];
+  items: { path: string; file: string; caption: string; rejected?: boolean }[];
   index: number;
   onClose: () => void;
+  onDecide?: (path: string, reject: boolean) => void;
+  deciding?: string | null;
 }) {
   const [index, setIndex] = useState(start);
   const [loaded, setLoaded] = useState<string | null>(null);
@@ -24,10 +28,14 @@ export function PreviewModal({
       if (e.key === "Escape") onClose();
       if (e.key === "ArrowRight") setIndex((i) => Math.min(items.length - 1, i + 1));
       if (e.key === "ArrowLeft") setIndex((i) => Math.max(0, i - 1));
+      if (onDecide && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const key = e.key.toLowerCase();
+        if (key === "k" || key === "r") onDecide(items[index].path, key === "r");
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [items.length, onClose]);
+  }, [items, index, onClose, onDecide]);
 
   const src = `/engine/api/frames/preview.jpg?path=${encodeURIComponent(item.path)}`;
   return (
@@ -62,6 +70,18 @@ export function PreviewModal({
             <br />
             <span style={{ opacity: 0.7 }}>{item.caption}</span>
           </span>
+          {onDecide ? (
+            <button
+              type="button"
+              onClick={() => onDecide(item.path, !item.rejected)}
+              disabled={deciding === item.path}
+              title={item.rejected ? "Keep this frame anyway (K)" : "Reject this frame (R)"}
+              style={{ gap: 6 }}
+            >
+              {item.rejected ? <Check size={16} /> : <Ban size={16} />}
+              {item.rejected ? "Keep" : "Reject"}
+            </button>
+          ) : null}
           <button type="button" onClick={onClose} aria-label="Close preview">
             <X size={18} />
           </button>
