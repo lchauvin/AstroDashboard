@@ -39,6 +39,7 @@ from pathlib import Path
 from . import paths
 
 SESSION_DATA = ".SessionData"
+QUARANTINE_PREFIX = ".MispointedFrames_Quarantine"  # as in layout.py
 
 
 class UnsafeOperation(Exception):
@@ -75,6 +76,16 @@ def _check_session_dst(root: Path, download: Path, dst: Path) -> None:
         raise UnsafeOperation(f"destination is not in a .SessionData\\NIGHT_ folder: {dst}")
     if os.path.splitdrive(str(dst))[0].lower() != os.path.splitdrive(str(root))[0].lower():
         raise UnsafeOperation("destination is on another volume")
+
+
+def _check_kept(root: Path, download: Path, kept: Path) -> None:
+    """The file that stays when a download copy is removed: a light of a night, in .SessionData or a quarantine."""
+    if not _under(kept, root) or _under(kept, download):
+        raise UnsafeOperation(f"kept file is not inside a target folder of {root}: {kept}")
+    parts = kept.relative_to(root).parts
+    in_night = SESSION_DATA in parts or any(p.startswith(QUARANTINE_PREFIX) for p in parts)
+    if not in_night or not any(p.startswith("NIGHT_") for p in parts):
+        raise UnsafeOperation(f"kept file is not in a .SessionData or quarantine NIGHT_ folder: {kept}")
 
 
 def move(root: Path, download: Path, src: str, dst: str) -> None:
@@ -163,7 +174,7 @@ def remove_duplicate(root: Path, download: Path, src: str, kept: str) -> None:
     root, download, s, k = _resolve(root), _resolve(download), _resolve(src), _resolve(kept)
     _check_download(root, download)
     _check_download_src(download, s)
-    _check_session_dst(root, download, k)
+    _check_kept(root, download, k)
     if s == k:
         raise UnsafeOperation("source and kept file are the same path")
     if not s.is_file() or not k.is_file():

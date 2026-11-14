@@ -401,3 +401,31 @@ def test_manual_rejects_of_quarantined_frames_survive_a_rerun():
     result = {"lights": [{"frames": [{"path": f"{IC_NIGHT}/h0.fits"}]}]}
     overrides.carry_over(previous, result)
     assert result["overrides"] == {f"{IC_Q}/h1.fits": "reject", f"{IC_NIGHT}/h0.fits": "keep"}
+
+
+def test_a_refiled_copy_of_a_quarantined_light_goes_to_the_trash(data_root, tmp_path):
+    import shutil
+
+    app = client_for(data_root, tmp_path)
+    night = {"revisionId": "ic-1848-soul-nebula", "session": "NIGHT_2026-02-01"}
+    with TestClient(app) as client:
+        app.state.engine._run_scan()
+        _analysed(app, {"h0.fits": False, "h1.fits": True, "h2.fits": False})
+        plan = client.post("/api/organizer/quarantine", json=night).json()
+        assert _approve(client, plan)["status"] == "applied"
+        # Ingest (before it knew about quarantines) refiled a re-synced copy at the freed path.
+        shutil.copy2(data_root / IC_Q / "h1.fits", data_root / IC_NIGHT / "h1.fits")
+        q = client.get("/api/diagnostics/ic-1848-soul-nebula/NIGHT_2026-02-01").json()["quarantine"]
+        assert q["pending"] == 1 and q["restorable"] == 0
+
+        plan = client.post("/api/organizer/quarantine", json=night).json()
+        assert [(o["op"], o["src"]) for o in plan["ops"]] == [("trash", f"{IC_NIGHT}/h1.fits")]
+        assert plan["ops"][0]["dst"] == f".Trash/{plan['id']}/{IC_NIGHT}/h1.fits"
+        assert _approve(client, plan)["status"] == "applied"
+        assert not (data_root / IC_NIGHT / "h1.fits").exists() and (data_root / IC_Q / "h1.fits").is_file()
+        assert (data_root / ".Trash" / plan["id"] / IC_NIGHT / "h1.fits").is_file()
+        q = client.get("/api/diagnostics/ic-1848-soul-nebula/NIGHT_2026-02-01").json()["quarantine"]
+        assert q["pending"] == 0 and q["restorable"] == 1
+        # The stored analysis still points at the quarantined light, not the trash.
+        stored = app.state.engine.cache.diagnostic("ic-1848-soul-nebula", "NIGHT_2026-02-01")["result"]
+        assert f"{IC_Q}/h1.fits" in {f["path"] for g in stored["lights"] for f in g["frames"]}

@@ -42,8 +42,14 @@ class ApplyRequest(BaseModel):
     confirm: str = Field(min_length=1, max_length=100)
 
 
-def _plan_id(slug: str) -> str:
-    return time.strftime("%Y%m%d-%H%M%S") + "-" + re.sub(r"[^a-z0-9-]", "", slug.lower())[:40]
+def _plan_id(slug: str, taken=lambda pid: False) -> str:
+    """Time and slug; a suffix when a plan made the same second has it (a stored plan is never overwritten)."""
+    base = time.strftime("%Y%m%d-%H%M%S") + "-" + re.sub(r"[^a-z0-9-]", "", slug.lower())[:40]
+    pid, n = base, 1
+    while taken(pid):
+        n += 1
+        pid = f"{base}-{n}"
+    return pid
 
 
 def register(app: FastAPI, state) -> None:
@@ -52,7 +58,7 @@ def register(app: FastAPI, state) -> None:
     root = Path(os.path.abspath(cfg.data_root))
 
     def _store(p, status: str = "draft") -> dict[str, Any]:
-        pid = _plan_id(p.revision_id or p.target)
+        pid = _plan_id(p.revision_id or p.target, lambda x: cache.plan(x) is not None)
         data = p.as_dict()
         for op in data["ops"]:
             if op.get("dst"):
@@ -150,9 +156,10 @@ def register(app: FastAPI, state) -> None:
         if stored is None:
             raise HTTPException(404, detail="This night has not been analysed")
         paths = quarantine.rejected_lights(overrides.apply(stored["result"]), rev["folder"], body.session)
-        if not paths:
+        copies = quarantine.duplicates(cache.plans(10000), root, rev["id"], body.session)
+        if not paths and not copies:
             raise HTTPException(409, detail="No rejected light of this night is left in .SessionData")
-        return _store(quarantine.quarantine_plan(root, rev["id"], rev["folder"], body.session, paths))
+        return _store(quarantine.quarantine_plan(root, rev["id"], rev["folder"], body.session, paths, copies))
 
     @app.post("/api/organizer/restore-quarantine")
     def restore_night(body: NightRequest) -> dict[str, Any]:
@@ -218,7 +225,7 @@ def register(app: FastAPI, state) -> None:
         done = (p.get("result") or {}).get("done") or []
         if not done:
             raise HTTPException(409, detail="Nothing of this plan was applied")
-        pid = _plan_id("undo-" + plan_id)
+        pid = _plan_id("undo-" + plan_id, lambda x: cache.plan(x) is not None)
         ops = applier.inverse(p["ops"], done)
         for op in ops:
             if op.get("dst"):

@@ -353,9 +353,12 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
     def _quarantine(rev: dict[str, Any], session: str, stored: dict[str, Any] | None) -> dict[str, Any]:
         """Rejected lights WBPP would still load, and lights the dashboard quarantined that can go back."""
         result = overrides.apply(stored["result"]) if stored else {}
+        plans = state.cache.plans(10000)
         return {
-            "pending": len(quarantine.rejected_lights(result, rev["folder"], session)),
-            "restorable": len(quarantine.restorable(state.cache.plans(10000), cfg.data_root.resolve(), rev["id"], session)),
+            # Rejected lights still in .SessionData, and refiled copies of quarantined ones: WBPP would stack both.
+            "pending": len(quarantine.rejected_lights(result, rev["folder"], session))
+            + len(quarantine.duplicates(plans, cfg.data_root.resolve(), rev["id"], session, exact=False)),
+            "restorable": len(quarantine.restorable(plans, cfg.data_root.resolve(), rev["id"], session)),
             "paths": sorted(quarantine.quarantined_lights(result)),
         }
 

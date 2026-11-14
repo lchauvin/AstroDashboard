@@ -44,7 +44,8 @@ export default async function PlanPage({ params }: { params: Promise<{ plan: str
           {plan.kind === "quarantine" ? (
             <p className={styles.summary}>
               Moves the night&apos;s rejected lights from .SessionData to the quarantine folder at the same relative path, so
-              WBPP no longer finds them. &ldquo;Put back&rdquo; on the night&apos;s diagnostics reverses it.
+              WBPP no longer finds them. A byte-identical copy of a light already quarantined (refiled by ingest) goes to
+              .Trash instead. &ldquo;Put back&rdquo; on the night&apos;s diagnostics reverses the moves.
             </p>
           ) : null}
           {plan.kind === "restore-quarantine" ? (

@@ -60,10 +60,62 @@ def _quarantine_dir(tree, parent: str) -> str:
     return existing[0] if existing else QUARANTINE_PREFIX
 
 
-def quarantine_plan(root: Path, revision_id: str, target: str, session: str, paths: list[str]) -> Plan:
-    pl = Planner(root, revision_id, target, f"Quarantine {len(paths)} rejected light{'s' if len(paths) != 1 else ''} of {session}")
+def _quarantine_moves(plans: list[dict[str, Any]], revision_id: str, session: str) -> dict[str, str]:
+    """quarantined path → original path, for every light the applied quarantine plans of this night moved."""
+    out: dict[str, str] = {}
+    for p in sorted(plans, key=lambda p: p["created"]):
+        if p.get("kind") != KIND_QUARANTINE or p.get("revisionId") != revision_id or p.get("session") != session:
+            continue
+        if p["status"] not in ("applied", "partial"):
+            continue
+        for i in (p.get("result") or {}).get("done") or []:
+            op = p["ops"][i]
+            if op["op"] == "move" and op.get("kind") == "file":
+                out[op["dst"]] = op["src"]
+    return out
+
+
+def _identical(a: Path, b: Path) -> bool:
+    try:
+        if a.stat().st_size != b.stat().st_size:
+            return False
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            while True:
+                x, y = fa.read(1 << 20), fb.read(1 << 20)
+                if x != y:
+                    return False
+                if not x:
+                    return True
+    except OSError:
+        return False
+
+
+def _looks_same(a: Path, b: Path) -> bool:
+    try:
+        sa, sb = a.stat(), b.stat()
+    except OSError:
+        return False
+    return sa.st_size == sb.st_size and abs(sa.st_mtime - sb.st_mtime) < 2.0
+
+
+def duplicates(plans: list[dict[str, Any]], root: Path, revision_id: str, session: str, exact: bool = True) -> list[str]:
+    """Lights back in .SessionData although quarantined: a byte-identical copy refiled at the freed path
+    (a re-synced download ingested before ingest knew about the quarantine). WBPP would stack them.
+    `exact=False` compares size and timestamp only (a count for a page); a plan always compares the bytes."""
+    same = _identical if exact else _looks_same
+    return sorted(o for q, o in _quarantine_moves(plans, revision_id, session).items()
+                  if os.path.isfile(root / o) and same(root / o, root / q))
+
+
+def quarantine_plan(root: Path, revision_id: str, target: str, session: str, paths: list[str],
+                    copies_of_quarantined: list[str] | None = None) -> Plan:
+    n = len(paths) + len(copies_of_quarantined or [])
+    pl = Planner(root, revision_id, target, f"Quarantine {n} rejected light{'s' if n != 1 else ''} of {session}")
     plan = pl.plan
     tree = pl.tree
+    for path in copies_of_quarantined or []:
+        if path in tree.files:
+            pl.trash(path, "{plan}", "identical copy of a light already in the quarantine (refiled by ingest)")
     for path in paths:
         split = _split(path, target, session)
         if split is None:
@@ -94,21 +146,15 @@ def quarantine_plan(root: Path, revision_id: str, target: str, session: str, pat
             "Remove them or leave them out of WBPP: " + ", ".join(sorted(copies)))
     plan.extra = {"kind": KIND_QUARANTINE, "session": session}
     plan.lint.append({"code": "quarantine", "level": "info", "text": f"{sum(o.op == 'move' for o in plan.ops)} lights to the quarantine"})
+    if copies_of_quarantined:
+        plan.lint.append({"code": "quarantine-copies", "level": "info",
+                          "text": f"{len(copies_of_quarantined)} copies of quarantined lights to .Trash"})
     return plan
 
 
 def restorable(plans: list[dict[str, Any]], root: Path, revision_id: str, session: str) -> list[tuple[str, str]]:
     """(quarantined path, original path) for what applied quarantine plans of this night moved and is still there."""
-    out: dict[str, str] = {}
-    for p in sorted(plans, key=lambda p: p["created"]):
-        if p.get("kind") != KIND_QUARANTINE or p.get("revisionId") != revision_id or p.get("session") != session:
-            continue
-        if p["status"] not in ("applied", "partial"):
-            continue
-        for i in (p.get("result") or {}).get("done") or []:
-            op = p["ops"][i]
-            if op["op"] == "move" and op.get("kind") == "file":
-                out[op["dst"]] = op["src"]
+    out = _quarantine_moves(plans, revision_id, session)
     return [(q, o) for q, o in out.items() if os.path.isfile(root / q) and not os.path.exists(root / o)]
 
 

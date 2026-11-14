@@ -40,7 +40,7 @@ from typing import Any, Iterable
 
 from ..frames import canonical_filter, normalize_kind, parse_time
 from ..headers import IMAGE_SUFFIXES, read_header
-from ..layout import panel_folder
+from ..layout import QUARANTINE_PREFIX, panel_folder
 from .paths import DOWNLOAD
 
 NIGHT_DIR_RE = re.compile(r"^(?:NIGHT_)?(\d{4}-\d{2}-\d{2})$")
@@ -196,6 +196,21 @@ def match_target(obj: str, targets: list["TargetRef"], object_map: dict[str, dic
         return latest, ""
     return None, (f'{latest.target} is "{latest.stage}": not switching to it. Turn on "Also switch to finished '
                   f'targets", choose it yourself, or start a new revision.')
+
+
+def quarantined_copy(session_root: str, parts: list[str]) -> str | None:
+    """Where a light below `session_root` (.SessionData) sits once quarantined: the same relative path in each of
+    the revision's quarantine folders that has it. A quarantine must not be undone by ingesting a re-copy."""
+    parent = os.path.dirname(os.path.normpath(session_root))
+    try:
+        names = [n for n in os.listdir(parent) if n.startswith(QUARANTINE_PREFIX)]
+    except OSError:
+        return None
+    for n in sorted(names):
+        p = os.path.join(parent, n, *parts)
+        if os.path.isfile(p):
+            return p
+    return None
 
 
 def same_file(a: str, st_a: os.stat_result, b: str) -> bool:
@@ -400,6 +415,17 @@ def plan_ingest(
                         row["ingested"] += 1
                 else:
                     plan.holds.append(Hold(path, dl, "exists", f"Destination already exists (and differs): {dst}", kind, base_obj, filt))
+                continue
+            quarantined = quarantined_copy(target.session_root, parts)
+            if quarantined and same_file(path, st, quarantined):
+                # Ingested, then quarantined (rejected): its path in the night is free, but it must not come back.
+                plan.holds.append(Hold(path, dl, "ingested", f"Already ingested, then quarantined: the same frame is in {quarantined}",
+                                       kind, base_obj, filt, dst=quarantined))
+                info["ingested"] += 1
+                row = plan.objects.get(night.isoformat(), {}).get(base_obj or "")
+                if row:
+                    row["frames"] -= 1
+                    row["ingested"] += 1
                 continue
             plan.actions.append(Action("move", path, dst, f"NIGHT_{night.isoformat()}", dl, kind, filt, target.revision_id, target.target, st.st_size))
             if target.revision_id not in night_targets:

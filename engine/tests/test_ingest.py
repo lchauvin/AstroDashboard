@@ -414,3 +414,40 @@ def test_a_download_folder_elsewhere_on_the_drive(data_root, tmp_path):
 
     with pytest.raises(fileops.UnsafeOperation):   # fileops re-checks the folder itself
         fileops.move(data_root, Path("Z:/NINA"), "Z:/NINA/x.fits", str(dest / "x.fits"))
+
+
+def test_a_resynced_copy_of_a_quarantined_light_does_not_come_back(data_root, tmp_path):
+    """Quarantine frees the light's path in the night; a re-copy in .Download must not be ingested into it."""
+    import shutil
+
+    dl = data_root / ".Download" / "Soul Nebula" / "LIGHT" / "Ha"
+    for i in range(3):
+        f = frame(dl / f"q{i}.fits", **light(FILTER="Ha", OBJECT="Soul Nebula", DATE_LOC=f"{NIGHT}T22:1{i}:00"))
+        os.utime(f, (OLD + i, OLD + i))  # q2 is the newest and stays
+    app = app_for(data_root, tmp_path)
+    with TestClient(app) as client:
+        app.state.engine._run_scan()
+        svc = app.state.engine.ingest
+        client.post("/api/ingest/mode", json={"mode": "auto"})
+        client.post("/api/ingest/run")
+        moved = {Path(r["dst"]).name: Path(r["dst"]) for r in client.get("/api/ingest").json()["recent"]}
+        q0 = moved["q0.fits"]
+        # The analysis rejected q0 and a quarantine plan moved it (same relative path, beside .SessionData).
+        parts = q0.parts[q0.parts.index(".SessionData") + 1:]
+        target = Path(*q0.parts[:q0.parts.index(".SessionData")])
+        quarantined = target.joinpath(".MispointedFrames_Quarantine", *parts)
+        quarantined.parent.mkdir(parents=True)
+        os.rename(q0, quarantined)
+        # robocopy re-syncs it into .Download, timestamps kept.
+        shutil.copy2(quarantined, dl / "q0.fits")
+
+        plan = svc.plan()
+        hold = next(h for h in plan.holds if Path(h.src).name == "q0.fits")
+        assert hold.reason == "ingested" and Path(hold.dst) == quarantined
+        assert not [a for a in plan.actions if Path(a.src).name == "q0.fits"]
+        client.post("/api/ingest/run")
+        assert not q0.exists() and quarantined.exists()
+
+        r = client.post("/api/ingest/remove-copies", json={"night": NIGHT, "confirm": True}).json()
+        assert r["removed"] == 1 and not r["kept"]
+        assert not (dl / "q0.fits").exists() and quarantined.is_file()
