@@ -5,7 +5,7 @@ import { EfficiencyBars, GoalMini, MoonGlyph, SeasonStrip, localTime } from "@/c
 import { PlanControls } from "@/components/planning/PlanControls";
 import styles from "@/components/planning/planning.module.css";
 import { FilterChip, Marks, Tip } from "@/components/ui";
-import { stageLabel } from "@/lib/format";
+import { hm, stageLabel } from "@/lib/format";
 import { isoDate } from "@/lib/planning/night";
 import type { TargetPlan } from "@/lib/planning/plan";
 import { FILTER_NAMES } from "@/lib/planning/rig";
@@ -87,7 +87,7 @@ export default async function PlanningTargetsPage({ searchParams }: { searchPara
             {tonight.dusk ? `${localTime(tonight.dusk)} – ${localTime(tonight.dawn)}` : "None"}
           </div>
           <div className={styles.small}>
-            {tonight.dusk ? `${tonight.darkHours.toFixed(1)} h of astronomical darkness (sun below −18°)` : "The sun never reaches −18° tonight."}
+            {tonight.dusk ? `${hm(tonight.darkHours)} of astronomical darkness (sun below −18°)` : "The sun never reaches −18° tonight."}
           </div>
         </div>
         <div className={styles.tonightCell}>
@@ -96,7 +96,7 @@ export default async function PlanningTargetsPage({ searchParams }: { searchPara
             <MoonGlyph phase={tonight.moonPhase} size={24} />
             <span className="num">{Math.round(tonight.moonIllum * 100)} %</span>
           </div>
-          <div className={styles.small}>{tonight.moonFreeHours.toFixed(1)} h of darkness with the moon down</div>
+          <div className={styles.small}>{hm(tonight.moonFreeHours)} of darkness with the moon down</div>
         </div>
         <div className={styles.tonightCell}>
           <div className="eyebrow">Sky at {site.name}</div>
@@ -216,7 +216,7 @@ function YourTargets({ plans, q, start }: { plans: TargetPlan[]; q: string; star
                 </div>
               </td>
               <td className="num" style={{ whiteSpace: "nowrap" }}>
-                {p.tonightHours.toFixed(1)} h
+                {hm(p.tonightHours)}
                 <div className={styles.sub}>max {Math.round(p.maxAlt)}°</div>
               </td>
               <td className={styles.adviceCell}>
@@ -308,7 +308,7 @@ function Ideas({
                   {p.anchor.basis === "survey" ? ` · ${Math.round(p.anchor.rayleighs)} R measured` : ""}
                 </div>
               </td>
-              <td className="num">{p.tonightHours.toFixed(1)} h</td>
+              <td className="num">{hm(p.tonightHours)}</td>
               <td className="num">{p.hours90.toFixed(0)} h</td>
               <td className="num">{p.hoursToSnr30 == null ? "—" : `${p.hoursToSnr30 < 10 ? p.hoursToSnr30.toFixed(1) : Math.round(p.hoursToSnr30)} h`}</td>
               <td className={styles.adviceCell}>

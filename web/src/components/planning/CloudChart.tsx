@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { hm } from "@/lib/format";
+
 import styles from "./charts.module.css";
 
 export type ChartSlot = {
@@ -113,7 +115,7 @@ export function CloudChart({
           <g>
             <rect x={x(clearRun.start)} y={M.t} width={Math.max(0, x(clearRun.end) - x(clearRun.start))} height={plotB - M.t} className={styles.usable} />
             <text x={x(clearRun.start) + 2} y={M.t - 8} className={styles.axis}>
-              longest clear {((clearRun.end - clearRun.start) / 3_600_000).toFixed(1)} h
+              longest clear {hm((clearRun.end - clearRun.start) / 3_600_000)}
             </text>
           </g>
         ) : null}

@@ -8,6 +8,7 @@ import { DewWarning, NightDetails, QualityBadge, dayLabel, nightHref } from "@/c
 import { localTime } from "@/components/planning/bits";
 import styles from "@/components/planning/overview.module.css";
 import { FilterChip, Tip } from "@/components/ui";
+import { hm } from "@/lib/format";
 import { isoDate } from "@/lib/planning/night";
 import type { TargetPlan } from "@/lib/planning/plan";
 import { FILTER_NAMES } from "@/lib/planning/rig";
@@ -126,7 +127,7 @@ export default async function NightPage({ params, searchParams }: { params: Prom
               {ideas.map((p, i) => (
                 <span key={p.key}>
                   {i ? ", " : ""}
-                  <Tip tip={`${p.classLabel} · ${p.tonightHours.toFixed(1)} h up · ${p.advice}`}>
+                  <Tip tip={`${p.classLabel} · ${hm(p.tonightHours)} up · ${p.advice}`}>
                     <Link href={`/planning/target/${encodeURIComponent(p.key)}?site=${site.id}&date=${date}`}>{p.title}</Link>
                   </Tip>
                 </span>
@@ -151,7 +152,7 @@ function Rec({ p, rank, siteId, date }: { p: TargetPlan; rank: number; siteId: s
           {p.title}
         </Link>
         <div className={styles.recSub}>
-          {p.tonightHours.toFixed(1)} h up in the dark · max {Math.round(p.maxAlt)}°
+          {hm(p.tonightHours)} up in the dark · max {Math.round(p.maxAlt)}°
         </div>
       </div>
       <Tip tip={p.advice}>

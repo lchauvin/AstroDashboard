@@ -16,6 +16,7 @@
  * cause when transparency is poor: "smoky" instead of "hazy".
  */
 
+import { hm } from "../format";
 import type { NightForecast } from "./forecast";
 import type { CalendarNight } from "./plan";
 
@@ -51,7 +52,7 @@ export const SMOKE_PRESENT = 0;
 /** A night worth setting up for without compromise (a moonlit night is not counted). */
 export const isGood = (q: NightQuality) => q.level === "excellent" || q.level === "good";
 
-const h = (x: number) => `${x.toFixed(1)} h`;
+const h = hm;
 
 export function nightQuality(n: CalendarNight, f: NightForecast | null): NightQuality {
   const moonShare = n.darkHours ? n.moonFreeHours / n.darkHours : 0;

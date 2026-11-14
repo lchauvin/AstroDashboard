@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { hm } from "@/lib/format";
+
 import styles from "./charts.module.css";
 
 /** Non-finite values (NaN) are gaps: the line breaks there and the tooltip leaves the series out. */
@@ -27,7 +29,7 @@ const PAD = { l: 44, r: 34, t: 18, b: 22 };
 function xLabel(s: number): string {
   if (s === 0) return "now";
   const m = Math.round(s / 60);
-  if (Math.abs(s) >= 7200) return `−${(Math.abs(s) / 3600).toFixed(Math.abs(s) % 3600 ? 1 : 0)} h`;
+  if (Math.abs(s) >= 7200) return `−${hm(Math.abs(s) / 3600)}`;
   return Math.abs(s) >= 60 ? `−${Math.abs(m)} min` : `−${Math.abs(Math.round(s))} s`;
 }
 

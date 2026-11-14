@@ -12,7 +12,7 @@ import { SnrChart } from "@/components/planning/SnrChart";
 import { TelescopiusCard } from "@/components/TelescopiusCard";
 import styles from "@/components/planning/planning.module.css";
 import { Badge, FilterChip, Marks, Tip } from "@/components/ui";
-import { stageLabel } from "@/lib/format";
+import { hm, stageLabel } from "@/lib/format";
 import { formatDec, formatRa } from "@/lib/astro/coordinates";
 import { snr2PerHour } from "@/lib/planning/evaluate";
 import { isoDate } from "@/lib/planning/night";
@@ -248,12 +248,12 @@ export default async function TargetPlanPage({ params, searchParams }: { params:
                     {s.id === site.id ? <span className={styles.sub}> · selected</span> : null}
                   </td>
                   <td className="num">{s.sqm.toFixed(1)}</td>
-                  <td className="num">{cp ? `${cp.tonightHours.toFixed(1)} h` : "—"}</td>
+                  <td className="num">{cp ? hm(cp.tonightHours) : "—"}</td>
                   <td>{cp?.best ? <><FilterChip filter={cp.best.letter} /> {Math.round(cp.best.efficiency * 100)} %</> : "—"}</td>
                   <td className="num">{cp ? `${cp.hours30.toFixed(0)} h` : "—"}</td>
                   <td>
                     {remaining.length
-                      ? remaining.map((g) => `${g.letter} ${Number.isFinite(g.remainingHours!) ? g.remainingHours!.toFixed(1) : "∞"} h`).join(" · ")
+                      ? remaining.map((g) => `${g.letter} ${hm(g.remainingHours!)}`).join(" · ")
                       : <span className="muted">no goals set</span>}
                   </td>
                 </tr>

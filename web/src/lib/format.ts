@@ -20,15 +20,18 @@ export function sortFilters<T extends { filter: string | null }>(items: T[]): T[
 }
 
 /** 12.25 h → "12.3 h"; under an hour → "45 min". */
-export function hours(seconds: number): string {
-  if (seconds <= 0) return "0 h";
-  const h = seconds / 3600;
-  if (h < 1) return `${Math.round(seconds / 60)} min`;
-  return `${h >= 10 ? h.toFixed(1) : h.toFixed(2).replace(/0$/, "")} h`;
+/** A duration in hours as clock time: 1.99 → "1h59", 0.75 → "45 min". */
+export function hm(h: number): string {
+  if (!Number.isFinite(h)) return "∞";
+  const minutes = Math.round(Math.abs(h) * 60);
+  const sign = h < 0 && minutes ? "−" : "";
+  if (minutes < 60) return `${sign}${minutes} min`;
+  return `${sign}${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}`;
 }
 
-export function hoursNumber(seconds: number): string {
-  return (seconds / 3600).toFixed(1);
+/** A duration in seconds as clock time: 7164 s → "1h59". */
+export function hours(seconds: number): string {
+  return hm(seconds / 3600);
 }
 
 export function exposure(s: number | null | undefined): string {

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { filterColor } from "@/lib/format";
+import { filterColor, hm } from "@/lib/format";
 import styles from "./charts.module.css";
 
 export type SnrSeries = {
@@ -87,14 +87,14 @@ export function SnrChart({ series, maxHours }: { series: SnrSeries[]; maxHours?:
         {shown.map((s) =>
           s.haveHours ? (
             <circle key={`h${s.letter}`} cx={x(Math.min(s.haveHours, xMax))} cy={y(snrAt(s, s.haveHours))} r={4.5} className={styles.nowDot} style={{ stroke: filterColor(s.letter) }}>
-              <title>{`${s.name}: ${s.haveHours.toFixed(1)} h collected → SNR ${snrAt(s, s.haveHours).toFixed(1)}`}</title>
+              <title>{`${s.name}: ${hm(s.haveHours)} collected → SNR ${snrAt(s, s.haveHours).toFixed(1)}`}</title>
             </circle>
           ) : null,
         )}
         {shown.map((s) =>
           s.goalHours && Number.isFinite(s.goalHours) && s.goalHours <= xMax ? (
             <rect key={`g${s.letter}`} x={x(s.goalHours) - 4.5} y={y(snrAt(s, s.goalHours)) - 4.5} width={9} height={9} className={styles.goalDot} style={{ fill: filterColor(s.letter) }}>
-              <title>{`${s.name} goal: ${s.goalHours.toFixed(1)} h → SNR ${snrAt(s, s.goalHours).toFixed(1)}`}</title>
+              <title>{`${s.name} goal: ${hm(s.goalHours)} → SNR ${snrAt(s, s.goalHours).toFixed(1)}`}</title>
             </rect>
           ) : null,
         )}
@@ -114,7 +114,7 @@ export function SnrChart({ series, maxHours }: { series: SnrSeries[]; maxHours?:
         <span>○ collected · ■ goal</span>
         <span className={styles.readout} aria-live="polite">
           {hoverH != null
-            ? `${hoverH.toFixed(1)} h → ${shown.map((s) => `${s.name} ${snrAt(s, hoverH).toFixed(1)}`).join(" · ")}`
+            ? `${hm(hoverH)} → ${shown.map((s) => `${s.name} ${snrAt(s, hoverH).toFixed(1)}`).join(" · ")}`
             : "Hover the chart for values"}
         </span>
       </figcaption>

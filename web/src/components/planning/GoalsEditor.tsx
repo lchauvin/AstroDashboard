@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Save } from "lucide-react";
 
+import { hm } from "@/lib/format";
 import { goalStatus } from "@/lib/planning/goals";
 import type { FilterLetter } from "@/lib/planning/rig";
 import type { Goal, GoalMode } from "@/lib/planning/types";
@@ -119,7 +120,7 @@ export function GoalsEditor({
             <th>Goal</th>
             <th className="num">Hours</th>
             <th className="num">SNR</th>
-            <th>Progress (good hours)</th>
+            <th>Progress (good time)</th>
             <th>Check</th>
           </tr>
         </thead>
@@ -160,7 +161,7 @@ export function GoalsEditor({
                       }}
                     />
                   ) : (
-                    <span className={styles.implied}>{d.mode === "snr" ? fmt(st.goalHours) : "—"}</span>
+                    <span className={styles.implied}>{d.mode === "snr" && st.goalHours != null ? hm(st.goalHours) : "—"}</span>
                   )}
                 </td>
                 <td className="num">
@@ -187,13 +188,13 @@ export function GoalsEditor({
                       <span style={{ width: `${Math.round(frac * 100)}%` }} />
                     </span>
                     <span className="num">
-                      {st.goodHours.toFixed(1)}
-                      {st.goalHours != null ? ` / ${fmt(st.goalHours)}` : ""} h
+                      {hm(st.goodHours)}
+                      {st.goalHours != null ? ` / ${hm(st.goalHours)}` : ""}
                     </span>
                   </div>
                   <div className={styles.basis}>
                     SNR so far ≈ {fmt(st.snrSoFar)}
-                    {st.rawHours - st.goodHours > 0.05 ? ` · ${(st.rawHours - st.goodHours).toFixed(1)} h rejected by diagnostics` : ""}
+                    {st.rawHours - st.goodHours > 0.05 ? ` · ${hm(st.rawHours - st.goodHours)} rejected by diagnostics` : ""}
                   </div>
                 </td>
                 <td>
@@ -219,7 +220,7 @@ export function GoalsEditor({
                   ) : st.goal && st.goal.mode !== "none" && st.remainingHours === 0 ? (
                     <StatusIcon level="ok" size={13} label="Goal reached" />
                   ) : st.remainingHours != null ? (
-                    <span className={styles.basis}>{st.remainingHours.toFixed(1)} h to go</span>
+                    <span className={styles.basis}>{hm(st.remainingHours)} to go</span>
                   ) : null}
                 </td>
               </tr>

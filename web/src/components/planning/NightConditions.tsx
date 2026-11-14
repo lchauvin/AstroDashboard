@@ -1,4 +1,5 @@
 import { Tip } from "@/components/ui";
+import { hm } from "@/lib/format";
 import { CLEAR_CLOUD } from "@/lib/planning/forecast";
 import type { NightGrid } from "@/lib/planning/night";
 import type { RatedNight } from "@/server/planning";
@@ -49,7 +50,7 @@ export function NightConditions({ n, grid }: { n: RatedNight; grid: NightGrid })
   if (!f || night.dusk == null || night.dawn == null) {
     return (
       <div className={styles.condGrid}>
-        <Cell label="Darkness" value={night.dusk ? `${localTime(night.dusk)} – ${localTime(night.dawn)}` : "None"} sub={`${night.darkHours.toFixed(1)} h`} />
+        <Cell label="Darkness" value={night.dusk ? `${localTime(night.dusk)} – ${localTime(night.dawn)}` : "None"} sub={hm(night.darkHours)} />
         <Cell label="Moon" value={`${Math.round(night.moonIllum * 100)} %`} sub={moonText} />
         <Cell label="Weather" value="Not forecast yet" sub="Astrospheric reaches about 10 days ahead" />
       </div>
@@ -79,7 +80,7 @@ export function NightConditions({ n, grid }: { n: RatedNight; grid: NightGrid })
         <Cell
           label="Clear sky"
           value={run ? `${localTime(run.start)} – ${localTime(run.end)}` : "No clear stretch"}
-          sub={`${f.longestClear.toFixed(1)} h in a row · ${f.clearHours.toFixed(1)} h in all`}
+          sub={`${hm(f.longestClear)} in a row · ${hm(f.clearHours)} in all`}
           tip={`Clear = Astrospheric cloud below ${CLEAR_CLOUD} %. A night needs 5 h in a row to be worth setting up.`}
         />
         <Cell

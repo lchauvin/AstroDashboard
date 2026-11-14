@@ -1,6 +1,7 @@
 import "server-only";
 
 import { engineGet, engineSend } from "@/lib/engine";
+import { hm } from "@/lib/format";
 import { isoDate } from "@/lib/planning/night";
 import type { QualityLevel } from "@/lib/planning/quality";
 import { FILTER_NAMES } from "@/lib/planning/rig";
@@ -38,7 +39,7 @@ export type CheckResult = {
 export const NOTIFY_DEFAULTS: NotifySettings = { enabled: false, ntfyServer: "https://ntfy.sh", ntfyTopic: "", moonlit: true, dashboardUrl: "" };
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-const h = (x: number) => `${x.toFixed(1)} h`;
+const h = hm;
 
 /** 🌑…🌘 from the phase angle (0 new, 90 first quarter, 180 full, 270 last quarter). */
 const MOONS = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"];

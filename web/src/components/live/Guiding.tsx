@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import { hm } from "@/lib/format";
 import { ago, ALGORITHM, algorithmLabel, clock, duration, enginePost, fmt, type Analysis, type Change, type LiveState, type Polar, type Suggestion } from "@/lib/live";
 import { Marks, StatusIcon, Tip } from "../ui";
 import { LiveBar, NotConnected } from "./LiveBar";
@@ -443,7 +444,7 @@ function PolarCard({ pol, adv, serverTime }: { pol: Polar; adv: boolean; serverT
           sub={f.ok ? `${pm(f.altSe)}${dirs && Math.abs(f.alt) > 2 * f.altSe ? ` · axis too ${f.alt > 0 ? "high" : "low"}` : ""}` : "needs more hour angle"} />
         <Tile label="Azimuth" value={f.ok ? `${signed(f.az, 0)}′` : "—"}
           sub={f.ok ? `${pm(f.azSe)}${dirs && Math.abs(f.az) > 2 * f.azSe ? ` · axis ${f.az > 0 ? "east" : "west"} of the pole` : ""}` : "needs more hour angle"} />
-        {f.ok ? <Tile label="Total" value={`${f.total.toFixed(0)}′`} level={errLevel(f.total)} sub={`fitted over ${f.spanH} h, ${f.n} windows`} /> : null}
+        {f.ok ? <Tile label="Total" value={`${f.total.toFixed(0)}′`} level={errLevel(f.total)} sub={`fitted over ${hm(f.spanH)}, ${f.n} windows`} /> : null}
       </div>
       {pol.advice.length ? (
         <p>

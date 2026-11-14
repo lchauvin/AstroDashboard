@@ -3,7 +3,7 @@
 import type { FilterNight } from "@/lib/planning/evaluate";
 import type { GoalStatus } from "@/lib/planning/plan";
 import { FILTER_NAMES, type FilterLetter } from "@/lib/planning/rig";
-import { filterColor } from "@/lib/format";
+import { filterColor, hm } from "@/lib/format";
 import { Tip } from "../ui";
 import styles from "./planning.module.css";
 
@@ -52,7 +52,7 @@ function Row({ n }: { n: FilterNight }) {
         tip={
           none
             ? `${FILTER_NAMES[n.letter]}: no modelled signal for this target`
-            : `${FILTER_NAMES[n.letter]}: ${pct(n.efficiency)} of a moonless night's SNR² over ${n.hours.toFixed(1)} h · tonight SNR ${Math.sqrt(n.snr2).toFixed(1)}`
+            : `${FILTER_NAMES[n.letter]}: ${pct(n.efficiency)} of a moonless night's SNR² over ${hm(n.hours)} · tonight SNR ${Math.sqrt(n.snr2).toFixed(1)}`
         }
       >
         <span className={styles.bar} style={{ width: 64, display: "block" }}>
@@ -79,7 +79,7 @@ export function GoalMini({ goals }: { goals: GoalStatus[] }) {
               {g.letter}
             </span>
             <Tip
-              tip={`${FILTER_NAMES[g.letter]}: ${g.goodHours.toFixed(1)} h good of ${Number.isFinite(g.goalHours!) ? g.goalHours!.toFixed(1) : "∞"} h${g.goal?.mode === "snr" ? ` (SNR ${g.goal.snr} goal)` : ""}${g.flag ? ` — ${g.flag}` : ""}`}
+              tip={`${FILTER_NAMES[g.letter]}: ${hm(g.goodHours)} good of ${hm(g.goalHours!)}${g.goal?.mode === "snr" ? ` (SNR ${g.goal.snr} goal)` : ""}${g.flag ? ` — ${g.flag}` : ""}`}
             >
               <span className={styles.bar} style={{ width: 64, display: "block" }}>
                 <span style={{ width: `${Math.round(frac * 100)}%`, background: "var(--color-accent)" }} />
@@ -115,7 +115,7 @@ export function SeasonStrip({ hours, start, maxHours = 10 }: { hours: number[]; 
   const best = weeks.indexOf(Math.max(...weeks));
   const bestDate = new Date(y, m - 1, d + best * 7).toLocaleDateString("en-CA", { month: "short", day: "numeric" });
   return (
-    <Tip tip={`Usable hours per night over the next year (weekly mean). Best around ${bestDate}: ${weeks[best]?.toFixed(1)} h/night.`}>
+    <Tip tip={`Usable hours per night over the next year (weekly mean). Best around ${bestDate}: ${hm(weeks[best] ?? 0)}/night.`}>
       <svg width={width} height={H + 11} className={styles.season} role="img" aria-label={`Season: best around ${bestDate}`}>
         {weeks.map((h, i) => (
           <rect
