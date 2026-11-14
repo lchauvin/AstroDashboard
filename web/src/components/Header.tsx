@@ -20,7 +20,8 @@ export function Header() {
     <header className={styles.header}>
       <div className={styles.inner}>
         <Link href="/library" className={styles.brand}>
-          <span className={styles.brandMark} aria-hidden="true" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-mark.png" alt="" width={36} height={36} className={styles.brandMark} />
           <span className={styles.brandName}>AstroDashboard</span>
           <span className={styles.brandTagline}>Observatory log</span>
         </Link>
