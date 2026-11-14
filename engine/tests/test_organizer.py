@@ -307,3 +307,97 @@ def test_bare_panel_folders_get_the_target_prefix(data_root, tmp_path):
         assert done["status"] == "applied", done["result"]
         night = data_root / "M 31 (Andromeda Galaxy) R2" / ".SessionData" / "NIGHT_2027-09-01"
         assert (night / "M31_Panel_1" / "LIGHT" / "L" / "a.fits").is_file() and not (night / "PANEL_1").exists()
+
+
+# ------------------------------------------------------------------ quarantine of rejected lights
+
+IC = "IC 1848 (Soul Nebula)"
+IC_NIGHT = f"{IC}/.SessionData/NIGHT_2026-02-01/LIGHT/H"
+IC_Q = f"{IC}/.MispointedFrames_Quarantine/NIGHT_2026-02-01/LIGHT/H"
+
+
+def _analysed(app, rejected: dict[str, bool], overrides: dict[str, str] | None = None) -> None:
+    """A stored analysis of IC 1848's first night: h0..h2 with astro-eval's verdicts."""
+    frames = [{"path": f"{IC_NIGHT}/{n}", "file": n, "rejected": r, "reasons": ["fwhm"] if r else [],
+               "exposure": 300.0, "obs_time": None} for n, r in rejected.items()]
+    result = {"lights": [{"key": "H", "filter": "H", "frames": frames, "summary": {}}]}
+    if overrides:
+        result["overrides"] = overrides
+    app.state.engine.cache.save_diagnostic("ic-1848-soul-nebula", "NIGHT_2026-02-01", 1.0, {"lights": []}, result)
+
+
+def _approve(client, plan: dict) -> dict:
+    return client.post(f"/api/organizer/plans/{plan['id']}/apply", json={"confirm": plan["id"]}).json()
+
+
+def test_quarantine_moves_rejected_lights_and_restore_puts_them_back(data_root, tmp_path):
+    before = files(data_root)
+    app = client_for(data_root, tmp_path)
+    night = {"revisionId": "ic-1848-soul-nebula", "session": "NIGHT_2026-02-01"}
+    with TestClient(app) as client:
+        app.state.engine._run_scan()
+        # h0 rejected by astro-eval but kept by hand; h1 rejected by hand; h2 rejected by astro-eval.
+        _analysed(app, {"h0.fits": True, "h1.fits": False, "h2.fits": True},
+                  {f"{IC_NIGHT}/h0.fits": "keep", f"{IC_NIGHT}/h1.fits": "reject"})
+        q = client.get("/api/diagnostics/ic-1848-soul-nebula/NIGHT_2026-02-01").json()["quarantine"]
+        assert q == {"pending": 2, "restorable": 0, "paths": []}
+        assert client.post("/api/organizer/restore-quarantine", json=night).status_code == 409
+
+        plan = client.post("/api/organizer/quarantine", json=night).json()
+        assert plan["status"] == "draft" and plan["kind"] == "quarantine"
+        assert {(o["src"], o["dst"]) for o in plan["ops"] if o["op"] == "move"} == {
+            (f"{IC_NIGHT}/h1.fits", f"{IC_Q}/h1.fits"), (f"{IC_NIGHT}/h2.fits", f"{IC_Q}/h2.fits")}
+        assert any("_REJECTED" in w and "Accepted" in w for w in plan["warnings"])  # astro-eval copies are named
+        assert files(data_root) == before  # a draft changes nothing
+
+        assert _approve(client, plan)["status"] == "applied"
+        assert (data_root / IC_Q / "h1.fits").is_file() and (data_root / IC_Q / "h2.fits").is_file()
+        assert (data_root / IC_NIGHT / "h0.fits").is_file() and not (data_root / IC_NIGHT / "h1.fits").exists()
+        app.state.engine._run_scan()
+        h = next(t for t in client.get("/api/targets").json()["targets"] if t["catalogId"] == "IC 1848")
+        assert h["revisions"][0]["totals"]["quarantined"] >= 2
+        # The stored analysis follows the frames; the hand decision went with h1.
+        q = client.get("/api/diagnostics/ic-1848-soul-nebula/NIGHT_2026-02-01").json()["quarantine"]
+        assert q == {"pending": 0, "restorable": 2, "paths": [f"{IC_Q}/h1.fits", f"{IC_Q}/h2.fits"]}
+        stored = app.state.engine.cache.diagnostic("ic-1848-soul-nebula", "NIGHT_2026-02-01")["result"]
+        assert stored["overrides"][f"{IC_Q}/h1.fits"] == "reject"
+        assert client.post("/api/organizer/quarantine", json=night).status_code == 409
+
+        # The restore puts back only what the plan moved, not frames quarantined by hand elsewhere.
+        hand = data_root / IC / ".MispointedFrames_Quarantine" / "NIGHT_2026-01-15" / "LIGHT" / "H" / "mispointed.fits"
+        write_fits(hand, **light(FILTER="H"))
+        restore = client.post("/api/organizer/restore-quarantine", json=night).json()
+        assert restore["kind"] == "restore-quarantine"
+        assert {(o["src"], o["dst"]) for o in restore["ops"] if o["op"] == "move"} == {
+            (f"{IC_Q}/h1.fits", f"{IC_NIGHT}/h1.fits"), (f"{IC_Q}/h2.fits", f"{IC_NIGHT}/h2.fits")}
+        assert _approve(client, restore)["status"] == "applied"
+        assert hand.is_file()
+        # The folders the quarantine emptied are tidied away; the one still holding a frame stays.
+        assert not (data_root / IC / ".MispointedFrames_Quarantine" / "NIGHT_2026-02-01").exists()
+        hand.unlink()
+        assert files(data_root) == before
+        stored = app.state.engine.cache.diagnostic("ic-1848-soul-nebula", "NIGHT_2026-02-01")["result"]
+        assert stored["overrides"][f"{IC_NIGHT}/h1.fits"] == "reject"
+        assert client.get("/api/diagnostics/ic-1848-soul-nebula/NIGHT_2026-02-01").json()["quarantine"]["restorable"] == 0
+
+
+def test_quarantine_goes_into_the_existing_quarantine_folder(data_root, tmp_path):
+    """M 31 already has a quarantine folder (frames set aside by hand); its name is reused."""
+    m = data_root / "IC 1848 (Soul Nebula)" / ".MispointedFrames_Quarantine_2026"
+    write_fits(m / "NIGHT_2026-01-01" / "LIGHT" / "H" / "x.fits", **light(FILTER="H"))
+    app = client_for(data_root, tmp_path)
+    with TestClient(app) as client:
+        app.state.engine._run_scan()
+        _analysed(app, {"h0.fits": True})
+        plan = client.post("/api/organizer/quarantine", json={"revisionId": "ic-1848-soul-nebula", "session": "NIGHT_2026-02-01"}).json()
+        move = next(o for o in plan["ops"] if o["op"] == "move")
+        assert move["dst"] == f"{IC}/.MispointedFrames_Quarantine_2026/NIGHT_2026-02-01/LIGHT/H/h0.fits"
+
+
+def test_manual_rejects_of_quarantined_frames_survive_a_rerun():
+    from astrodash.diagnostics import overrides
+
+    previous = {"overrides": {f"{IC_Q}/h1.fits": "reject", f"{IC_NIGHT}/gone.fits": "keep", f"{IC_NIGHT}/h0.fits": "keep"}}
+    result = {"lights": [{"frames": [{"path": f"{IC_NIGHT}/h0.fits"}]}]}
+    overrides.carry_over(previous, result)
+    assert result["overrides"] == {f"{IC_Q}/h1.fits": "reject", f"{IC_NIGHT}/h0.fits": "keep"}

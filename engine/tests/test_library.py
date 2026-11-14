@@ -219,3 +219,41 @@ def test_master_bias_exposure_from_xisf_property(tmp_path):
     master = next(m for b in build(root, tmp_path).calibration()["builds"] for m in b["masters"])
     assert master["exposure"] == 0.25 and master["exposureFrom"] == "XISF FrameExposureTime"
     assert master["suspect"] is None
+
+
+def test_an_ignored_session_stays_listed_but_leaves_the_totals(data_root, tmp_path):
+    app = create_app(Config(data_root=data_root, db_path=tmp_path / "var" / "ign.db"), scan_on_start=False)
+    with TestClient(app) as client:
+        app.state.engine._run_scan()
+        url = "/api/revisions/ic-1848-soul-nebula"
+        before = client.get(url).json()
+        night2 = next(s for s in before["sessions"] if s["folder"] == "NIGHT_2026-02-02")
+        assert night2["ignored"] is False
+        after = client.put(f"{url}/sessions/NIGHT_2026-02-02/ignored", json={"ignored": True}).json()
+        s2 = next(s for s in after["sessions"] if s["folder"] == "NIGHT_2026-02-02")
+        assert s2["ignored"] is True and s2["totals"] == night2["totals"]  # still listed, with its own numbers
+        assert after["totals"]["seconds"] == before["totals"]["seconds"] - night2["totals"]["seconds"]
+        assert after["totals"]["nights"] == before["totals"]["nights"] - 1
+        assert after["totals"]["ignoredNights"] == 1 and after["totals"]["ignoredSeconds"] == night2["totals"]["seconds"]
+        assert after["totals"]["last"] == "2026-02-01"
+        assert {f["filter"] for f in after["filters"]} == {"H"}  # night 2's O and S are gone from the filters
+        assert sum(f["acceptedSeconds"] for f in after["filters"]) == after["totals"]["seconds"]
+        # Its flats/darks issues no longer count; the overview follows.
+        ov = next(t for t in client.get("/api/targets").json()["targets"] if t["catalogId"] == "IC 1848")
+        assert ov["revisions"][0]["totals"]["seconds"] == after["totals"]["seconds"]
+        # A rescan keeps the decision; bringing the night back restores the totals.
+        app.state.engine._run_scan()
+        assert client.get(url).json()["totals"]["ignoredNights"] == 1
+        back = client.put(f"{url}/sessions/NIGHT_2026-02-02/ignored", json={"ignored": False}).json()
+        assert back["totals"] == {**before["totals"]}
+        assert client.put(f"{url}/sessions/NIGHT_1999-01-01/ignored", json={"ignored": True}).status_code == 404
+
+
+def test_acquired_time_counts_set_aside_lights_once(data_root, tmp_path):
+    rev = build(data_root, tmp_path).revision("ic-1848-soul-nebula")
+    night = next(s for s in rev["sessions"] if s["folder"] == "NIGHT_2026-02-01")
+    t = night["totals"]
+    # 3 H lights: h2 rejected through its _REJECTED copy (counted once), the Accepted copy not at all.
+    assert t["lights"] == 2 and t["rejected"] == 1
+    assert t["acquiredSeconds"] == t["seconds"] * 3 / 2
+    assert rev["totals"]["acquiredSeconds"] == sum(s["totals"]["acquiredSeconds"] for s in rev["sessions"])

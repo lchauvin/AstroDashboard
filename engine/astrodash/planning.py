@@ -139,15 +139,15 @@ def accepted_seconds(rev: dict[str, Any], summaries: list[dict[str, Any]],
                 rejected += g.get("rejected") or 0
         accepted = 0.0
         for filt, secs in raw.items():
+            analysed = bool(diag and filt in kept)
+            good = min(secs, kept[filt]) if analysed else secs
+            accepted += good
+            if s.get("ignored"):
+                continue  # listed with its own numbers, never in the target's
             o = out.setdefault(filt, {"seconds": 0.0, "goodSeconds": 0.0, "analysedSeconds": 0.0})
             o["seconds"] += secs
-            if diag and filt in kept:
-                good = min(secs, kept[filt])
-                o["analysedSeconds"] += secs
-            else:
-                good = secs
+            o["analysedSeconds"] += secs if analysed else 0.0
             o["goodSeconds"] += good
-            accepted += good
         if diag:
             sessions[s["folder"]] = {"finished": diag["finished"], "acceptedSeconds": accepted, "rejected": rejected}
     return out, sessions

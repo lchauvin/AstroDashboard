@@ -16,7 +16,9 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from .diagnostics import overrides
 from .organizer import apply as applier
+from .organizer import quarantine
 from .organizer.plan import TRASH, canonical_plan, new_revision_plan, new_target_plan
 
 
@@ -28,6 +30,11 @@ class NewTargetRequest(BaseModel):
     catalogId: str = Field(min_length=1, max_length=60)  # noqa: N815
     name: str = Field(min_length=1, max_length=100)
     panels: int = Field(default=1, ge=1, le=50)
+
+
+class NightRequest(BaseModel):
+    revisionId: str = Field(min_length=1, max_length=300)  # noqa: N815
+    session: str = Field(min_length=1, max_length=200)
 
 
 class ApplyRequest(BaseModel):
@@ -129,6 +136,33 @@ def register(app: FastAPI, state) -> None:
         meta["notes"] = ""
         return _store(new_target_plan(root, catalog_id, name, json.dumps(meta, indent=2) + "\n"))
 
+    def _night(body: NightRequest) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        lib = state.require_library()
+        rev = lib.revisions.get(body.revisionId)
+        if rev is None or lib.session(body.revisionId, body.session) is None:
+            raise HTTPException(404, detail="No such night")
+        return rev, cache.diagnostic(body.revisionId, body.session)
+
+    @app.post("/api/organizer/quarantine")
+    def quarantine_night(body: NightRequest) -> dict[str, Any]:
+        """A draft plan moving the night's rejected lights (your overrides applied) to the quarantine."""
+        rev, stored = _night(body)
+        if stored is None:
+            raise HTTPException(404, detail="This night has not been analysed")
+        paths = quarantine.rejected_lights(overrides.apply(stored["result"]), rev["folder"], body.session)
+        if not paths:
+            raise HTTPException(409, detail="No rejected light of this night is left in .SessionData")
+        return _store(quarantine.quarantine_plan(root, rev["id"], rev["folder"], body.session, paths))
+
+    @app.post("/api/organizer/restore-quarantine")
+    def restore_night(body: NightRequest) -> dict[str, Any]:
+        """A draft plan putting back what the night's quarantine plans moved (and nothing else)."""
+        rev, _ = _night(body)
+        moves = quarantine.restorable(cache.plans(10000), root, rev["id"], body.session)
+        if not moves:
+            raise HTTPException(409, detail="Nothing of this night was quarantined by the dashboard")
+        return _store(quarantine.restore_plan(root, rev["id"], rev["folder"], body.session, moves))
+
     @app.get("/api/organizer/plans/{plan_id}")
     def get_plan(plan_id: str) -> dict[str, Any]:
         p = cache.plan(plan_id)
@@ -173,6 +207,8 @@ def register(app: FastAPI, state) -> None:
                 renames[a[1]] = b[1]
         if moves:
             cache.remap_diagnostics(p["revisionId"], moves, renames)
+        if renames:
+            cache.rename_ignored_sessions(p["revisionId"], renames)
 
     @app.post("/api/organizer/plans/{plan_id}/undo")
     def undo(plan_id: str) -> dict[str, Any]:

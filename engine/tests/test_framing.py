@@ -242,3 +242,20 @@ def test_framing_api_compares_each_night_with_the_one_before(tmp_path):
         assert res["status"] == "ready" and res["previous"] == "NIGHT_2026-09-03" and res["level"] == "bad"
         assert svc.live(str(live), None, None, "2026-09-04")["status"] == "no-target"
         assert svc.live(str(live), "ngc-1-test", None, "2026-09-01")["status"] == "first"
+
+        # Ignoring the third night: the next one is compared with the second, the third still with the second.
+        r = client.put("/api/revisions/ngc-1-test/sessions/NIGHT_2026-09-03/ignored", json={"ignored": True})
+        assert r.status_code == 200 and r.json()["totals"]["nights"] == 2
+        res = svc.live(str(live), "ngc-1-test", None, "2026-09-04")
+        assert res["status"] == "ready" and res["previous"] == "NIGHT_2026-09-02" and res["level"] == "ok"
+        third = client.get("/api/framing/sessions/ngc-1-test/NIGHT_2026-09-03").json()["panels"][0]
+        assert third["verdict"]["previous"] == "NIGHT_2026-09-02" and third["night"]["frames"] == 3
+        # Ignoring the first night: the second becomes the reference.
+        client.put("/api/revisions/ngc-1-test/sessions/NIGHT_2026-09-01/ignored", json={"ignored": True})
+        s = client.get("/api/framing/revisions/ngc-1-test").json()["sessions"]
+        assert s["NIGHT_2026-09-02"][""]["status"] == "first"
+        assert s["NIGHT_2026-09-03"][""]["previous"] == "NIGHT_2026-09-02"
+        # Back in: the first night is the reference again.
+        client.put("/api/revisions/ngc-1-test/sessions/NIGHT_2026-09-01/ignored", json={"ignored": False})
+        s = client.get("/api/framing/revisions/ngc-1-test").json()["sessions"]
+        assert s["NIGHT_2026-09-02"][""]["previous"] == "NIGHT_2026-09-01"

@@ -72,12 +72,14 @@ class Plan:
     warnings: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
     lint: list[dict[str, Any]] = field(default_factory=list)
+    extra: dict[str, Any] = field(default_factory=dict)  # stored with the plan (quarantine: kind, session)
 
     def as_dict(self) -> dict[str, Any]:
         counts: dict[str, int] = {}
         for o in self.ops:
             counts[o.op] = counts.get(o.op, 0) + 1
         return {
+            **self.extra,
             "revisionId": self.revision_id,
             "target": self.target,
             "title": self.title,

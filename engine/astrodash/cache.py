@@ -28,6 +28,12 @@ CREATE TABLE IF NOT EXISTS dismissals (
     note    TEXT,
     created REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ignored_sessions (
+    revision TEXT NOT NULL,
+    session  TEXT NOT NULL,
+    created  REAL NOT NULL,
+    PRIMARY KEY (revision, session)
+);
 CREATE TABLE IF NOT EXISTS diagnostics (
     revision TEXT NOT NULL,
     session  TEXT NOT NULL,
@@ -149,6 +155,28 @@ class HeaderCache:
     def undismiss(self, key: str) -> bool:
         with self._lock, self._conn:
             return self._conn.execute("DELETE FROM dismissals WHERE key = ?", (key,)).rowcount > 0
+
+    # ------------------------------------------------------------------ ignored sessions
+
+    def ignored_sessions(self) -> set[tuple[str, str]]:
+        """(revision id, session folder) of the nights left out of a target's totals and framing."""
+        with self._lock:
+            return {(r, s) for r, s in self._conn.execute("SELECT revision, session FROM ignored_sessions").fetchall()}
+
+    def set_session_ignored(self, revision: str, session: str, ignored: bool) -> None:
+        with self._lock, self._conn:
+            if ignored:
+                self._conn.execute("INSERT OR IGNORE INTO ignored_sessions(revision, session, created) VALUES (?,?,?)",
+                                   (revision, session, time.time()))
+            else:
+                self._conn.execute("DELETE FROM ignored_sessions WHERE revision = ? AND session = ?", (revision, session))
+
+    def rename_ignored_sessions(self, revision: str, renames: dict[str, str]) -> None:
+        """After an organizer plan renamed session folders: the decision follows the folder."""
+        with self._lock, self._conn:
+            for old, new in renames.items():
+                self._conn.execute("UPDATE OR IGNORE ignored_sessions SET session = ? WHERE revision = ? AND session = ?",
+                                   (new, revision, old))
 
     def save_diagnostic(self, revision: str, session: str, duration: float, summary: dict, result: dict) -> None:
         with self._lock, self._conn:

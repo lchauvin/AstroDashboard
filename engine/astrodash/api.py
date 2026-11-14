@@ -19,6 +19,7 @@ from .config import Config
 from .diagnostics.detectors import analyse as analyse_frames, horizon_samples, learn_horizon
 from .diagnostics import overrides
 from .diagnostics.jobs import DiagnosticsJobs, summarize as summarize_diagnostic
+from .organizer import quarantine
 from .library import Library
 from .preview import preview as frame_preview
 from .scanner import Scanner
@@ -32,6 +33,10 @@ class Dismissal(BaseModel):
     key: str = Field(min_length=1, max_length=500)
     label: str | None = Field(default=None, max_length=500)
     note: str | None = Field(default=None, max_length=1000)
+
+
+class SessionIgnore(BaseModel):
+    ignored: bool
 
 
 class FrameDecision(BaseModel):
@@ -87,7 +92,7 @@ class EngineState:
             result = self.scanner.scan()
             self.scanner.progress.phase = "building library"
             self.last_scan = result
-            self.library = Library(result, self.cfg, self.cache.dismissals())
+            self.library = Library(result, self.cfg, self.cache.dismissals(), self.cache.ignored_sessions())
             self.scanner.progress.phase = "done"
             if self.warm_framing:
                 self.framing.warm()
@@ -98,9 +103,9 @@ class EngineState:
             self.last_error = f"{type(exc).__name__}: {exc}"
 
     def rebuild(self) -> None:
-        """Re-derive the Library from the last scan (after a dismissal change); no disk walk."""
+        """Re-derive the Library from the last scan (after a dismissal or ignored-session change); no disk walk."""
         if self.last_scan is not None:
-            self.library = Library(self.last_scan, self.cfg, self.cache.dismissals())
+            self.library = Library(self.last_scan, self.cfg, self.cache.dismissals(), self.cache.ignored_sessions())
 
     def require_library(self) -> Library:
         if self.library is None:
@@ -217,6 +222,17 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
         ]
         return rev
 
+    @app.put("/api/revisions/{rev_id}/sessions/{session}/ignored")
+    def ignore_session(rev_id: str, session: str, body: SessionIgnore) -> dict[str, Any]:
+        """Leave a night out of the target (totals, goals, checks, framing reference), or bring it back.
+        Stored in the dashboard database; the night's files stay where they are."""
+        lib = state.require_library()
+        if lib.session(rev_id, session) is None:
+            raise HTTPException(404, detail="No such session")
+        state.cache.set_session_ignored(rev_id, session, body.ignored)
+        state.rebuild()
+        return revision(rev_id)
+
     @app.get("/api/revisions/{rev_id}/preview.jpg")
     def preview(rev_id: str):
         src = state.require_library().preview_path(rev_id)
@@ -331,6 +347,16 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
             "job": jobs[-1] if jobs else None,
             "stored": {**stored, "result": _user_rules(rev, overrides.apply(stored["result"]))} if stored else None,
             "analysis": _analysis(rev_id, session, stored["result"]) if stored else None,
+            "quarantine": _quarantine(rev, session, stored),
+        }
+
+    def _quarantine(rev: dict[str, Any], session: str, stored: dict[str, Any] | None) -> dict[str, Any]:
+        """Rejected lights WBPP would still load, and lights the dashboard quarantined that can go back."""
+        result = overrides.apply(stored["result"]) if stored else {}
+        return {
+            "pending": len(quarantine.rejected_lights(result, rev["folder"], session)),
+            "restorable": len(quarantine.restorable(state.cache.plans(10000), cfg.data_root.resolve(), rev["id"], session)),
+            "paths": sorted(quarantine.quarantined_lights(result)),
         }
 
     @app.post("/api/diagnostics/{rev_id}/{session}/frames")

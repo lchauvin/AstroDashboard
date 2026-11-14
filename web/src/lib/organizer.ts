@@ -45,6 +45,9 @@ export type OrgPlan = OrgPlanSummary & {
   lint: Lint[];
   undoOf?: string;
   dataRoot?: string;
+  /** Plans made from a night's diagnostics: which night, and what they do. */
+  kind?: "quarantine" | "restore-quarantine";
+  session?: string;
 };
 
 export type Trash = { path: string; plans: { plan: string; bytes: number; files: number }[]; bytes: number; files: number };

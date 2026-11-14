@@ -164,3 +164,46 @@
   font: 400 10.5px/1 var(--font-mono);
   color: var(--text-muted);
 }
+
+/* A night left out of the target: listed, dimmed, not counted. */
+.ignoredRow > td {
+  opacity: 0.45;
+}
+
+.ignoredRow > td.night {
+  opacity: 1;
+}
+
+.ignoredRow .date {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  color: var(--text-muted);
+}
+
+.ignore {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 400 11px/1.2 var(--font-body);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ignore:hover:not(:disabled) {
+  color: var(--color-accent-700);
+}
+
+.ignore:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.ignoreError {
+  display: block;
+  font-size: 10.5px;
+  color: var(--status-bad);
+}

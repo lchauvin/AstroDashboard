@@ -4,6 +4,7 @@ import { Moon } from "lucide-react";
 import { exposure, FILTER_ORDER, filterLabel, hours, num, settingsLabel, shortDate } from "@/lib/format";
 import type { DarkStatus, FlatStatus, LightGroup, Level, Revision, Session } from "@/lib/types";
 import { FramingCell, FramingKey, FramingProvider } from "./Framing";
+import { IgnoreSession } from "./IgnoreSession";
 import { Badge, FilterChip, StatusIcon, Tip } from "./ui";
 import styles from "./SessionMatrix.module.css";
 
@@ -92,10 +93,13 @@ function Cell({ session, filter, panels }: { session: Session; filter: string; p
   }
   const seconds = usable.reduce((s, g) => s + g.seconds, 0);
   const exposures = [...new Set(usable.map((g) => g.exposure))];
-  const byExposure = exposures.map((e) => ({
-    e,
-    frames: usable.filter((g) => g.exposure === e).reduce((s, g) => s + g.frames, 0),
-  }));
+  // Rejected / quarantined frames sit next to the count of their exposure: "23×300s (−3)".
+  const byExposure = exposures.map((e) => {
+    const gs = groups.filter((g) => g.exposure === e);
+    return { e, frames: gs.reduce((s, g) => s + g.frames, 0), setAside: gs.reduce((s, g) => s + g.rejected + g.quarantined, 0) };
+  });
+  // Set aside at an exposure with nothing usable left (rare): its own line.
+  const otherSetAside = setAside - byExposure.reduce((s, x) => s + x.setAside, 0);
   const flat = session.flatStatus[filter];
   const flatLvl = flatLevel(flat);
   const dark = worstDark(usable);
@@ -107,8 +111,18 @@ function Cell({ session, filter, panels }: { session: Session; filter: string; p
         {byExposure.map((x) => (
           <span key={String(x.e)}>
             {x.frames}×{exposure(x.e).replace(" s", "s")}
+            {x.setAside ? (
+              <span className={styles.setAside} title={`${x.setAside} rejected or quarantined`}>
+                {" "}(−{x.setAside})
+              </span>
+            ) : null}
           </span>
         ))}
+        {otherSetAside > 0 ? (
+          <span className={styles.setAside} title={`${otherSetAside} rejected or quarantined at another exposure`}>
+            (−{otherSetAside})
+          </span>
+        ) : null}
       </div>
       <div className={`num ${styles.hours}`}>{hours(seconds)}</div>
       {panels.length ? (
@@ -172,7 +186,6 @@ function Cell({ session, filter, panels }: { session: Session; filter: string; p
             </span>
           </Tip>
         ) : null}
-        {setAside ? <span className={`num ${styles.setAside}`}>−{setAside}</span> : null}
       </div>
     </td>
   );
@@ -234,7 +247,13 @@ export function SessionMatrix({ rev }: { rev: Revision }) {
   );
   if (!rev.sessions.length) return <p className="muted">No sessions yet.</p>;
   return (
-    <FramingProvider revId={rev.id}>
+    <FramingProvider
+      revId={rev.id}
+      version={rev.sessions
+        .filter((s) => s.ignored)
+        .map((s) => s.folder)
+        .join("|")}
+    >
       <div className={styles.scroller}>
         <table className={`table ${styles.matrix}`}>
           <thead>
@@ -255,7 +274,7 @@ export function SessionMatrix({ rev }: { rev: Revision }) {
           </thead>
           <tbody>
             {rev.sessions.map((s) => (
-              <tr key={s.id}>
+              <tr key={s.id} className={s.ignored ? styles.ignoredRow : undefined}>
                 <td className={styles.night}>
                   <div className={styles.date}>
                     {s.totals.lights ? (
@@ -273,23 +292,35 @@ export function SessionMatrix({ rev }: { rev: Revision }) {
                   <div className={styles.folder}>
                     <span className="mono">{s.folder}</span>
                     {s.naming === "legacy" ? <Badge tone="muted">legacy name</Badge> : null}
+                    {s.ignored ? <Badge tone="muted">ignored</Badge> : null}
                   </div>
                   {s.nightMismatch ? (
                     <div className={styles.note}>
                       <StatusIcon level="info" size={12} /> headers say {s.headerNights.join(", ")}
                     </div>
                   ) : null}
+                  {s.totals.lights ? <IgnoreSession revId={rev.id} folder={s.folder} ignored={Boolean(s.ignored)} /> : null}
                 </td>
                 {filters.map((f) => (
                   <Cell key={f} session={s} filter={f} panels={rev.panels} />
                 ))}
                 <td className={`num ${styles.total}`}>
-                  <Tip tip={`Total frames: ${s.totals.lights}`}>{hours(s.totals.seconds)}</Tip>
+                  <Tip
+                    tip={`Total frames: ${s.totals.lights + s.totals.rejected + s.totals.quarantined}${
+                      s.totals.rejected + s.totals.quarantined ? ` (${s.totals.rejected + s.totals.quarantined} set aside)` : ""
+                    }`}
+                  >
+                    {hours(s.totals.acquiredSeconds ?? s.totals.seconds)}
+                  </Tip>
                 </td>
                 <td className={`num ${styles.total}`}>
                   {s.diagnostic ? (
                     <Tip tip={`Rejected frames: ${s.diagnostic.rejected}`}>
                       <span className={styles.usable}>{hours(s.diagnostic.acceptedSeconds)}</span>
+                    </Tip>
+                  ) : (s.totals.acquiredSeconds ?? 0) > s.totals.seconds ? (
+                    <Tip tip={`Not analysed: ${s.totals.rejected + s.totals.quarantined} frames set aside in folders`}>
+                      <span className={styles.usable}>{hours(s.totals.seconds)}</span>
                     </Tip>
                   ) : (
                     <span className="muted" aria-label="Not analysed">—</span>

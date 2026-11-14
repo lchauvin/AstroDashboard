@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from ..organizer.quarantine import in_quarantine
 from .runner import _group_summary
 
 DECISIONS = ("keep", "reject")
@@ -47,9 +48,10 @@ def light_paths(result: dict[str, Any]) -> set[str]:
 
 
 def carry_over(previous: dict[str, Any] | None, result: dict[str, Any]) -> None:
-    """Keep the decisions of the last run for the frames this run measured again."""
+    """Keep the decisions of the last run for the frames this run measured again, and for
+    quarantined frames: a run no longer measures them, but a restore brings them back."""
     old = (previous or {}).get("overrides") or {}
     paths = light_paths(result)
-    kept = {p: d for p, d in old.items() if p in paths}
+    kept = {p: d for p, d in old.items() if p in paths or in_quarantine(p)}
     if kept:
         result["overrides"] = kept

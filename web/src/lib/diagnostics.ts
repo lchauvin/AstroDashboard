@@ -233,6 +233,8 @@ export interface DiagDetail {
   job: DiagJob | null;
   stored: { finished: number; duration: number; result: DiagResult } | null;
   analysis: Analysis | null;
+  /** Rejected lights still in .SessionData (WBPP would load them), and lights the dashboard quarantined. */
+  quarantine?: { pending: number; restorable: number; paths: string[] };
 }
 
 /** astro-eval rejection flag → readable label. */

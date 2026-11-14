@@ -29,12 +29,17 @@ export interface RevisionSummary {
 
 export interface RevisionTotals {
   seconds: number;
+  /** Everything shot, rejected and quarantined lights included (seconds: the usable ones). */
+  acquiredSeconds?: number;
   lights: number;
   rejected: number;
   quarantined: number;
   nights: number;
   first: string | null;
   last: string | null;
+  /** Nights you left out, and their acquired time (not in the totals above). */
+  ignoredNights?: number;
+  ignoredSeconds?: number;
   /** Revision detail only: seconds left after diagnostics rejection (unanalysed nights count in full). */
   acceptedSeconds?: number;
   /** Revision detail only: acquired seconds on nights diagnostics has analysed. */
@@ -143,7 +148,10 @@ export interface Session {
   start: string | null;
   end: string | null;
   conditions: Conditions | null;
-  totals: { lights: number; seconds: number; rejected: number; quarantined: number; flats: number };
+  /** seconds: the usable lights; acquiredSeconds: everything shot, set-aside lights included. */
+  totals: { lights: number; seconds: number; acquiredSeconds?: number; rejected: number; quarantined: number; flats: number };
+  /** Left out of the target: still listed, not in its totals, checks or framing reference. */
+  ignored?: boolean;
   /** Revision detail only: the stored diagnostics run for this night, if any. */
   diagnostic?: { finished: number; acceptedSeconds: number; rejected: number } | null;
 }

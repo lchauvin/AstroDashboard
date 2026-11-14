@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Play, RotateCw } from "lucide-react";
+import { ArchiveRestore, Play, RotateCw, ShieldOff } from "lucide-react";
 
 import type { DiagDetail, DiagJob, LightFrame, LightGroupResult } from "@/lib/diagnostics";
 import { FLAG_LABELS, decisionFor, filterLetter, overrideNote, reasonLabel } from "@/lib/diagnostics";
@@ -174,6 +174,29 @@ export function SessionDiagnostics({
     const f = frameByPath.get(path);
     if (f) void decide(f, reject);
   };
+  // Quarantine: an organizer plan you approve on its own page, like every other move.
+  const [planning, setPlanning] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const quarantine = current.quarantine;
+  const quarantinedPaths = useMemo(() => new Set(quarantine?.paths ?? []), [quarantine]);
+  async function preparePlan(kind: "quarantine" | "restore-quarantine") {
+    setPlanning(true);
+    setPlanError(null);
+    try {
+      const res = await fetch(`/engine/api/organizer/${kind}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revisionId: detail.revision.id, session: detail.session.folder }),
+      });
+      const body = (await res.json().catch(() => null)) as { id?: string; detail?: string } | null;
+      if (!res.ok || !body?.id) throw new Error(body?.detail ?? res.statusText);
+      router.push(`/library/organizer/${encodeURIComponent(body.id)}`);
+    } catch (e) {
+      setPlanError(e instanceof Error ? e.message : String(e));
+      setPlanning(false);
+    }
+  }
+
   const openPaths = (paths: string[]) => {
     const wanted = new Set(paths);
     const frames = allLights
@@ -203,6 +226,35 @@ export function SessionDiagnostics({
             {stored ? "Re-run analysis" : "Analyse this night"}
           </button>
         )}
+        {!active && quarantine?.pending ? (
+          <button
+            type="button"
+            className="button"
+            disabled={planning}
+            onClick={() => preparePlan("quarantine")}
+            title="Prepare a plan moving the rejected lights to the quarantine folder, out of WBPP's reach. Nothing moves until you approve it."
+          >
+            <ShieldOff size={13} strokeWidth={1.8} />
+            Quarantine {quarantine.pending} rejected
+          </button>
+        ) : null}
+        {!active && quarantine?.restorable ? (
+          <button
+            type="button"
+            className="button"
+            disabled={planning}
+            onClick={() => preparePlan("restore-quarantine")}
+            title="Prepare a plan putting the lights this dashboard quarantined back in their night folder. Nothing moves until you approve it."
+          >
+            <ArchiveRestore size={13} strokeWidth={1.8} />
+            Put back {quarantine.restorable} quarantined
+          </button>
+        ) : null}
+        {planError ? (
+          <span>
+            <StatusIcon level="bad" /> Could not prepare the plan — {planError}
+          </span>
+        ) : null}
         {job?.status === "failed" ? (
           <span>
             <StatusIcon level="bad" /> Last run failed: {job.error}
@@ -337,6 +389,7 @@ export function SessionDiagnostics({
                 onDecide={decide}
                 deciding={deciding}
                 framing={Object.values(frameFraming).some((x) => x.cornerPx != null) ? frameFraming : undefined}
+                quarantined={quarantinedPaths}
               />
             </section>
           ) : null}

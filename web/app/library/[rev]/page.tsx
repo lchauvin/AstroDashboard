@@ -42,6 +42,8 @@ export default async function TargetPage({ params }: { params: Promise<{ rev: st
   // Usable = acquired minus what diagnostics rejected; shown once any night has been analysed.
   const analysed = t.analysedSeconds ?? 0;
   const accepted = t.acceptedSeconds ?? t.seconds;
+  // Acquired = everything shot; rejected and quarantined lights are only taken off the usable time.
+  const acquired = t.acquiredSeconds ?? t.seconds;
   // Goals: the same model and editor as Planning, at the default site.
   const [planning, telescopius] = await Promise.all([loadPlanningData(), loadTelescopiusObject(rev.catalogId, rev.name)]);
   const one = planning.ok ? planOne(planning.data, rev.id, null, isoDate(new Date()), 0) : null;
@@ -96,16 +98,16 @@ export default async function TargetPage({ params }: { params: Promise<{ rev: st
         ) : null}
       </div>
 
-      <div className={analysed ? `${styles.stats} ${styles.stats5}` : styles.stats}>
-        <StatTile label="Acquired" value={hours(t.seconds)} sub={`${t.lights} lights`} />
-        {analysed ? (
+      <div className={analysed || acquired > t.seconds ? `${styles.stats} ${styles.stats5}` : styles.stats}>
+        <StatTile label="Acquired" value={hours(acquired)} sub={`${t.lights + t.rejected + t.quarantined} lights`} />
+        {analysed || acquired > t.seconds ? (
           <StatTile
             label="Usable"
             value={hours(accepted)}
             sub={
-              analysed < t.seconds
+              analysed && analysed < t.seconds
                 ? `after diagnostics · ${hours(analysed)} of ${hours(t.seconds)} analysed`
-                : `after diagnostics · −${hours(t.seconds - accepted)}`
+                : `−${hours(acquired - accepted)} rejected or set aside`
             }
           />
         ) : null}
@@ -161,7 +163,11 @@ export default async function TargetPage({ params }: { params: Promise<{ rev: st
       <section className={styles.block}>
         <div className={styles.blockHead}>
           <h2 className="section-title">Sessions</h2>
-          <span className="eyebrow">Frames × exposure · flats · darks · framing · conditions</span>
+          {t.ignoredNights ? (
+            <span className="eyebrow">
+              {t.ignoredNights} ignored night{t.ignoredNights > 1 ? "s" : ""} · {hours(t.ignoredSeconds ?? 0)} not counted
+            </span>
+          ) : null}
         </div>
         <SessionMatrix rev={rev} />
       </section>

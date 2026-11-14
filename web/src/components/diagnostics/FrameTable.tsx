@@ -34,6 +34,7 @@ export function FrameTable({
   onDecide,
   deciding,
   framing,
+  quarantined,
 }: {
   groups: LightGroupResult[];
   onSelect: (frames: LightFrame[], index: number) => void;
@@ -46,6 +47,8 @@ export function FrameTable({
   deciding?: string | null;
   /** Each frame against the previous night's framing (adds a Framing column). */
   framing?: Record<string, FrameFraming>;
+  /** Paths moved to the quarantine folder (out of WBPP's reach). */
+  quarantined?: Set<string>;
 }) {
   const [tab, setTab] = useState<string>("all");
   const [sort, setSort] = useState<{ key: Col["key"] | "framing"; dir: 1 | -1 }>({ key: "time", dir: 1 });
@@ -136,14 +139,22 @@ export function FrameTable({
                   {f.rejected ? (
                     <span style={{ display: "inline-flex", gap: 6, alignItems: "flex-start" }}>
                       <StatusIcon level="bad" size={13} label="Rejected" />
-                      <span className={styles.reasonList}>{f.reasons.map(reasonLabel).join(", ")}</span>
+                      <span className={styles.reasonList}>
+                        {f.reasons.map(reasonLabel).join(", ")}
+                        {quarantined?.has(f.path) ? " · quarantined" : ""}
+                      </span>
                     </span>
                   ) : (
                     <span style={{ display: "inline-flex", gap: 6 }}>
                       <StatusIcon level="ok" size={13} label="Kept" />
                       {f.override ? (
                         <span className={styles.reasonList}>{overrideNote(f)}</span>
-                      ) : f.n_trails ? (
+                      ) : null}
+                      {quarantined?.has(f.path) ? (
+                        <span className={styles.reasonList} title="Still in the quarantine folder: put it back to stack it">
+                          quarantined
+                        </span>
+                      ) : f.n_trails && !f.override ? (
                         <span className={styles.reasonList}>{f.trail_type} trail</span>
                       ) : null}
                     </span>

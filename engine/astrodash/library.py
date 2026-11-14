@@ -79,10 +79,13 @@ def resolve_rejected_copies(frames: list[Frame]) -> None:
 
 
 class Library:
-    def __init__(self, scan: ScanResult, cfg: Config, dismissals: dict[str, dict[str, Any]] | None = None):
+    def __init__(self, scan: ScanResult, cfg: Config, dismissals: dict[str, dict[str, Any]] | None = None,
+                 ignored_sessions: set[tuple[str, str]] | None = None):
         self.cfg = cfg
         # Issues the user chose to ignore, keyed by dark_key(); still reported, never counted.
         self.dismissals = dismissals or {}
+        # (revision id, session folder) of the nights you left out: listed, never counted.
+        self.ignored_sessions = ignored_sessions or set()
         self.scanned_at = scan.finished_at
         self.scan_duration = scan.duration_s
         today = date.today()
@@ -149,14 +152,20 @@ class Library:
 
         sessions.sort(key=lambda s: (s["date"] or "", s["folder"]))
         self._resolve_flats(sessions, master_flats)
+        rev_id = slugify(t.folder)
+        for s in sessions:
+            s["ignored"] = (rev_id, s["folder"]) in self.ignored_sessions
+        # An ignored night stays listed, but its time, frames and issues are not the target's.
+        active = [s for s in sessions if not s["ignored"]]
+        left_out = [s for s in sessions if s["ignored"]]
 
-        filters = self._filter_totals(sessions)
+        filters = self._filter_totals(active)
         lights_ok = [f for f in frames if f.kind == "LIGHT" and f.status == "ok"]
         equipment = sorted({
             (f.instrume or "?", f.telescop or "?", f.focallen or 0) for f in lights_ok
         })
-        total_seconds = sum(s["totals"]["seconds"] for s in sessions)
-        nights = [s for s in sessions if s["totals"]["lights"] > 0]
+        total_seconds = sum(s["totals"]["seconds"] for s in active)
+        nights = [s for s in active if s["totals"]["lights"] > 0]
         panels = sorted({g["panel"] for s in sessions for g in s["lightGroups"] if g["panel"]}, key=lambda p: int(p) if p.isdigit() else 0)
 
         stage = self._stage(info, tj)
@@ -168,7 +177,7 @@ class Library:
                     if st.get("readoutWrong"):
                         st["readoutAccepted"] = st.pop("readoutWrong")
         rev = {
-            "id": slugify(t.folder),
+            "id": rev_id,
             "folder": t.folder,
             "catalogId": tj.get("catalog_id") or t.catalog_id,
             "name": tj.get("name") or t.name,
@@ -191,10 +200,13 @@ class Library:
             "equipment": [{"instrume": i, "telescop": tel, "focalLength": fl} for i, tel, fl in equipment],
             "totals": {
                 "seconds": total_seconds,
-                "lights": sum(s["totals"]["lights"] for s in sessions),
-                "rejected": sum(s["totals"]["rejected"] for s in sessions),
-                "quarantined": sum(s["totals"]["quarantined"] for s in sessions),
+                "acquiredSeconds": sum(s["totals"]["acquiredSeconds"] for s in active),
+                "lights": sum(s["totals"]["lights"] for s in active),
+                "rejected": sum(s["totals"]["rejected"] for s in active),
+                "quarantined": sum(s["totals"]["quarantined"] for s in active),
                 "nights": len(nights),
+                "ignoredNights": len(left_out),
+                "ignoredSeconds": sum(s["totals"]["seconds"] for s in left_out),
                 "first": nights[0]["date"] if nights else None,
                 "last": nights[-1]["date"] if nights else None,
             },
@@ -323,6 +335,8 @@ class Library:
             "totals": {
                 "lights": len(ok_lights),
                 "seconds": sum(f.exposure or 0 for f in ok_lights),
+                # Everything shot: the usable lights plus those set aside (rejected, quarantined).
+                "acquiredSeconds": sum(f.exposure or 0 for f in lights if f.status in ("ok", "rejected", "quarantined")),
                 "rejected": sum(1 for f in lights if f.status == "rejected"),
                 "quarantined": sum(1 for f in lights if f.status == "quarantined"),
                 "flats": sum(1 for f in flats if f.status == "ok"),
@@ -493,7 +507,9 @@ class Library:
         missing, borrowed, binmix, focus, readout_wrong = [], [], [], [], []
         flat_cal_missing: dict[str, set] = {}
         flat_cal_suspect: dict[str, set] = {}
-        for s in rev["sessions"]:
+        # Flats and darks only matter for the nights that will be stacked.
+        active = [s for s in rev["sessions"] if not s.get("ignored")]
+        for s in active:
             for filt, st in s["flatStatus"].items():
                 label = f"{s['folder']} · {filt}"
                 if st["status"] == "missing":
@@ -538,11 +554,11 @@ class Library:
                 f"Flats can only be calibrated with a suspect bias (shorter than {self.cfg.min_bias_exposure_s:g} s)",
                 [f"{k} — {len(v)} night{'s' if len(v) > 1 else ''}" for k, v in sorted(flat_cal_suspect.items())],
             ))
-        if not (missing or binmix or borrowed) and rev["sessions"]:
+        if not (missing or binmix or borrowed) and active:
             checks.append(Check("ok", "flats", "Every night/filter has its own flats"))
 
         dark_missing, dark_raw, dark_unverified, dark_ok, dark_dismissed = {}, {}, {}, {}, {}
-        for s in rev["sessions"]:
+        for s in active:
             for g in s["lightGroups"]:
                 if not g["frames"] or not g["dark"]:
                     continue
@@ -671,7 +687,7 @@ class Library:
                     "revisionId": rev["id"], "catalogId": rev["catalogId"], "name": rev["name"],
                     "revision": rev["revision"], "stage": rev["stage"]["value"], "folder": s["folder"],
                     "date": s["date"], "lights": s["totals"]["lights"], "seconds": s["totals"]["seconds"],
-                    "filters": filters,
+                    "filters": filters, "ignored": s.get("ignored", False),
                 })
         return sorted(out, key=lambda x: (x["date"] or "", x["catalogId"]), reverse=True)
 

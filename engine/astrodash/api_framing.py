@@ -7,8 +7,8 @@ Diagnostics page every light of its night, Live the newest light as it lands. A 
 uses every light of it whose stars are known, so it only gets better as more are measured.
 
 The previous night is the one before in the same revision and panel; a night whose stars all
-failed (clouds) is skipped over, so the next one is compared with the last night that has a
-framing.
+failed (clouds), or one you left out of the target, is skipped over, so the next one is compared
+with the last night that has a framing. An ignored night is still compared with that reference.
 """
 
 from __future__ import annotations
@@ -46,6 +46,7 @@ class _Night:
     folder: str
     date: str | None
     frames: list[Frame]
+    ignored: bool = False     # left out of the target: compared, never the reference
 
 
 def _sample(frames: list[Frame], n: int = SAMPLE) -> list[Frame]:
@@ -203,7 +204,7 @@ class FramingService:
         chains: dict[str | None, list[_Night]] = defaultdict(list)
         for s in rev["sessions"]:
             for panel, frames in index.get((rev["folder"], s["folder"]), {}).items():
-                chains[panel].append(_Night(s["folder"], s["date"], frames))
+                chains[panel].append(_Night(s["folder"], s["date"], frames, bool(s.get("ignored"))))
         return chains
 
     def _framing(self, frames: list[Frame]) -> tuple[tuple, Night | None]:
@@ -268,7 +269,8 @@ class FramingService:
                 verdicts.append({"status": "unmeasured"})
                 continue
             verdicts.append(self._compare(ref, n, key, cur))
-            ref = (n, key, cur)
+            if not n.ignored:
+                ref = (n, key, cur)
         return verdicts, missing, (None if waiting else ref)
 
     def _rel(self, path: str) -> str:
@@ -316,6 +318,9 @@ class FramingService:
             v = dict(verdicts[-1])
             # Through the night (every night, the first one too): each light against the night's own framing.
             night = ref[2] if ref and ref[0].folder == folder else None
+            if night is None and chain[upto].ignored and v.get("status") not in ("pending", "unmeasured"):
+                # An ignored night is not the reference, but it still has a framing of its own.
+                _, night = self._framing([f for f in chain[upto].frames if self._known(*f)])
             frames: dict[str, dict[str, Any]] = {}
             for p in (night.poses if night else {}):
                 corner, shift, rot = night.offsets(p)

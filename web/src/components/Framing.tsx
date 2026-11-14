@@ -10,7 +10,16 @@ type State = { data: RevisionFraming | null; error: string | null };
 const FramingContext = createContext<State>({ data: null, error: null });
 
 /** Fetches a revision's framing for the session matrix, and asks again while the engine measures stars. */
-export function FramingProvider({ revId, children }: { revId: string; children: React.ReactNode }) {
+export function FramingProvider({
+  revId,
+  version = "",
+  children,
+}: {
+  revId: string;
+  /** Changes when the verdicts must be asked again (a night ignored or added back changes the references). */
+  version?: string;
+  children: React.ReactNode;
+}) {
   const [state, setState] = useState<State>({ data: null, error: null });
   useEffect(() => {
     let stop = false;
@@ -34,7 +43,7 @@ export function FramingProvider({ revId, children }: { revId: string; children: 
       stop = true;
       clearTimeout(timer);
     };
-  }, [revId]);
+  }, [revId, version]);
   return <FramingContext.Provider value={state}>{children}</FramingContext.Provider>;
 }
 
