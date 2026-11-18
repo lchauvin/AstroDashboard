@@ -218,7 +218,9 @@ export const CENTER_ACTIVE: CenterPhase[] = ["waiting-frame", "stopping", "updat
 
 export type CenterState = {
   phase: CenterPhase;
-  /** The sequence was running when it started (stop → centre → start), else only its target is rewritten. */
+  /** center: slew and centre now; update: rewrite the sequence's target only. */
+  mode?: "center" | "update";
+  /** Center now while the sequence ran: stop → centre → start. */
   running: boolean;
   target: { object: string | null; ra: number; dec: number; rotation: number | null; panel: string | null; revision: string; session: string };
   message: string;

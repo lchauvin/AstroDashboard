@@ -4,7 +4,7 @@ Library, diagnostics, live monitoring and planning for the observatory. Design a
 
 **Status:** Phases 0–4 are done: scaffold, indexer + Library, Diagnostics (astro-eval measurements plus the dashboard's
 own detectors and learned horizon), and Planning (sites with a map, sky calibrated from your own subs, tonight's
-ranking with a moon-aware filter suggestion, a 30-night calendar, new target ideas, SNR curves and goals per filter).
+ranking with a moon-aware filter suggestion, a 30-night calendar, new target ideas and goals per filter).
 Phase 5 adds Live (its own connection to NINA and PHD2: sequence, last image, equipment, guiding with an optional AI advisor) and auto-ingest from `G:\Astro\.Download`,
 which runs in **Dry-run** until you switch it to Auto on the Live page (PLAN.md §5.2). Phase 6 adds the Organizer (Library → Organizer): a lint of every target against the canonical layout, and
 migration plans you read operation by operation and approve by typing the plan id. Moves only (legacy sessions go to
@@ -26,18 +26,26 @@ corners, stay within the nights' spread (dither and drift); ⚠ up to twice it; 
 same way, so a mis-centred or turned framing shows on the first frame of the night. A night's Diagnostics plots each light's
 framing through the night against its dither (shifts only), so a drift such as field rotation stands out (PLAN.md §4.4).
 
-**Center on it** (Library → target → Sessions, under each night): sends NINA back to that night's target coordinates, the
-ones its sequence was told to point at before any dither (the lights' `OBJCTRA`/`OBJCTDEC`/`OBJCTROT`; one button per
-mosaic panel). Only on a click, after a confirmation. If the sequence is running on that target, the dashboard waits for the
-exposure in progress to be saved, stops the sequence (the Advanced API has no pause), updates the target container's
-coordinates, slews and centres with NINA's own Center (its plate-solve pointing tolerance applies), waits until PHD2 has
-guided without settling for 15 s (asking NINA to start guiding if it did not restart by itself), then starts the sequence
-again with `skipValidation`. If anything fails after the stop, the sequence stays stopped, Live's Sequence card says why,
-and an ntfy notification goes out when notifications are on. If the sequence is loaded but not running, only the target
-container's coordinates are updated, so its own Slew and center goes there. The change lives in NINA's memory: save the
-sequence in NINA to keep it. The target's name and rotation are kept, so `OBJECT` and auto-ingest routing don't change.
-Any name the target had on the revision's nights matches (e.g. "Flaming Star Nebula" for a sequence now called "IC 405").
-How close nights land is still limited by NINA's pointing tolerance (Options › Plate solving): 1′ is about 25 px at 2.4″/px.
+**Goals** (Library or Planning → target → Goals): per filter, **Hours**, **Match** or **None**. Match makes another Library
+target the goal in that filter ("as good as my Heart Nebula in Hα"). Both targets are measured from their kept subs: each
+light binned, flat-fielded with its night's flat, the light-pollution gradient removed, then the nebula's contrast over the
+noise, squared so it adds up over subs. The hours needed are the reference's quality over this target's quality per hour, and
+they appear once this target has an analysed night in that filter (PLAN.md §6.7). No SNR is estimated anywhere any more; the
+moon-aware filter choice comes from how much the moon brightens each filter's sky.
+
+**Center on it** (Library → target → Sessions, under each night): one button per night (per mosaic panel) opens a menu with two
+actions, both on that night's target coordinates, the ones its sequence was told to point at before any dither (the lights' `OBJCTRA`/`OBJCTDEC`/`OBJCTROT`).
+**Center now** slews and centres with NINA's own Center (its plate-solve pointing tolerance applies). If the sequence is running,
+a warning asks first; on Continue the dashboard waits for the exposure in progress to be saved, stops the sequence (the Advanced
+API has no pause), updates the target container's coordinates, slews and centres, waits until PHD2 has guided without settling
+for 15 s (asking NINA to start guiding if it did not restart by itself), then starts the sequence again with `skipValidation`.
+If anything fails after the stop, the sequence stays stopped, Live's Sequence card says why, and an ntfy notification goes out
+when notifications are on. With no sequence running it only slews and centres; the sequence is not touched. **Update sequence**
+only writes the coordinates into the sequence's target container, running or not, so its own Slew and center goes there. The
+change lives in NINA's memory: save the sequence in NINA to keep it. The target's name and rotation are kept, so `OBJECT` and
+auto-ingest routing don't change. Any name the target had on the revision's nights matches (e.g. "Flaming Star Nebula" for a
+sequence now called "IC 405"). How close nights land is still limited by NINA's pointing tolerance (Options › Plate solving):
+1′ is about 25 px at 2.4″/px.
 
 ## Run
 

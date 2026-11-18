@@ -50,6 +50,8 @@ class CenterBody(BaseModel):
     session: str
     panel: str | None = None
     waitFrame: bool = True  # noqa: N815 — JSON name
+    # center: slew and centre now (stop → centre → start when the sequence runs); update: the sequence's target only.
+    mode: Literal["center", "update"] = "center"
 
 
 class ModeBody(BaseModel):
@@ -273,7 +275,7 @@ def register(app: FastAPI, state) -> None:
         names = sorted({x["object"] for s in rev["sessions"] for x in s.get("targets") or [] if x["panel"] == body.panel and x["object"]})
         target = {**t, "revision": body.revision, "session": body.session, "names": names}
         try:
-            return {"center": obs.center.start(target, wait_frame=body.waitFrame)}
+            return {"center": obs.center.start(target, wait_frame=body.waitFrame, mode=body.mode)}
         except CenterRefused as exc:
             raise HTTPException(409, detail=str(exc)) from exc
 

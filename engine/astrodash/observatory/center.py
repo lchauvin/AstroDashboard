@@ -3,12 +3,16 @@
 The coordinates are the session's NINA target (OBJCTRA/OBJCTDEC/OBJCTROT of its lights: the centre the
 sequence's Slew and center aims at, before any dither).
 
-* Sequence running (on that target): wait for the exposure in progress to be saved, stop the sequence, rewrite
-  the target container's coordinates, slew and centre (NINA's own Center instruction, at its pointing tolerance),
-  check that PHD2 guides again and has settled, then start the sequence (NINA resumes at the first unfinished
-  instruction). When anything fails after the stop, the sequence stays stopped and a notification says why.
-* Sequence loaded, not running: only rewrite the target container's coordinates, so the sequence's own Slew and
-  center goes there. In NINA's memory only: the sequence file is not rewritten.
+Two actions (`mode`):
+
+* **center** ("Center now"). Sequence running (on that target): wait for the exposure in progress to be saved,
+  stop the sequence, rewrite the target container's coordinates, slew and centre (NINA's own Center instruction,
+  at its pointing tolerance), check that PHD2 guides again and has settled, then start the sequence (NINA resumes
+  at the first unfinished instruction). When anything fails after the stop, the sequence stays stopped and a
+  notification says why. Sequence not running: slew and centre now; the sequence is not touched.
+* **update** ("Update sequence"): only rewrite the target container's coordinates, running or not, so the
+  sequence's own Slew and center (or its centre after a flip) goes there. In NINA's memory only: the sequence file
+  is not rewritten.
 
 NINA's API has no pause: a stop is what there is, hence waiting for the frame first. The target's name and
 rotation are kept (`/sequence/set-target` rewrites them too), so the frames' OBJECT does not change. Which
@@ -93,31 +97,38 @@ class CenterJob:
     def busy(self) -> bool:
         return bool(self.state and self.state["phase"] in ACTIVE)
 
-    def start(self, target: dict, wait_frame: bool = True) -> dict:
-        """`target`: {"object", "ra", "dec", "rotation", "revision", "session", "panel"} (J2000 degrees)."""
+    def start(self, target: dict, wait_frame: bool = True, mode: str = "center") -> dict:
+        """`target`: {"object", "ra", "dec", "rotation", "revision", "session", "panel"} (J2000 degrees).
+        `mode`: "center" (slew and centre now) or "update" (rewrite the sequence's target only)."""
+        if mode not in ("center", "update"):
+            raise CenterRefused(f"Unknown action {mode!r}.")
         if self.busy:
             raise CenterRefused("A Center on it is already under way.")
         if not self.obs.nina or not self.obs.nina_status.get("connected"):
             raise CenterRefused("NINA is not reachable.")
-        if not self.obs.sequence.get("available"):
-            raise CenterRefused("No advanced sequence is loaded in NINA.")
         running = self.obs.sequence.get("status") == "running"
-        if running:
+        if (mode == "update" or running) and not self.obs.sequence.get("available"):
+            raise CenterRefused("No advanced sequence is loaded in NINA.")
+        if mode == "center":
             mount = self.obs.equipment.get("mount") or {}
             if not mount.get("Connected"):
                 raise CenterRefused("The mount is not connected in NINA.")
             if mount.get("AtPark"):
                 raise CenterRefused("The mount is parked.")
+        if mode == "center" and running:
             seq_target = self.obs.sequence.get("target")
             if seq_target and _names(target) and seq_target.strip().casefold() not in _names(target):
                 raise CenterRefused(f'NINA is imaging "{seq_target}", not "{target["object"]}": nothing changed.')
             if busy := self._ninas_busy():
                 raise CenterRefused(f"NINA is in the middle of a {busy}: try again once it is done.")
         self._cancel = False
-        self.state = {"phase": "waiting-frame" if running else "updating", "running": running, "target": target,
+        stops = mode == "center" and running
+        self.state = {"phase": "waiting-frame" if stops else ("centering" if mode == "center" else "updating"),
+                      "mode": mode, "running": stops, "target": target,
                       "message": "Starting…", "started": time.time(), "finished": None, "error": None,
                       "sequenceStopped": False, "waitFrame": wait_frame}
-        self.task = asyncio.create_task(self._run(target, running, wait_frame), name="obs-center")
+        run = self._run(target, True, wait_frame) if stops else (self._center_only(target) if mode == "center" else self._update_only(target))
+        self.task = asyncio.create_task(run, name="obs-center")
         return self.as_dict()
 
     def cancel(self) -> dict | None:
@@ -140,15 +151,35 @@ class CenterJob:
         self.state.update(phase=phase, message=message, error=error, finished=time.time())
         (log.warning if error else log.info)("center: %s — %s", phase, message)
 
+    async def _update_only(self, target: dict) -> None:
+        try:
+            self._phase("updating", "Updating the target in NINA's sequence…")
+            note = await self._set_target(target)
+            self._finish("done", f"NINA's sequence now targets {describe(target)}. {note}".strip())
+        except (CenterRefused, NinaError, NinaUnavailable) as exc:
+            self._finish("failed", str(exc), error=str(exc))
+        except Exception as exc:  # noqa: BLE001
+            log.exception("center (update) failed")
+            self._finish("failed", f"{type(exc).__name__}: {exc}", error=str(exc))
+
+    async def _center_only(self, target: dict) -> None:
+        """No sequence running: slew and centre now, the sequence untouched."""
+        nina = self.obs.nina
+        assert nina is not None
+        try:
+            self._phase("centering", f"Slewing and centering on {describe(target)}…")
+            await nina.slew_center(target["ra"], target["dec"])
+            self._finish("done", f"Centered on {describe(target)}. The sequence was not changed.")
+        except (CenterRefused, NinaError, NinaUnavailable) as exc:
+            self._finish("failed", f"NINA: {exc}", error=str(exc))
+        except Exception as exc:  # noqa: BLE001
+            log.exception("center (slew) failed")
+            self._finish("failed", f"{type(exc).__name__}: {exc}", error=str(exc))
+
     async def _run(self, target: dict, running: bool, wait_frame: bool) -> None:
         nina = self.obs.nina
         assert nina is not None
         try:
-            if not running:
-                self._phase("updating", "Updating the target in NINA's sequence…")
-                note = await self._set_target(target)
-                self._finish("done", f"NINA's sequence now targets {describe(target)}. {note}".strip())
-                return
             if wait_frame:
                 await self._wait_frame()
             if self._cancel:

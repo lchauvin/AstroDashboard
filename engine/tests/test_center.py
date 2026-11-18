@@ -96,9 +96,9 @@ def fast(monkeypatch):
     monkeypatch.setattr(center_mod, "SETTLED_S", 0.0)
 
 
-def _run(job, target=IC405, wait_frame=True):
+def _run(job, target=IC405, wait_frame=True, mode="center"):
     async def go():
-        job.start(dict(target), wait_frame=wait_frame)
+        job.start(dict(target), wait_frame=wait_frame, mode=mode)
         await job.task
         return job.as_dict()
 
@@ -125,11 +125,29 @@ def test_running_waits_for_the_frame_then_stops_centres_and_starts_again():
     assert not st["sequenceStopped"]
 
 
-def test_loaded_but_not_running_only_rewrites_the_target():
+def test_update_only_rewrites_the_target():
     nina = FakeNina([["M 31", 10.68, 41.27, 0.0], ["IC 405", 78.9, 33.8, 267.78]], running=False)
-    st = _run(CenterJob(FakeObs(nina), sleep=_yield))
+    st = _run(CenterJob(FakeObs(nina), sleep=_yield), mode="update")
     assert st["phase"] == "done" and "now targets" in st["message"]
     assert nina.calls == [("set", 1, "IC 405", 78.937, 33.8602, 267.78)]  # name and rotation kept
+
+
+def test_update_while_running_does_not_stop_or_slew():
+    nina = FakeNina([["IC 405", 78.9, 33.8, 267.78]])
+    st = _run(CenterJob(FakeObs(nina, exposing=True), sleep=_yield), mode="update")
+    assert st["phase"] == "done" and nina.running
+    assert nina.calls == [("set", 0, "IC 405", 78.937, 33.8602, 267.78)]
+
+
+def test_center_now_without_a_running_sequence_slews_only():
+    nina = FakeNina([["IC 405", 78.9, 33.8, 267.78]], running=False)
+    st = _run(CenterJob(FakeObs(nina), sleep=_yield))
+    assert st["phase"] == "done" and "not changed" in st["message"]
+    assert nina.calls == [("slew", 78.937, 33.8602)]
+    obs = FakeObs(FakeNina([["IC 405", 78.9, 33.8, 267.78]], running=False))
+    obs.equipment["mount"]["AtPark"] = True
+    with pytest.raises(CenterRefused):
+        CenterJob(obs, sleep=_yield).start(dict(IC405))
 
 
 def test_an_older_name_of_the_same_target_is_accepted_and_ninas_name_kept():
@@ -180,7 +198,7 @@ def test_guiding_that_does_not_come_back_is_asked_for_then_resumes():
 
 def test_a_wrong_container_is_put_back():
     nina = FakeNina([["M 31", 10.68, 41.27, 0.0], ["IC 405", 78.9, 33.8, 267.78]], running=False, index_offset=1)
-    st = _run(CenterJob(FakeObs(nina), sleep=_yield))
+    st = _run(CenterJob(FakeObs(nina), sleep=_yield), mode="update")
     assert st["phase"] == "failed" and "put back" in st["message"]
     assert [round(x, 2) for x in nina.targets[0][1:3]] == [10.68, 41.27] and nina.targets[0][0] == "M 31"
 
@@ -312,7 +330,10 @@ def test_center_endpoint(tmp_path):
 
         obs = app.state.engine.observatory
         got = {}
-        obs.center.start = lambda target, wait_frame=True: got.update(target) or {"phase": "updating"}
+        obs.center.start = lambda target, wait_frame=True, mode="center": got.update(target, mode=mode) or {"phase": "updating"}
         assert client.post("/api/live/center", json=body).json() == {"center": {"phase": "updating"}}
-        assert got["names"] == ["Flaming Star Nebula", "IC 405"] and got["session"] == "NIGHT_2025-10-16"
+        assert got["names"] == ["Flaming Star Nebula", "IC 405"] and got["session"] == "NIGHT_2025-10-16" and got["mode"] == "center"
+        client.post("/api/live/center", json={**body, "mode": "update"})
+        assert got["mode"] == "update"
+        assert client.post("/api/live/center", json={**body, "mode": "slew"}).status_code == 422
         assert client.get("/api/live/center").json() == {"center": None}
