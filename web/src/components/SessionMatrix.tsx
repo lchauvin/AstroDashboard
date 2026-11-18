@@ -92,12 +92,16 @@ function Cell({ session, filter, panels }: { session: Session; filter: string; p
       </td>
     );
   }
-  const seconds = usable.reduce((s, g) => s + g.seconds, 0);
   const exposures = [...new Set(usable.map((g) => g.exposure))];
   // Rejected / quarantined frames sit next to the count of their exposure: "23×300s (−3)".
   const byExposure = exposures.map((e) => {
     const gs = groups.filter((g) => g.exposure === e);
-    return { e, frames: gs.reduce((s, g) => s + g.frames, 0), setAside: gs.reduce((s, g) => s + g.rejected + g.quarantined, 0) };
+    return {
+      e,
+      frames: gs.reduce((s, g) => s + g.frames, 0),
+      seconds: usable.filter((g) => g.exposure === e).reduce((s, g) => s + g.seconds, 0),
+      setAside: gs.reduce((s, g) => s + g.rejected + g.quarantined, 0),
+    };
   });
   // Set aside at an exposure with nothing usable left (rare): its own line.
   const otherSetAside = setAside - byExposure.reduce((s, x) => s + x.setAside, 0);
@@ -108,16 +112,20 @@ function Cell({ session, filter, panels }: { session: Session; filter: string; p
 
   return (
     <td className={styles.cell}>
+      {/* One block per exposure length: the count, then that exposure's total time below it. */}
       <div className={`num ${styles.frames}`}>
         {byExposure.map((x) => (
-          <span key={String(x.e)}>
-            {x.frames}×{exposure(x.e).replace(" s", "s")}
-            {x.setAside ? (
-              <span className={styles.setAside} title={`${x.setAside} rejected or quarantined`}>
-                {" "}(−{x.setAside})
-              </span>
-            ) : null}
-          </span>
+          <div key={String(x.e)} className={styles.exposure}>
+            <span>
+              {x.frames}×{exposure(x.e).replace(" s", "s")}
+              {x.setAside ? (
+                <span className={styles.setAside} title={`${x.setAside} rejected or quarantined`}>
+                  {" "}(−{x.setAside})
+                </span>
+              ) : null}
+            </span>
+            <span className={styles.hours}>{hours(x.seconds)}</span>
+          </div>
         ))}
         {otherSetAside > 0 ? (
           <span className={styles.setAside} title={`${otherSetAside} rejected or quarantined at another exposure`}>
@@ -125,7 +133,6 @@ function Cell({ session, filter, panels }: { session: Session; filter: string; p
           </span>
         ) : null}
       </div>
-      <div className={`num ${styles.hours}`}>{hours(seconds)}</div>
       {panels.length ? (
         <div className={`num ${styles.panels}`}>
           {panels.map((p) => {

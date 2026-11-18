@@ -62,6 +62,15 @@
   line-height: 1.35;
 }
 
+.exposure {
+  display: flex;
+  flex-direction: column;
+}
+
+.exposure + .exposure {
+  margin-top: 3px;
+}
+
 .hours {
   font-size: 11px;
   color: var(--text-muted);
