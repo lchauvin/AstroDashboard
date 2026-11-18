@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { ago, clock, enginePost, type LiveState, type SkyState } from "@/lib/live";
+import { ago, clock, enginePost, type LiveState, type MeridianFlip, type SkyState } from "@/lib/live";
 import { StatusIcon } from "../ui";
 import styles from "./live.module.css";
 import { useAdvanced } from "./useLive";
@@ -54,9 +54,55 @@ export function LiveBar({ s, offline, tab }: { s: LiveState | null; offline: boo
           ))}
         </div>
       ) : null}
+      {s?.meridianFlip ? <FlipRow f={s.meridianFlip} serverTime={s.serverTime} /> : null}
       {s?.sky ? <SkyRow k={s.sky} now={s.serverTime} /> : null}
     </div>
   );
+}
+
+/** NINA's meridian flip within 15 min, counting down each second between polls; gone once the flip is done. */
+function FlipRow({ f, serverTime }: { f: MeridianFlip; serverTime: number }) {
+  const [offset, setOffset] = useState(0); // engine clock minus this browser's
+  const [now, setNow] = useState(serverTime);
+  useEffect(() => setOffset(serverTime - Date.now() / 1000), [serverTime]);
+  useEffect(() => {
+    const tick = () => setNow(Date.now() / 1000 + offset);
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [offset]);
+  let body: React.ReactNode;
+  if (f.state === "flipping") {
+    body = <>Meridian flip under way (since {clock(f.since)}, {countdown(now - f.since)}).</>;
+  } else if (f.at > now) {
+    body = (
+      <>
+        Meridian flip in <span className="num">{countdown(f.at - now)}</span> (at {clock(f.at)}).
+      </>
+    );
+  } else {
+    body = (
+      <>
+        Meridian flip due since {clock(f.at)} (<span className="num">{countdown(now - f.at)}</span>): NINA flips once the current instruction ends.
+      </>
+    );
+  }
+  return (
+    <div className={styles.lostRow} role="status">
+      <span className={styles.lost}>
+        <StatusIcon level="warn" size={13} /> {body}
+      </span>
+    </div>
+  );
+}
+
+/** 754 s → "12:34"; an hour or more → "1:02:03". */
+function countdown(s: number): string {
+  const t = Math.max(0, Math.round(s));
+  const h = Math.floor(t / 3600);
+  const mm = String(Math.floor((t % 3600) / 60)).padStart(h ? 2 : 1, "0");
+  const ss = String(t % 60).padStart(2, "0");
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
 /** The sky monitor, when it has something to say: clouds (NINA told unsafe), a star being lost or dimmed, an obstruction, or what it just did. */

@@ -39,6 +39,8 @@ DEFAULTS = {
 }
 
 POLL_S = 4.0
+FLIP_WARN_S = 15 * 60  # warn on the Live bar this long before NINA's meridian flip
+FLIP_OVERDUE_S = 3600  # past due longer than this: no flip trigger in the sequence, stop saying it is coming
 HISTORY_S = 30.0
 ADVISOR_TICK_S = 20.0
 SKY_TICK_S = 5.0
@@ -73,6 +75,8 @@ class Observatory:
         self.ws_connected = False
         self.phd2_error: str | None = None
         self.equipment: dict[str, Any] = {}
+        self.equipment_t = 0.0  # when `equipment` was read from NINA
+        self.flip_done_t = 0.0  # NINA's last MOUNT-AFTER-FLIP
         self.sequence: dict[str, Any] = parse_sequence(None)
         self.history: list[dict] = []
         self.frames: list[dict] = []
@@ -229,6 +233,7 @@ class Observatory:
             d.events.append((time.time(), "meridian flip"))
         elif event == "MOUNT-AFTER-FLIP":
             d.end("meridian flip")
+            self.flip_done_t = time.time()
         elif event == "AUTOFOCUS-STARTING":
             d.begin("autofocus")
             d.events.append((time.time(), "autofocus"))
@@ -263,7 +268,7 @@ class Observatory:
                 equipment = await self.nina.equipment()
                 await self._refresh_sequence()
                 self._track_devices(equipment)
-                self.equipment = equipment
+                self.equipment, self.equipment_t = equipment, time.time()
                 self.nina_status.update(connected=True, error=None, lastOk=time.time())
                 if self._wake_history.is_set() or time.monotonic() - last_history > HISTORY_S:
                     self._wake_history.clear()
@@ -649,6 +654,23 @@ class Observatory:
         """NINA's clock minus ours, in seconds (0 until NINA has answered)."""
         return self.nina.clock.seconds if self.nina else 0.0
 
+    def meridian_flip(self, now: float | None = None) -> dict | None:
+        """The coming meridian flip, for the Live bar: due within FLIP_WARN_S, overdue (NINA flips between
+        instructions, after the current frame), or under way. None otherwise, and once it is done: NINA's
+        TimeToMeridianFlip then jumps to ~12 h, and a reading taken before MOUNT-AFTER-FLIP is ignored."""
+        now = now or time.time()
+        if "meridian flip" in self.dist.open:
+            return {"state": "flipping", "since": self.dist.open["meridian flip"].start}
+        mount = self.equipment.get("mount") or {}
+        hours = mount.get("TimeToMeridianFlip")
+        if (not self.nina_status["connected"] or not mount.get("Connected") or mount.get("AtPark") or mount.get("TrackingEnabled") is False
+                or not isinstance(hours, (int, float)) or self.equipment_t <= self.flip_done_t):
+            return None
+        at = self.equipment_t + float(hours) * 3600
+        if not -FLIP_OVERDUE_S < at - now <= FLIP_WARN_S:
+            return None
+        return {"state": "soon" if at > now else "due", "at": at}
+
     def snapshot(self, graph_s: float = 180.0) -> dict:
         eq.CLOCK["offset"] = self.clock_offset()
         st = self.recent_stats()
@@ -693,6 +715,7 @@ class Observatory:
                 "check": self.advisor_check, "analyses": list(reversed(analyses[-10:])), "changes": list(reversed(changes)),
             },
             "polar": self.polar.summary(),
+            "meridianFlip": self.meridian_flip(),
             "sky": self.sky.as_dict(time.time(), self.sky_settings()),
             "paramInfo": {k: {"label": v[0], "help": v[1], "basic": k in adv.BASIC_PARAMS} for k, v in adv.PARAM_INFO.items()},
         }

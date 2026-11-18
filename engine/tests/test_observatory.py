@@ -590,3 +590,31 @@ def test_auto_apply_leaves_an_algorithm_switch_to_you(monkeypatch, tmp_path):
     entry = asyncio.run(obs.analyze(manual=False))
     assert entry["suggestions"][0]["value"] == "Predictive PEC"
     assert "Brain" in entry["auto"] and obs.advisor.changes == []
+
+
+def test_meridian_flip_warns_within_15_min_counts_through_the_flip_and_clears_once_done(tmp_path):
+    from astrodash.observatory import runtime
+
+    obs = runtime.Observatory(lambda: {}, _Store(), lambda: tmp_path)
+    t0 = 1_000_000.0
+    obs.nina_status["connected"] = True
+
+    def read(hours, t, **mount):
+        obs.equipment = {"mount": {"Connected": True, "AtPark": False, "TrackingEnabled": True, "TimeToMeridianFlip": hours, **mount}}
+        obs.equipment_t = t
+
+    read(0.5, t0)
+    assert obs.meridian_flip(t0) is None  # 30 min away
+    read(0.2, t0)
+    assert obs.meridian_flip(t0) == {"state": "soon", "at": t0 + 720}
+    assert obs.meridian_flip(t0 + 800) == {"state": "due", "at": t0 + 720}  # past due, NINA finishing the frame
+    read(0.2, t0, TrackingEnabled=False)
+    assert obs.meridian_flip(t0) is None  # not tracking: nothing to flip
+
+    read(0.0, t0 + 720)
+    asyncio.run(obs._on_nina_event("MOUNT-BEFORE-FLIP", {}))
+    assert obs.meridian_flip()["state"] == "flipping"
+    asyncio.run(obs._on_nina_event("MOUNT-AFTER-FLIP", {}))
+    assert obs.meridian_flip() is None  # the reading from before the flip no longer counts
+    read(11.9, time.time() + 1)
+    assert obs.meridian_flip() is None  # NINA's next flip is ~12 h away

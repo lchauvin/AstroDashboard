@@ -287,6 +287,10 @@
   color: var(--text-secondary);
 }
 
+.stateOk {
+  color: var(--status-good);
+}
+
 .more {
   font: 400 10.5px/1 var(--font-mono);
   letter-spacing: 0.1em;

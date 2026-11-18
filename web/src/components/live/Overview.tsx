@@ -348,7 +348,7 @@ function Device({ d, adv }: { d: DeviceCard; adv: boolean }) {
   const facts = d.facts.filter((f) => adv || !f.advanced);
   const alert = d.level === "warn" || d.level === "bad"; // a warning reads under the device name, not squeezed beside the label
   const state = (
-    <span className={styles.state}>
+    <span className={d.level === "ok" ? `${styles.state} ${styles.stateOk}` : styles.state}>
       {d.level ? <StatusIcon level={d.level} size={13} /> : null}
       {d.status}
     </span>

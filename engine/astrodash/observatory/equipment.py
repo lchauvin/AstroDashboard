@@ -190,7 +190,7 @@ def _weather(p: dict, facts: list) -> tuple[str, str | None]:
 
 def _safety(p: dict, facts: list) -> tuple[str, str | None]:
     safe = _pick(p, "IsSafe")
-    return ("Safe", None) if safe else ("UNSAFE", "bad")
+    return ("Safe", "ok") if safe else ("UNSAFE", "bad")
 
 
 def _dome(p: dict, facts: list) -> tuple[str, str | None]:

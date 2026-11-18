@@ -63,6 +63,8 @@ export type GuideGraph = {
   events: { t: number; label: string }[];
 };
 
+export type MeridianFlip = { state: "soon" | "due"; at: number } | { state: "flipping"; since: number };
+
 /** The sky monitor (engine `sky.py`): what NINA's safety monitor says, from PHD2's guide star. The dashboard sends NINA nothing. */
 export type SkyState = SkyMonitorSettings & {
   state: "off" | "idle" | "watching" | "cloudy" | "obstructed" | "gaveUp";
@@ -201,6 +203,8 @@ export type LiveState = {
   polar?: Polar;
   /** Absent from engines older than the sky monitor. */
   sky?: SkyState;
+  /** NINA's coming meridian flip (engine `meridian_flip`): within 15 min, overdue, or under way; null otherwise and once done. */
+  meridianFlip?: MeridianFlip | null;
   /** The newest light on disk against its target's previous night; null when there is no light to check. */
   framing?: LiveFraming | null;
 };
