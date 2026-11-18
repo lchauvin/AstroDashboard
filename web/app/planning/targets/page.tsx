@@ -4,7 +4,7 @@ import { EngineNotice } from "@/components/EngineNotice";
 import { EfficiencyBars, GoalMini, MoonGlyph, SeasonStrip, localTime } from "@/components/planning/bits";
 import { PlanControls } from "@/components/planning/PlanControls";
 import styles from "@/components/planning/planning.module.css";
-import { FilterChip, Marks, Tip } from "@/components/ui";
+import { FilterChip, Marks } from "@/components/ui";
 import { hm, stageLabel } from "@/lib/format";
 import { isoDate } from "@/lib/planning/night";
 import type { TargetPlan } from "@/lib/planning/plan";
@@ -128,7 +128,8 @@ export default async function PlanningTargetsPage({ searchParams }: { searchPara
         <div className={styles.sectionHead}>
           <h2 className="section-title">Your targets</h2>
           <p className={styles.sectionNote}>
-            Score = usable hours × the filter&apos;s efficiency tonight × how far it is from its goal, with moonless hours
+            Score = usable hours × what an hour tonight is worth in the filter (how much the moon brightens its sky) × how far it
+            is from its goal, with moonless hours
             favouring the filters the moon hurts most. When Astrospheric covers the night, the filter follows your sky rules
             instead: OIII (or L/RGB) on clear, transparent nights with little moonlight; Hα unless the seeing is poor; SII
             otherwise — skipping filters whose goal is met. Finished targets are {sp.finished === "1" ? "included" : "hidden"}.
@@ -167,9 +168,8 @@ export default async function PlanningTargetsPage({ searchParams }: { searchPara
           <h2 className="section-title">New ideas</h2>
           <p className={styles.sectionNote}>
             Bright nebulae and galaxies from OpenNGC and Sharpless that suit a {rig.fov.width.toFixed(1)}° field, not already
-            in your library, {sort === "score" ? "ranked by tonight’s usable hours, brightness (hours to SNR 30) and framing" : `sorted by ${sort === "tonight" ? "tonight’s" : "the next 90 nights’"} usable hours`}.
+            in your library, {sort === "score" ? "ranked by tonight’s usable hours and framing" : `sorted by ${sort === "tonight" ? "tonight’s" : "the next 90 nights’"} usable hours`}.
             Click Tonight or Next 90 d to sort by hours; click again to go back to the ranking.
-            {data.halphaPending ? ` ${data.halphaPending} Hα survey values are still being fetched in the background.` : ""}
           </p>
         </div>
         <Ideas plans={ideas.filter((p) => !p.listed).slice(0, 25)} q={q} sort={sort} sortHref={sortHref} />
@@ -180,7 +180,7 @@ export default async function PlanningTargetsPage({ searchParams }: { searchPara
         {calibrated.length
           ? `: ${calibrated.map((c) => `${FILTER_NAMES[c.letter]} κ ${c.kappa.toFixed(2)}`).join(", ")} (κ = measured sky ÷ the flat-spectrum SQM prediction)`
           : " — none yet; analyse nights in Diagnostics to calibrate it"}
-        . Target brightness is estimated (Hα survey or class typical, OIII/SII by class line ratios). Computed in {result.computeMs} ms.
+        . Hours per filter come from your goals (Match goals are measured from your subs). Computed in {result.computeMs} ms.
       </p>
     </main>
   );
@@ -287,7 +287,6 @@ function Ideas({
             <SortHead by="h90" sort={sort} sortHref={sortHref}>
               Next 90 d
             </SortHead>
-            <th>To SNR 30</th>
             <th>Suggestion</th>
           </tr>
         </thead>
@@ -305,12 +304,10 @@ function Ideas({
                 {p.classLabel}
                 <div className={styles.sub}>
                   {p.info?.majAxArcmin ? `${Math.round(p.info.majAxArcmin)}′${p.info.minAxArcmin ? ` × ${Math.round(p.info.minAxArcmin)}′` : ""}` : "size unknown"}
-                  {p.anchor.basis === "survey" ? ` · ${Math.round(p.anchor.rayleighs)} R measured` : ""}
                 </div>
               </td>
               <td className="num">{hm(p.tonightHours)}</td>
               <td className="num">{p.hours90.toFixed(0)} h</td>
-              <td className="num">{p.hoursToSnr30 == null ? "—" : `${p.hoursToSnr30 < 10 ? p.hoursToSnr30.toFixed(1) : Math.round(p.hoursToSnr30)} h`}</td>
               <td className={styles.adviceCell}>
                 {p.best ? (
                   <div className={styles.best}>

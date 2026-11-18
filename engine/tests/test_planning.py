@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from astrodash import halpha, planning
+from astrodash import planning
 from astrodash.api import create_app
 from astrodash.config import Config
 
@@ -82,8 +82,15 @@ def test_sites_goals_settings_api(data_root, tmp_path):
         from_sess = client.get("/api/sites/from-session", params={"revisionId": rev, "session": sess["folder"]}).json()
         assert from_sess["site"]["lat"] == pytest.approx(45.5)
 
-        assert client.put(f"/api/goals/{rev}", json={"goals": {"H": {"mode": "snr"}}}).status_code == 422
-        client.put(f"/api/goals/{rev}", json={"goals": {"H": {"mode": "snr", "snr": 30}, "O": {"mode": "hours", "hours": 15}}})
+        # SNR goals are gone; a Match goal needs a reference that exists and is not the target itself.
+        assert client.put(f"/api/goals/{rev}", json={"goals": {"H": {"mode": "snr", "snr": 30}}}).status_code == 422
+        assert client.put(f"/api/goals/{rev}", json={"goals": {"H": {"mode": "match"}}}).status_code == 422
+        assert client.put(f"/api/goals/{rev}", json={"goals": {"H": {"mode": "match", "ref": "nope"}}}).status_code == 422
+        assert client.put(f"/api/goals/{rev}", json={"goals": {"H": {"mode": "match", "ref": rev}}}).status_code == 422
+        other = next(t["id"] for t in client.get("/api/planning/context").json()["targets"] if t["id"] != rev)
+        saved = client.put(f"/api/goals/{rev}", json={"goals": {"H": {"mode": "match", "ref": other, "hours": 3},
+                                                                 "O": {"mode": "hours", "hours": 15}}}).json()["goals"]
+        assert saved["H"] == {"mode": "match", "ref": other}
         assert client.get(f"/api/revisions/{rev}").json()["goals"]["O"] == {"mode": "hours", "hours": 15}
         ctx = client.get("/api/planning/context").json()
         t = next(t for t in ctx["targets"] if t["id"] == rev)
@@ -123,45 +130,6 @@ def test_pointing_wraps_ra_through_zero():
 
     p = _pointing([F(359.0), F(1.0)])
     assert p["ra"] in (0.0, 360.0) or p["ra"] == pytest.approx(0.0, abs=1e-6)
-
-
-def test_halpha_measure_resolved_vs_diluted():
-    # A synthetic survey: 20 R background, a 120' disc of +200 R at the centre.
-    def fake(ra, dec, fov, size):
-        y, x = np.mgrid[0:size, 0:size]
-        px_per_arcmin = size / (fov * 60)
-        r_arcmin = np.hypot(x - (size - 1) / 2, y - (size - 1) / 2) / px_per_arcmin
-        return np.where(r_arcmin <= 60, 220.0, 20.0)
-
-    big = halpha.measure(314.8, 44.5, 120, 120, 0, fetch=fake)
-    assert big["netR"] == pytest.approx(200, rel=0.02) and not big["beamDiluted"]
-    small = halpha.measure(314.8, 44.5, 20, 10, 0, fetch=fake)
-    assert small["beamDiluted"]
-
-
-def test_halpha_lookup_returns_cached_and_queues_missing(data_root, tmp_path, monkeypatch):
-    calls = []
-
-    def fake_measure(ra, dec, maj, mnr, pa):
-        calls.append((ra, dec))
-        return {"survey": "x", "objectR": 1, "backgroundR": 0, "netR": 1, "peakR": 1, "objectArcmin": maj or 10, "beamDiluted": True}
-
-    monkeypatch.setattr(halpha, "measure", fake_measure)
-    monkeypatch.setattr("astrodash.api_planning.time.sleep", lambda s: None)
-    cfg = Config(data_root=data_root, db_path=tmp_path / "var" / "h.db")
-    app = create_app(cfg, scan_on_start=False)
-    with TestClient(app) as client:
-        item = {"ra": 10.5, "dec": 41.2, "maj": 100}
-        first = client.post("/api/planning/halpha/lookup", json={"items": [item]}).json()
-        assert first["found"] == {} and first["missing"] == 1
-        import time as _t
-        for _ in range(50):
-            if calls:
-                break
-            _t.sleep(0.02)
-        _t.sleep(0.1)
-        again = client.post("/api/planning/halpha/lookup", json={"items": [item]}).json()
-        assert "10.500|41.200" in again["found"] and len(calls) == 1
 
 
 def _astrospheric_payload():

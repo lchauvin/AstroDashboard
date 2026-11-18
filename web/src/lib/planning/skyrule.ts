@@ -24,7 +24,7 @@ export type NightSky = { transparency: number | null; seeing: number | null };
 export const GOOD_TRANSPARENCY = 15;
 /** Astrospheric seeing (1–5) below this is "poor". */
 export const POOR_SEEING = 2;
-/** OIII (or L) keeps at least this share of a moonless night's SNR² on the target: "little moonlight". */
+/** OIII (or L) hours are worth at least this share of moonless ones on the target: "little moonlight". */
 export const LITTLE_MOONLIGHT = 0.8;
 
 const ORDER: Record<SkyClass, FilterLetter[]> = {
@@ -64,7 +64,7 @@ export function ruleFilter(
   const steady = sky.seeing == null || sky.seeing >= POOR_SEEING;
   const cls: SkyClass = transparent && (moonlight ?? 0) >= LITTLE_MOONLIGHT ? "oiii" : steady ? "ha" : "sii";
 
-  const usable = (l: FilterLetter) => relevant.includes(l) && (evals.find((f) => f.letter === l)?.snr2Dark ?? 0) > 0;
+  const usable = (l: FilterLetter) => relevant.includes(l) && evals.some((f) => f.letter === l);
   const wanted = ORDER[cls].filter(usable);
   const pick = wanted.find((l) => needOf(l) > 0.05);
   if (!pick) return null;

@@ -454,9 +454,13 @@ For each candidate target (your existing targets, NINA `Targets\*.json`, and a c
 
 ### 6.3 SNR (from AstroPlanner)
 
+*(Superseded 2026-11-17 by §6.7: no SNR is estimated any more; the vendored modules remain for the sky model and the rig.)*
+
 SNR vs. integration curves per filter for the selected target, site and rig, plus hours to a target SNR, optimal sub length and read-noise penalty. These are the vendored `src/lib/snr/*` modules, pinned by a ported copy of AstroPlanner's `verify-snr` checks.
 
 ### 6.4 Goals — the bridge between Planning and Library
+
+*(The SNR mode below was replaced by Match on 2026-11-17, §6.7. Hours and None are unchanged.)*
 
 Goals are set **per revision, per filter**, and **each filter picks its own mode** (decided 2026-10-08):
 
@@ -520,6 +524,24 @@ Optional, with `TELESCOPIUS_API_KEY` in `.env` (API v2.2, non-commercial use onl
 - **Sky events** (`/events/highlights`, cached 6 h per site) appear on the Planning overview (next 30 days) and on each night page. Not shown: Moon phases, apogee/perigee, inferior conjunctions, perihelia, and occultations not visible from the site.
 - **API limits:** 60 requests/minute, and a search costs 2, so calls are spaced 2.1 s apart. A failed call is not retried for 10 minutes, and the last good answer is served meanwhile. Results come under `page_results` (not the spec's `objects`). RA is in hours, sizes are in arcseconds (list `size_deg` in degrees), and event times are UTC.
 - **Not used:** the yearly ephemeris (one point per day at midnight, worse than ours), the weather forecast (Astrospheric is the source; the Telescopius one could become a second opinion), equipment (the rig comes from the headers), news.
+
+
+### 6.7 Match goals, and no SNR estimation (2026-11-17)
+
+**Why.** SNR goals rested on a modelled target brightness (Hα survey, or a class typical, with OIII/SII from class line ratios), wrong by a factor of a few for OIII and SII. What you actually want to set is "as good as that target I liked". So a filter's goal is now **Hours**, **Match** (a reference target from the Library) or **None**, and nothing estimates SNR any more: the SNR goal mode, the SNR column and "SNR so far", the SNR vs integration chart, "SNR tonight", the ideas' "To SNR 30", the Hα survey (`halpha.py`, its endpoints and prefetch) and the target-signal model (`signal.ts`) are gone. Old SNR goals (e.g. in a `target.json`) read as no goal.
+
+**Measured, not modelled** (`engine/astrodash/match.py`, served by `api_match.py`). Per target and filter, from the kept lights of analysed nights (6 per night and filter; nights left out of the target don't count):
+- each light is median-binned 24×24 over the central 80 % square (stars vanish), the bias pedestal is taken off and it is divided by that night's flat for the filter, binned the same way. Without the flat, vignetting read as nebula (a few % of a ~700 ADU sky is more than faint OIII);
+- a plane fitted to the darkest 30 % is subtracted (the light-pollution gradient, what background extraction removes before you judge an image);
+- one mask per target and mosaic panel, from the stack of the filter that shows the target most clearly (usually Hα; L or R for a galaxy): the nebula is the part above the dark floor by 3σ (2–40 % of the square), the background the darker half of the rest. Both come from the stack, never from the frame measured, and the mask filter's own frames are measured with the other half's mask (even/odd), so a frame's noise never picks its own regions;
+- frames after a meridian flip (PIERSIDE West) are turned 180° after the flat;
+- quality per sub q = (contrast ÷ noise)², contrast in ADU and noise = astro-eval's per-pixel background noise. It adds up over subs like SNR², and gain and sub length cancel per hour. `qPerHour` is the mean scaled to an hour.
+
+Match hours = reference `qPerHour` × reference good hours ÷ this target's `qPerHour` (`web/src/lib/planning/goals.ts`). Until this target has an analysed night in the filter, the goal shows why it has no hours and adds no need to the ranking. It is flagged above the cap (Settings → Goals), beyond the season's usable hours, or when the two pixel scales differ by more than 10 %. Binned frames and flats are kept in `match_frames` (var/astrodash.db), read once; the per-target result is recomputed from them when its frames change (the summary for all targets takes ~70 ms). A finished analysis and every scan queue the new frames in the background.
+
+On the real library (2026-11-17), Hα quality per hour ran Pelican 45, Flaming Star 11.5, Heart 10.4, WR 134 8.8, Crescent 8.1 … Bubble 2.9, Ghost 2.3, Sh2-114 0.12, the order you would expect. **Known limit:** the mask follows the clearest filter, so a structure seen only in another line (the Crescent's OIII shell outside its Hα) is under-measured in that line. The absolute q is not PixInsight's SNR: it is one yardstick, applied the same way to every target.
+
+**Planning without SNR.** The moon-aware choice is kept, from the sky alone: a filter's efficiency tonight = mean of (moonless sky ÷ tonight's sky) over the usable samples (sky-limited: an hour under twice the sky is worth half), from the sky model calibrated on your subs. Moon sensitivity, the sky rules' "little moonlight", the calendar and the ntfy verdict use it unchanged. Ideas are ranked by usable hours × framing fit. The optimal sub and read-noise cost on the target page now assume a sky-limited target (sky and camera only).
 
 ---
 

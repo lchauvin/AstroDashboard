@@ -2,30 +2,32 @@
  * Planning, put together: for a site and a starting night, rank your own
  * targets and new ideas, suggest a filter per night, and turn goals into hours.
  *
- * Score = usable hours × predicted SNR efficiency × need × preference (PLAN §6.2):
+ * Score = usable hours × moon efficiency × need × preference (PLAN §6.2):
  *  - usable hours: astronomical darkness, above the site floor and horizon mask;
- *  - efficiency: tonight's SNR² vs. the same hours with no moon, per filter;
+ *  - efficiency: what tonight's hours are worth in each filter against moonless
+ *    ones (sky only: moonless sky ÷ tonight's sky, see evaluate.ts);
  *  - need: the remaining goal deficit for that filter (0–1); without goals,
  *    filters that lag behind the target's best-covered one are wanted more;
  *  - moon sensitivity: on moonless hours, filters the moon hurts most (OIII,
  *    L, B) get a bonus, so dark time goes to them and Hα/SII are kept for
  *    moonlit nights — the opportunity cost a single night's efficiency misses;
  *  - preference: acquiring targets 1, processed 0.6, finished 0 (shown, not ranked).
- * New ideas are also weighted by brightness (hours to SNR 30) and framing fit.
+ * New ideas are also weighted by framing fit. No target brightness is modelled:
+ * how long a filter takes is measured from your subs (Match goals, goals.ts).
  */
 
 import { angularSeparation } from "@/lib/astro/angles";
 import { OBJECT_CLASS_LABEL, type ObjectClass } from "@/lib/snr";
 import type { SiteCalibration } from "./calibrate";
-import { evaluateNight, snr2PerHour, type FilterNight } from "./evaluate";
+import { evaluateNight, type FilterNight } from "./evaluate";
 import { grids, maxDarkAltitude, usableHours, usableSamples, type NightGrid, type TargetSample } from "./night";
 import { FILTER_LETTERS, FILTER_NAMES, type FilterLetter, type PlanRig } from "./rig";
-import { classFilters, halphaAnchor, targetSignals, type CatalogInfo, type FilterSignal, type HalphaAnchor } from "./signal";
+import { classFilters, type CatalogInfo } from "./target";
 import { filterSky, type FilterSky } from "./skymodel";
-import { goalStatus, type GoalStatus } from "./goals";
+import { goalStatus, type GoalStatus, type MatchInput } from "./goals";
 import type { NightForecast } from "./forecast";
 import { nightSky, ruleFilter, type RuleChoice } from "./skyrule";
-import type { HalphaMeasurement, PlanTarget, Site } from "./types";
+import type { MatchRevision, PlanTarget, Site } from "./types";
 
 export { goalStatus, type GoalStatus };
 
@@ -41,8 +43,6 @@ export type TargetPlan = {
   dec: number;
   objectClass: ObjectClass;
   classLabel: string;
-  anchor: HalphaAnchor;
-  signals: FilterSignal[];
   goals: GoalStatus[];
   goalsSet: boolean;
   tonight: FilterNight[];
@@ -58,12 +58,10 @@ export type TargetPlan = {
   fit: number;
   /** Filters considered for this target, in suggestion order. */
   relevant: FilterLetter[];
-  /** Per filter, 0–1: SNR² lost under a reference bright moon (75 % lit, 60° away). */
+  /** Per filter, 0–1: what a reference bright moon (75 % lit, 60° away) costs. */
   moonSensitivity: Partial<Record<FilterLetter, number>>;
   /** Fraction of tonight's usable time with the moon down. */
   moonDownFraction: number;
-  /** Hours to SNR 30 in the easiest relevant filter under a dark sky (ideas' brightness). */
-  hoursToSnr30: number | null;
   /** Your sky rules' choice for tonight (skyrule.ts), when the forecast covers it; it sets `best`. */
   rule: RuleChoice | null;
   /** On one of your Telescopius target lists (ideas only). */
@@ -126,7 +124,7 @@ function adviceFor(plan: Pick<TargetPlan, "tonight" | "relevant" | "best" | "ton
   if (plan.rule) return plan.rule.note;
   const rel = plan.tonight.filter((f) => plan.relevant.includes(f.letter));
   const worst = [...rel]
-    .filter((f) => f.snr2Dark > 0 && f.efficiency < 0.8 && f.letter !== plan.best!.letter)
+    .filter((f) => f.efficiency < 0.8 && f.letter !== plan.best!.letter)
     .sort((a, b) => a.efficiency - b.efficiency);
   const moonUp = grid.moonIllum > 0.05 && plan.tonight.some((f) => f.efficiency < 0.97);
   const name = FILTER_NAMES[plan.best.letter];
@@ -148,7 +146,8 @@ export type PlanInput = {
   targets: PlanTarget[];
   catalogFor: (t: PlanTarget) => CatalogInfo | null;
   ideas: CatalogInfo[];
-  halpha: Record<string, HalphaMeasurement | null>;
+  /** Match measurements per revision (engine api_match.py); Match goals need them. */
+  match: Record<string, MatchRevision | null>;
   calibration: SiteCalibration | null;
   goalCapHours: number;
   includeFinished?: boolean;
@@ -162,7 +161,21 @@ export type PlanInput = {
   forecastFor?: (dusk: number | null, dawn: number | null) => NightForecast | null;
 };
 
-export const halphaKey = (ra: number, dec: number) => `${ra.toFixed(3)}|${dec.toFixed(3)}`;
+/** What a Match goal of `target` in `letter` needs: both targets' measurements (see goals.ts). */
+export function matchInput(target: PlanTarget, letter: FilterLetter, targets: PlanTarget[], match: Record<string, MatchRevision | null>): MatchInput | null {
+  const goal = target.goals[letter];
+  const own = match[target.id] ?? null;
+  const refTarget = goal?.mode === "match" && goal.ref ? (targets.find((t) => t.id === goal.ref) ?? null) : null;
+  const refMatch = refTarget ? (match[refTarget.id] ?? null) : null;
+  const refTot = refTarget?.filters.find((f) => f.filter === letter);
+  return {
+    measured: own?.filters[letter] ?? null,
+    scale: own?.scale ?? null,
+    ref: refTarget
+      ? { id: refTarget.id, title: refTarget.catalogId, goodHours: (refTot?.goodSeconds ?? 0) / 3600, measured: refMatch?.filters[letter] ?? null, scale: refMatch?.scale ?? null }
+      : null,
+  };
+}
 
 export function plan(input: PlanInput): PlanResult {
   const t0 = Date.now();
@@ -177,10 +190,7 @@ export function plan(input: PlanInput): PlanResult {
 
   const build = (kind: TargetPlan["kind"], target: PlanTarget | null, info: CatalogInfo | null, ra: number, dec: number): TargetPlan => {
     const cls: ObjectClass = info?.objectClass ?? "unknown";
-    const anchor = halphaAnchor(cls, input.halpha[halphaKey(info?.ra ?? ra, info?.dec ?? dec)] ?? null);
-    const signals = targetSignals(rig, info ?? { name: target?.catalogId ?? "?", ra, dec, majAxArcmin: null, minAxArcmin: null, paDeg: null, type: "", vmag: null, surfBr: null, commonName: null, objectClass: cls }, anchor);
     const samples = usableSamples(tonight, site, ra, dec);
-    const tonightEval = evaluateNight(samples, tonight.stepMinutes, tonight.moonIllum, signals, skies, rig);
     const h90 = coarse90.map((g) => usableHours(g, site, ra, dec));
     const hours90 = h90.reduce((a, b) => a + b, 0);
     const hours30 = h90.slice(0, 30).reduce((a, b) => a + b, 0);
@@ -194,12 +204,9 @@ export function plan(input: PlanInput): PlanResult {
       const letters = FILTER_LETTERS.filter((l) => have.has(l));
       relevant = letters.length ? letters : classFilters(cls, rig.owned);
       for (const letter of relevant) {
-        const sig = signals.find((s) => s.letter === letter);
-        const fs = skies[letter];
-        const rate = sig && fs ? snr2PerHour(sig, fs, rig) : 0;
         const tot = target.filters.find((f) => f.filter === letter);
-        const st = goalStatus(letter, target.goals[letter] ?? null, tot?.goodSeconds ?? 0, tot?.seconds ?? 0, rate, input.goalCapHours, hours90);
-        goals.push(st);
+        const m = matchInput(target, letter, input.targets, input.match);
+        goals.push(goalStatus(letter, target.goals[letter] ?? null, tot?.goodSeconds ?? 0, tot?.seconds ?? 0, input.goalCapHours, hours90, m));
       }
       if (!goalsSet) {
         // No goals at all: balance the filters — the ones lagging behind are wanted more.
@@ -209,9 +216,10 @@ export function plan(input: PlanInput): PlanResult {
     } else {
       relevant = classFilters(cls, rig.owned);
     }
+    const tonightEval = evaluateNight(samples, tonight.stepMinutes, tonight.moonIllum, relevant, skies);
     const needOf = (l: FilterLetter) => (target ? goals.find((g) => g.letter === l)?.need ?? 0 : 1);
     const moonSensitivity: TargetPlan["moonSensitivity"] = {};
-    for (const f of evaluateNight([REFERENCE_MOON], 60, 0.75, signals.filter((s) => relevant.includes(s.letter)), skies, rig)) {
+    for (const f of evaluateNight([REFERENCE_MOON], 60, 0.75, relevant, skies)) {
       moonSensitivity[f.letter] = Math.max(0, 1 - f.efficiency);
     }
     const moonDownFraction = samples.length ? samples.filter((s) => s.moonAlt <= 0).length / samples.length : 1;
@@ -226,20 +234,11 @@ export function plan(input: PlanInput): PlanResult {
       const f = tonightEval.find((x) => x.letter === rule.letter)!;
       best = { letter: rule.letter, value: filterValue(f, needOf(rule.letter), moonSensitivity[rule.letter] ?? 0, moonDownFraction), efficiency: f.efficiency };
     }
-    // Brightness: hours to SNR 30 in the easiest relevant filter, under this site's dark sky.
-    let hoursToSnr30: number | null = null;
-    for (const l of relevant) {
-      const sig = signals.find((s) => s.letter === l);
-      const fs = skies[l];
-      const rate = sig && fs ? snr2PerHour(sig, fs, rig) : 0;
-      if (rate > 0) hoursToSnr30 = Math.min(hoursToSnr30 ?? Infinity, 900 / rate);
-    }
     const size = info?.majAxArcmin ?? null;
     const fovArcmin = rig.fov.width * 60;
     // Framing: best when the object spans ~60 % of the field width; log-normal fall-off, floor 0.2.
     const fit = size == null ? 1 : Math.max(0.2, Math.exp(-(Math.log(size / (fovArcmin * 0.6)) ** 2) / 2));
-    const brightness = hoursToSnr30 == null ? 0.05 : Math.min(1, Math.max(0.05, 8 / hoursToSnr30));
-    const weight = kind === "library" ? STAGE_WEIGHT[target?.stage ?? "acquiring"] ?? 1 : 0.8 * fit * brightness;
+    const weight = kind === "library" ? STAGE_WEIGHT[target?.stage ?? "acquiring"] ?? 1 : 0.8 * fit;
     const p: TargetPlan = {
       key: kind === "library" ? target!.id : `idea:${info!.name}`,
       kind,
@@ -251,8 +250,6 @@ export function plan(input: PlanInput): PlanResult {
       dec,
       objectClass: cls,
       classLabel: OBJECT_CLASS_LABEL[cls],
-      anchor,
-      signals,
       goals,
       goalsSet,
       tonight: tonightEval,
@@ -267,7 +264,6 @@ export function plan(input: PlanInput): PlanResult {
       relevant,
       moonSensitivity,
       moonDownFraction,
-      hoursToSnr30,
       rule,
     };
     p.advice = adviceFor(p, tonight);
@@ -339,7 +335,7 @@ export function plan(input: PlanInput): PlanResult {
         if (weight === 0) continue;
         const samples = usableSamples(g, site, p.ra, p.dec);
         if (!samples.length) continue;
-        const evals = evaluateNight(samples, g.stepMinutes, g.moonIllum, p.signals.filter((s) => p.relevant.includes(s.letter)), skies, rig);
+        const evals = evaluateNight(samples, g.stepMinutes, g.moonIllum, p.relevant, skies);
         const down = samples.filter((s) => s.moonAlt <= 0).length / samples.length;
         const needOf = (l: FilterLetter) => p.goals.find((x) => x.letter === l)?.need ?? 0.5;
         const rule = ruleFilter(sky, evals, p.relevant, needOf);

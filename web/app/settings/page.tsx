@@ -78,8 +78,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       ) : tab === "goals" ? (
         <div style={{ maxWidth: 760 }}>
           <p className={styles.hint} style={{ marginBottom: 16 }}>
-            Goals are set per target and filter on each target&apos;s planning page. An SNR goal is flagged when the hours it
-            implies exceed this cap, or the usable hours left in the next 90 nights.
+            Goals are set per target and filter on each target&apos;s Library or planning page. A Match goal is flagged when the
+            hours it implies exceed this cap, or the usable hours left in the next 90 nights.
           </p>
           <GoalCapForm cap={data.data.context.settings.goalCapHours} />
         </div>

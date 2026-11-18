@@ -28,7 +28,7 @@ export function MoonGlyph({ phase, size = 18, label }: { phase: number; size?: n
 
 const pct = (x: number) => `${Math.round(x * 100)} %`;
 
-/** One bar per relevant filter: share of a moonless night's SNR² that tonight delivers. */
+/** One bar per relevant filter: what tonight's hours are worth against moonless ones (sky only). */
 export function EfficiencyBars({ nights, relevant }: { nights: FilterNight[]; relevant: FilterLetter[] }) {
   const rows = relevant.map((l) => nights.find((n) => n.letter === l)).filter((n): n is FilterNight => !!n && n.hours > 0);
   if (!rows.length) return <span className="muted">—</span>;
@@ -42,25 +42,18 @@ export function EfficiencyBars({ nights, relevant }: { nights: FilterNight[]; re
 }
 
 function Row({ n }: { n: FilterNight }) {
-  const none = n.snr2Dark <= 0;
   return (
     <>
       <span className="mono" style={{ color: "var(--text-secondary)" }}>
         {n.letter}
       </span>
-      <Tip
-        tip={
-          none
-            ? `${FILTER_NAMES[n.letter]}: no modelled signal for this target`
-            : `${FILTER_NAMES[n.letter]}: ${pct(n.efficiency)} of a moonless night's SNR² over ${hm(n.hours)} · tonight SNR ${Math.sqrt(n.snr2).toFixed(1)}`
-        }
-      >
+      <Tip tip={`${FILTER_NAMES[n.letter]}: ${hm(n.hours)} tonight, each worth ${pct(n.efficiency)} of a moonless hour (the moon brightens this filter's sky)`}>
         <span className={styles.bar} style={{ width: 64, display: "block" }}>
-          <span style={{ width: `${none ? 0 : Math.round(n.efficiency * 100)}%`, background: filterColor(n.letter) }} />
+          <span style={{ width: `${Math.round(n.efficiency * 100)}%`, background: filterColor(n.letter) }} />
         </span>
       </Tip>
       <span className="num" style={{ color: "var(--text-secondary)" }}>
-        {none ? "—" : pct(n.efficiency)}
+        {pct(n.efficiency)}
       </span>
     </>
   );
@@ -79,7 +72,7 @@ export function GoalMini({ goals }: { goals: GoalStatus[] }) {
               {g.letter}
             </span>
             <Tip
-              tip={`${FILTER_NAMES[g.letter]}: ${hm(g.goodHours)} good of ${hm(g.goalHours!)}${g.goal?.mode === "snr" ? ` (SNR ${g.goal.snr} goal)` : ""}${g.flag ? ` — ${g.flag}` : ""}`}
+              tip={`${FILTER_NAMES[g.letter]}: ${hm(g.goodHours)} good of ${hm(g.goalHours!)}${g.goal?.mode === "match" && g.ref ? ` (as good as ${g.ref.title})` : ""}${g.flag ? ` — ${g.flag}` : ""}`}
             >
               <span className={styles.bar} style={{ width: 64, display: "block" }}>
                 <span style={{ width: `${Math.round(frac * 100)}%`, background: "var(--color-accent)" }} />

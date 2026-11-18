@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { classifyType } from "@/lib/snr";
-import type { CatalogInfo } from "@/lib/planning/signal";
+import type { CatalogInfo } from "@/lib/planning/target";
 
 /**
  * The deep-sky catalog, VENDORED from D:\Python\AstroPlanner\catalog\targets.json (2026-10-09):

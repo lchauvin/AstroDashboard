@@ -104,3 +104,19 @@
   color: var(--status-bad);
   font-size: 13px;
 }
+
+.select {
+  height: 28px;
+  max-width: 260px;
+  padding: 0 6px;
+  border: 1px solid var(--color-divider);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: 400 13px var(--font-body);
+  border-radius: 0;
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}

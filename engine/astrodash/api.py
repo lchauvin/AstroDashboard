@@ -12,8 +12,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import __version__, api_framing, api_leaks, api_live, api_organizer, api_planning, api_telescopius, planning
+from . import __version__, api_framing, api_leaks, api_live, api_match, api_organizer, api_planning, api_telescopius, planning
 from .api_framing import FramingService
+from .api_match import MatchService
 from .cache import HeaderCache
 from .config import Config
 from .diagnostics.detectors import analyse as analyse_frames, horizon_samples, learn_horizon
@@ -65,6 +66,7 @@ class EngineState:
         resolve =lambda rev, sess: self.library.session(rev, sess) if self.library else None  # noqa: E731
         self.jobs = DiagnosticsJobs(cfg, self.cache, resolve, after=self.rescan, **({"runner": runner} if runner else {}))
         self.framing = FramingService(cfg, self.cache, lambda: self.library)
+        self.match = MatchService(cfg, self.cache, lambda: self.library)
         self.warm_framing = False  # measure every night's framing sample after each scan (the real engine only)
 
     def start_scan(self) -> bool:
@@ -96,6 +98,7 @@ class EngineState:
             self.scanner.progress.phase = "done"
             if self.warm_framing:
                 self.framing.warm()
+                self.match.warm()
             self.last_error = None
             log.info("scan: %d files, %d read, %.1fs", len(result.frames), result.files_read, result.duration_s)
         except Exception as exc:  # noqa: BLE001
@@ -121,6 +124,7 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
         # Background framing work: samples after each scan, every light of a night after its analysis.
         state.warm_framing = True
         state.jobs.framing = state.framing.prepare_session
+        state.jobs.match = state.match.queue
     run_observatory = scan_on_start if observatory is None else observatory
     sim_router = None
     if fake_observatory:
@@ -419,6 +423,7 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
     api_telescopius.register(app, state)
     api_leaks.register(app, state)
     api_framing.register(app, state)
+    api_match.register(app, state)
     return app
 
 

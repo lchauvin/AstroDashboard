@@ -1,35 +1,33 @@
 import "server-only";
 
-import { engineGet, engineSend, type EngineResult } from "@/lib/engine";
+import { engineGet, type EngineResult } from "@/lib/engine";
 import { calibrateSites, type SiteCalibration } from "@/lib/planning/calibrate";
 import { nightForecast, type Forecast, type ForecastPayload, type NightForecast } from "@/lib/planning/forecast";
-import { halphaKey, plan, type CalendarNight, type PlanResult } from "@/lib/planning/plan";
+import { matchInput, plan, type CalendarNight, type PlanResult } from "@/lib/planning/plan";
 import { nightQuality, type NightQuality } from "@/lib/planning/quality";
 import { buildRig, type PlanRig } from "@/lib/planning/rig";
-import type { CatalogInfo } from "@/lib/planning/signal";
+import type { CatalogInfo } from "@/lib/planning/target";
 import { defaultSite } from "@/lib/planning/sites";
-import type { HalphaMeasurement, PlanTarget, PlanningContext, SkyPayload } from "@/lib/planning/types";
+import type { MatchRevision, PlanTarget, PlanningContext, SkyPayload } from "@/lib/planning/types";
 import { findCatalog, ideaCandidates } from "./catalog";
 import { loadTelescopiusLists } from "./telescopius";
 import { classifyType } from "@/lib/snr";
 import type { ListTarget, TargetList } from "@/lib/telescopius";
-import type { GoalRow } from "@/components/planning/GoalsEditor";
-import { snr2PerHour } from "@/lib/planning/evaluate";
-import { FILTER_NAMES } from "@/lib/planning/rig";
+import type { GoalRow, MatchCandidate } from "@/components/planning/GoalsEditor";
+import { FILTER_NAMES, type FilterLetter } from "@/lib/planning/rig";
 
 /**
  * Everything Planning needs from the engine, assembled on the server:
  * the planning context (targets, sites, settings, detected rig), the measured
- * sky (→ per-site calibration), and cached Hα survey values. Survey values not
- * measured yet are queued in the engine and appear on a later load.
+ * sky (→ per-site calibration), and the Match measurements per target (frames
+ * not measured yet are queued in the engine and count on a later load).
  */
 
 export type PlanningData = {
   context: PlanningContext;
   rig: PlanRig;
   calibration: Record<string, SiteCalibration>;
-  halpha: Record<string, HalphaMeasurement | null>;
-  halphaPending: number;
+  match: Record<string, MatchRevision | null>;
   catalogFor: (t: PlanTarget) => CatalogInfo | null;
   /** Targets from your Telescopius lists, as catalog entries (the vendored catalog's when it knows them). */
   listed: CatalogInfo[];
@@ -64,14 +62,12 @@ function ideaPool(data: PlanningData): CatalogInfo[] {
 
 const listedNames = (data: PlanningData) => new Set(data.listed.map((i) => i.name.toLowerCase()));
 
-/** Survey values only help objects the ~1° beam can resolve; library targets are always looked up (for context). */
-const SURVEY_MIN_ARCMIN = 60;
-
 export async function loadPlanningData(): Promise<EngineResult<PlanningData>> {
-  const [ctx, sky, lists] = await Promise.all([
+  const [ctx, sky, lists, match] = await Promise.all([
     engineGet<PlanningContext>("/api/planning/context"),
     engineGet<SkyPayload>("/api/planning/sky"),
     loadTelescopiusLists(),
+    engineGet<{ revisions: Record<string, MatchRevision | null> }>("/api/match/summary"),
   ]);
   if (!ctx.ok) return ctx;
   const context = ctx.data;
@@ -79,30 +75,18 @@ export async function loadPlanningData(): Promise<EngineResult<PlanningData>> {
   const calibration = sky.ok ? calibrateSites(sky.data.samples, context.sites, rig) : {};
 
   const catalogFor = (t: PlanTarget) => findCatalog(t.catalogId, t.name);
-  const items = new Map<string, { ra: number; dec: number; maj: number | null; min: number | null; pa: number | null }>();
-  const add = (i: CatalogInfo) => items.set(halphaKey(i.ra, i.dec), { ra: i.ra, dec: i.dec, maj: i.majAxArcmin, min: i.minAxArcmin, pa: i.paDeg });
-  for (const t of context.targets) {
-    const info = catalogFor(t);
-    if (info) add(info);
-  }
   const listed = new Map<string, CatalogInfo>();
   for (const l of lists?.lists ?? []) for (const t of l.targets) {
     const info = listInfo(t);
     listed.set(info.name.toLowerCase(), info);
   }
-  for (const i of [...ideaCandidates(), ...listed.values()]) if ((i.majAxArcmin ?? 0) >= SURVEY_MIN_ARCMIN) add(i);
-  const lookup = await engineSend<{ found: Record<string, HalphaMeasurement>; missing: number; queued: number }>(
-    "/api/planning/halpha/lookup",
-    { items: [...items.values()], prefetch: true },
-  );
   return {
     ok: true,
     data: {
       context,
       rig,
       calibration,
-      halpha: lookup.ok ? lookup.data.found : {},
-      halphaPending: lookup.ok ? lookup.data.missing : 0,
+      match: match.ok ? match.data.revisions : {},
       catalogFor,
       listed: [...listed.values()],
       lists: lists?.lists ?? [],
@@ -132,7 +116,7 @@ export function planFor(
     catalogFor: data.catalogFor,
     ideas: ideaPool(data),
     listed: listedNames(data),
-    halpha: data.halpha,
+    match: data.match,
     calibration: data.calibration[site.id] ?? null,
     goalCapHours: data.context.settings.goalCapHours,
     includeFinished: opts.includeFinished,
@@ -158,7 +142,7 @@ export function planOne(data: PlanningData, key: string, siteId: string | null |
     catalogFor: data.catalogFor,
     ideas: idea ? [idea] : [],
     listed: listedNames(data),
-    halpha: data.halpha,
+    match: data.match,
     calibration: data.calibration[site.id] ?? null,
     goalCapHours: data.context.settings.goalCapHours,
     includeFinished: true,
@@ -171,25 +155,52 @@ export function planOne(data: PlanningData, key: string, siteId: string | null |
   return p ? { site, result, plan: p, catalog: target ? data.catalogFor(target) : idea } : null;
 }
 
+/**
+ * Targets with Match data in a filter, as reference candidates (`exclude`: the target itself). Most similar in that
+ * filter first (closest quality per hour, on a ratio scale: ×2 and ×0.5 are equally far); newest first while the
+ * target itself is not measured in the filter.
+ */
+function candidatesFor(data: PlanningData, letter: FilterLetter, exclude: string): MatchCandidate[] {
+  const own = data.match[exclude]?.filters[letter]?.qPerHour ?? 0;
+  const distance = (c: MatchCandidate) => (own > 0 && c.measured ? Math.abs(Math.log(c.measured.qPerHour / own)) : 0);
+  return data.context.targets
+    .filter((t) => t.id !== exclude && (data.match[t.id]?.filters[letter]?.qPerHour ?? 0) > 0)
+    .map((t) => {
+      const m = data.match[t.id]!;
+      const f = m.filters[letter]!;
+      const tot = t.filters.find((x) => x.filter === letter);
+      return { id: t.id, title: t.catalogId, subtitle: t.name, goodHours: (tot?.goodSeconds ?? 0) / 3600, measured: f, scale: m.scale, nights: f.nights, lastNight: t.lastNight };
+    })
+    .sort((a, b) => distance(a) - distance(b) || (b.lastNight ?? "").localeCompare(a.lastNight ?? "") || a.title.localeCompare(b.title));
+}
+
 /** Goal editor rows for a planned library target (both the Planning detail page and the Library target page). */
-export function goalRowsFor(one: NonNullable<ReturnType<typeof planOne>>): GoalRow[] {
-  const { plan: p, result } = one;
-  if (!p.target) return [];
+export function goalRowsFor(data: PlanningData, one: NonNullable<ReturnType<typeof planOne>>): GoalRow[] {
+  const { plan: p } = one;
+  const target = p.target;
+  if (!target) return [];
   return p.relevant.map((l) => {
-    const sig = p.signals.find((s) => s.letter === l);
-    const fs = result.skies[l];
-    const tot = p.target!.filters.find((f) => f.filter === l);
+    const tot = target.filters.find((f) => f.filter === l);
+    const m = matchInput(target, l, data.context.targets, data.match);
     return {
       letter: l,
       name: FILTER_NAMES[l],
-      goal: p.target!.goals[l] ?? null,
+      goal: target.goals[l] ?? null,
       goodSeconds: tot?.goodSeconds ?? 0,
       rawSeconds: tot?.seconds ?? 0,
-      rate: sig && fs ? snr2PerHour(sig, fs, result.rig) : 0,
-      basis: sig?.basis ?? "",
-      basisTip: sig?.explain ?? "",
+      measured: m?.measured ?? null,
+      scale: m?.scale ?? null,
+      candidates: candidatesFor(data, l, target.id),
     };
   });
+}
+
+/** What the engine is still measuring for Match on this target or the references its goals use, for a note. */
+export function matchMeasuring(data: PlanningData, target: PlanTarget): string | null {
+  const ids = [target.id, ...Object.values(target.goals).flatMap((g) => (g.mode === "match" && g.ref ? [g.ref] : []))];
+  const busy = ids.map((id) => data.match[id]).filter((m): m is MatchRevision => !!m?.pending);
+  if (!busy.length) return null;
+  return busy.map((m) => (m.job && m.job.total ? `${m.job.label} (${m.job.done}/${m.job.total})` : m.job?.label ?? m.revisionId)).join(", ");
 }
 
 /** Astrospheric's forecast for a site, via the engine (which holds the key and caches it); null when the engine is down. */

@@ -152,7 +152,7 @@ export function GoalCapForm({ cap }: { cap: number }) {
   return (
     <div className={styles.rowActions}>
       <label className={styles.field} style={{ maxWidth: 260 }}>
-        <span>Flag SNR goals implying more than (hours per filter)</span>
+        <span>Flag Match goals implying more than (hours per filter)</span>
         <input className={styles.input} type="number" min={1} max={500} value={value} onChange={(e) => setValue(e.target.value)} />
       </label>
       <button

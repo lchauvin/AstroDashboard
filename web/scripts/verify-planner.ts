@@ -13,6 +13,7 @@ import { altAz, horizonAt, nightGrid, usableHours } from "../src/lib/planning/ni
 import { buildRig } from "../src/lib/planning/rig.js";
 import { filterSky, moonlightNl, skyRate } from "../src/lib/planning/skymodel.js";
 import { goalStatus } from "../src/lib/planning/plan.js";
+import { evaluateNight } from "../src/lib/planning/evaluate.js";
 import { parseLatLon } from "../src/lib/planning/sites.js";
 import { readFrameSite } from "../src/lib/planning/frameHeader.js";
 import type { Site } from "../src/lib/planning/types.js";
@@ -115,14 +116,30 @@ check("horizon profile interpolates and wraps through north", () => {
   assert.equal(horizonAt({ minAlt: 20, horizon: [] }, 123), 20);
 });
 
-check("SNR goal → hours → SNR round trip; cap flag", () => {
-  const rate = 25; // SNR² per hour
-  const g = goalStatus("O", { mode: "snr", snr: 30 }, 3600 * 4, 3600 * 5, rate, 40, null);
-  assert.ok(Math.abs(g.goalHours! - 36) < 1e-9 && Math.abs(g.remainingHours! - 32) < 1e-9);
-  assert.ok(Math.abs(g.snrSoFar! - 10) < 1e-9);
-  const h = goalStatus("O", { mode: "hours", hours: 36 }, 0, 0, rate, 40, null);
-  assert.ok(Math.abs(h.goalSnr! - 30) < 1e-9);
-  assert.ok(goalStatus("O", { mode: "snr", snr: 60 }, 0, 0, rate, 40, null).flag?.includes("cap"));
+check("Match goal: reference quality ÷ own rate; pending until measured; cap and scale flags", () => {
+  const m = (q: number) => ({ qPerHour: q, spread: null, frames: 12, nights: 2 });
+  const ref = { id: "ref", title: "IC 1848", goodHours: 15, measured: m(3), scale: 2.4 };
+  // This target gathers a quarter of the reference's quality per hour → 4 × 15 h.
+  const g = goalStatus("H", { mode: "match", ref: "ref" }, 3600 * 10, 3600 * 12, 100, null, { measured: m(0.75), scale: 2.4, ref });
+  assert.ok(Math.abs(g.factor! - 4) < 1e-9 && Math.abs(g.goalHours! - 60) < 1e-9 && Math.abs(g.remainingHours! - 50) < 1e-9);
+  assert.equal(g.flag, null);
+  const none = goalStatus("H", { mode: "match", ref: "ref" }, 0, 0, 100, null, { measured: null, scale: null, ref });
+  assert.equal(none.goalHours, null);
+  assert.equal(none.need, 0);
+  assert.ok(none.pending?.includes("analysed night"));
+  assert.ok(goalStatus("H", { mode: "match", ref: "ref" }, 0, 0, 40, null, { measured: m(0.75), scale: 2.4, ref }).flag?.includes("cap"));
+  assert.ok(goalStatus("H", { mode: "match", ref: "ref" }, 0, 0, 100, null, { measured: m(3), scale: 1.2, ref }).flag?.includes("pixel scale"));
+  const h = goalStatus("O", { mode: "hours", hours: 36 }, 3600 * 4, 0, 40, null);
+  assert.ok(Math.abs(h.remainingHours! - 32) < 1e-9);
+});
+
+check("moon efficiency: 1 with the moon down, lower for OIII than Hα under the same moon", () => {
+  const skies = { H: filterSky(rig, rig.filters.H!, 18, 1), O: filterSky(rig, rig.filters.O!, 18, 1) };
+  const dark = evaluateNight([{ t: 0, alt: 50, az: 180, moonAlt: -10, moonSep: 60 }], 60, 0.8, ["H", "O"], skies);
+  assert.ok(dark.every((f) => Math.abs(f.efficiency - 1) < 1e-12));
+  const lit = evaluateNight([{ t: 0, alt: 50, az: 180, moonAlt: 40, moonSep: 60 }], 60, 0.8, ["H", "O"], skies);
+  const eff = (l: string) => lit.find((f) => f.letter === l)!.efficiency;
+  assert.ok(eff("O") < eff("H") && eff("H") < 1, `O ${eff("O")} vs H ${eff("H")}`);
 });
 
 check("lat/long paste formats", () => {

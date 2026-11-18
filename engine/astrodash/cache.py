@@ -100,6 +100,13 @@ CREATE TABLE IF NOT EXISTS frame_stars (
     error    TEXT,
     measured REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS match_frames (
+    path     TEXT PRIMARY KEY,
+    size     INTEGER NOT NULL,
+    data     BLOB,
+    error    TEXT,
+    measured REAL NOT NULL
+);
 """
 
 
@@ -253,6 +260,32 @@ class HeaderCache:
         with self._lock, self._conn:
             self._conn.executemany(
                 "INSERT INTO frame_stars(path, size, data, error, measured) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(path) DO UPDATE SET size=excluded.size, data=excluded.data, error=excluded.error, "
+                "measured=excluded.measured",
+                payload,
+            )
+
+    # ------------------------------------------------------------------ match
+
+    def match_frames(self, keys: list[str]) -> dict[str, tuple[int, bytes | None, str | None]]:
+        """Binned frames for Match by path (lights) or flat key → (size measured at, data, error)."""
+        out: dict[str, tuple[int, bytes | None, str | None]] = {}
+        for i in range(0, len(keys), 500):
+            chunk = keys[i:i + 500]
+            with self._lock:
+                rows = self._conn.execute(
+                    f"SELECT path, size, data, error FROM match_frames WHERE path IN ({','.join('?' * len(chunk))})", chunk
+                ).fetchall()
+            out.update({p: (s, d, e) for p, s, d, e in rows})
+        return out
+
+    def save_match_frames(self, rows: list[tuple[str, int, bytes | None, str | None]]) -> None:
+        payload = [(p, s, d, e, time.time()) for p, s, d, e in rows]
+        if not payload:
+            return
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "INSERT INTO match_frames(path, size, data, error, measured) VALUES (?,?,?,?,?) "
                 "ON CONFLICT(path) DO UPDATE SET size=excluded.size, data=excluded.data, error=excluded.error, "
                 "measured=excluded.measured",
                 payload,

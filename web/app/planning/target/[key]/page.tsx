@@ -6,20 +6,17 @@ import { EngineNotice } from "@/components/EngineNotice";
 import { AltitudeChart } from "@/components/planning/AltitudeChart";
 import { SeasonStrip } from "@/components/planning/bits";
 import { GoalsEditor } from "@/components/planning/GoalsEditor";
-import { HalphaButton } from "@/components/planning/HalphaButton";
 import { PlanControls } from "@/components/planning/PlanControls";
-import { SnrChart } from "@/components/planning/SnrChart";
 import { TelescopiusCard } from "@/components/TelescopiusCard";
 import styles from "@/components/planning/planning.module.css";
-import { Badge, FilterChip, Marks, Tip } from "@/components/ui";
+import { Badge, FilterChip, Marks } from "@/components/ui";
 import { hm, stageLabel } from "@/lib/format";
 import { formatDec, formatRa } from "@/lib/astro/coordinates";
-import { snr2PerHour } from "@/lib/planning/evaluate";
 import { isoDate } from "@/lib/planning/night";
-import { FILTER_NAMES, type FilterLetter } from "@/lib/planning/rig";
+import { FILTER_NAMES } from "@/lib/planning/rig";
 import { nightSeries } from "@/lib/planning/series";
 import { optimalSubSeconds, readNoisePenalty } from "@/lib/snr";
-import { goalRowsFor, loadForecast, loadPlanningData, planOne, siteFor } from "@/server/planning";
+import { goalRowsFor, loadForecast, loadPlanningData, matchMeasuring, planOne, siteFor } from "@/server/planning";
 import { loadTelescopiusObject } from "@/server/telescopius";
 import tableStyles from "@/components/TargetsTable.module.css";
 import pageStyles from "../../../library/library.module.css";
@@ -62,15 +59,9 @@ export default async function TargetPlanPage({ params, searchParams }: { params:
   const series = nightSeries(site, tonight, p.ra, p.dec);
   const q = `?site=${site.id}&date=${date}`;
 
-  const allLetters = (Object.keys(rig.filters) as FilterLetter[]).filter((l) => p.signals.some((s) => s.letter === l));
-  const shownLetters = [...p.relevant, ...allLetters.filter((l) => !p.relevant.includes(l) && p.signals.find((s) => s.letter === l)!.zenithRate > 0)];
-  const rateOf = (l: FilterLetter) => {
-    const sig = p.signals.find((s) => s.letter === l);
-    const fs = skies[l];
-    return sig && fs ? snr2PerHour(sig, fs, rig) : 0;
-  };
+  const shownLetters = p.relevant.filter((l) => rig.filters[l]);
 
-  const goalRows = goalRowsFor(one);
+  const goalRows = goalRowsFor(data, one);
 
   // Compare sites: same target, same night, every site.
   const compare = data.context.sites.map((s) => {
@@ -130,8 +121,9 @@ export default async function TargetPlanPage({ params, searchParams }: { params:
         <div className={styles.sectionHead}>
           <h2 className="section-title">Per filter</h2>
           <p className={styles.sectionNote}>
-            Signal and sky in e⁻/s/px for your rig ({rig.pixelScale.toFixed(2)}″/px). Sky is &quot;measured&quot; where your own
-            analysed subs at {site.name} calibrated it (κ), otherwise the flat-spectrum SQM estimate.
+            Sky in e⁻/s/px for your rig ({rig.pixelScale.toFixed(2)}″/px): &quot;measured&quot; where your own analysed subs at{" "}
+            {site.name} calibrated it (κ), otherwise the flat-spectrum SQM estimate. Tonight vs moonless: what an hour tonight is
+            worth against a moonless hour, from how much the moon brightens this filter&apos;s sky.
           </p>
         </div>
         <div className={tableStyles.scroller}>
@@ -139,22 +131,20 @@ export default async function TargetPlanPage({ params, searchParams }: { params:
             <thead>
               <tr>
                 <th>Filter</th>
-                <th>Target signal</th>
                 <th className="num">Dark sky</th>
                 <th className="num">Tonight vs moonless</th>
-                <th className="num">SNR tonight</th>
                 <th className="num">Sub · read-noise cost</th>
                 <th className="num">Optimal sub</th>
               </tr>
             </thead>
             <tbody>
               {shownLetters.map((l) => {
-                const sig = p.signals.find((s) => s.letter === l)!;
                 const fs = skies[l];
                 const night = p.tonight.find((n) => n.letter === l);
                 const c = cal?.filters[l];
                 const sub = rig.subSeconds[l] ?? 300;
-                const params = { objectRate: sig.zenithRate, skyRate: fs?.darkRate ?? 0, darkRate: rig.camera.darkCurrentEPerSec, readNoise: rig.camera.readNoiseE };
+                // Sky-limited: the faint target adds next to nothing to the noise, so only the sky and the camera count.
+                const params = { objectRate: 0, skyRate: fs?.darkRate ?? 0, darkRate: rig.camera.darkCurrentEPerSec, readNoise: rig.camera.readNoiseE };
                 const penalty = readNoisePenalty({ ...params, subSeconds: sub });
                 const opt = optimalSubSeconds(params);
                 return (
@@ -163,20 +153,13 @@ export default async function TargetPlanPage({ params, searchParams }: { params:
                       <FilterChip filter={l} /> {FILTER_NAMES[l]}
                       {rig.filters[l]?.line ? <div className={styles.sub}>{rig.filters[l]!.fwhmNm} nm</div> : null}
                     </td>
-                    <td>
-                      <span className="num">{sig.zenithRate > 0 ? rate(sig.zenithRate) : "—"}</span>
-                      <div className={styles.sub}>
-                        <Tip tip={sig.explain}>{sig.basis}</Tip>
-                      </div>
-                    </td>
                     <td className="num">
                       {fs ? rate(fs.darkRate) : "—"}
                       <div className={styles.sub} style={{ whiteSpace: "nowrap" }} title={c ? `Calibrated from ${c.frames} of your frames (${c.moonDownFrames} with the moon down)` : undefined}>
                         {c ? `measured, κ ${c.kappa.toFixed(2)}` : "estimated"}
                       </div>
                     </td>
-                    <td className="num">{night && night.snr2Dark > 0 ? `${Math.round(night.efficiency * 100)} %` : "—"}</td>
-                    <td className="num">{night && night.snr2 > 0 ? Math.sqrt(night.snr2).toFixed(1) : "—"}</td>
+                    <td className="num">{night && night.hours > 0 ? `${Math.round(night.efficiency * 100)} %` : "—"}</td>
                     <td className="num">
                       {sub} s · {Number.isFinite(penalty) ? ((c2) => (c2 < 0.5 ? "< 1 %" : `−${Math.round(c2)} %`))((1 - 1 / (penalty * penalty)) * 100) : "—"}
                     </td>
@@ -189,35 +172,17 @@ export default async function TargetPlanPage({ params, searchParams }: { params:
         </div>
       </section>
 
-      <section className={styles.section}>
-        <div className={styles.sectionHead}>
-          <h2 className="section-title">SNR vs integration</h2>
-          <p className={styles.sectionNote}>
-            Moonless sky at {site.name}, target at 50°, your sub lengths. Real nights with the moon up take longer; the
-            calendar and tonight&apos;s numbers account for that.
-          </p>
-        </div>
-        <div className="framed" style={{ padding: "18px 20px" }}>
-          <Marks />
-          <SnrChart
-            series={p.relevant.map((l) => {
-              const g = p.goals.find((x) => x.letter === l);
-              return { letter: l, name: FILTER_NAMES[l], rate: rateOf(l), haveHours: g?.goodHours, goalHours: g?.goalHours, goalSnr: g?.goalSnr };
-            })}
-          />
-        </div>
-      </section>
-
       {p.target ? (
         <section className={styles.section}>
           <div className={styles.sectionHead}>
             <h2 className="section-title">Goals</h2>
             <p className={styles.sectionNote}>
-              Per filter: hours, SNR, or none. Good hours count only frames kept by Diagnostics where a night was analysed.
+              Per filter: hours, Match (as good as another target in that filter, measured from both targets&apos; subs), or none.
+              Good hours count only frames kept by Diagnostics where a night was analysed.
               {p.target.goalsSource === "target.json" ? " Current goals come from the revision's target.json; saving stores them in the dashboard." : ""}
             </p>
           </div>
-          <GoalsEditor revId={p.target.id} rows={goalRows} capHours={data.context.settings.goalCapHours} seasonHours={p.hours90} siteName={site.name} />
+          <GoalsEditor revId={p.target.id} rows={goalRows} capHours={data.context.settings.goalCapHours} seasonHours={p.hours90} measuring={matchMeasuring(data, p.target)} />
         </section>
       ) : null}
 
@@ -268,35 +233,18 @@ export default async function TargetPlanPage({ params, searchParams }: { params:
         ) : null}
       </section>
 
-      <section className={styles.section}>
-        <div className={styles.sectionHead}>
-          <h2 className="section-title">Brightness &amp; season</h2>
-        </div>
-        <div className="framed" style={{ padding: "18px 20px", display: "grid", gap: 14 }}>
-          <Marks />
-          <div>
-            <div className="eyebrow">Hα anchor · {p.anchor.basis === "survey" ? "measured" : p.anchor.basis === "typical" ? "class typical" : "none"}</div>
-            <p className={pageStyles.summary} style={{ fontSize: 14.5, maxWidth: 820 }}>
-              {p.anchor.note}
-            </p>
-            {catalog ? (
-              <div style={{ marginTop: 10 }}>
-                <HalphaButton ra={catalog.ra} dec={catalog.dec} maj={catalog.majAxArcmin} min={catalog.minAxArcmin} pa={catalog.paDeg} refresh={!!p.anchor.survey} />
-              </div>
-            ) : (
-              <p className={styles.sub}>Not in the catalog, so there is no size to measure the survey over.</p>
-            )}
+      {p.season ? (
+        <section className={styles.section}>
+          <div className={styles.sectionHead}>
+            <h2 className="section-title">Season</h2>
+            <p className={styles.sectionNote}>Usable hours over the next year at {site.name}.</p>
           </div>
-          {p.season ? (
-            <div>
-              <div className="eyebrow">Usable hours over the next year at {site.name}</div>
-              <div style={{ marginTop: 10 }}>
-                <SeasonStrip hours={p.season} start={date} />
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </section>
+          <div className="framed" style={{ padding: "18px 20px" }}>
+            <Marks />
+            <SeasonStrip hours={p.season} start={date} />
+          </div>
+        </section>
+      ) : null}
     </main>
   );
 }

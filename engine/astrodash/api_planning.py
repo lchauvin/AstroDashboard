@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import re
-import threading
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -21,7 +20,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from . import astrospheric, halpha, planning
+from . import astrospheric, planning
 from .ingest import paths as ingest_paths
 from .observatory.llm import EFFORTS, LlmError, split_model
 from .observatory.sky import FLAGS as SKY_FLAGS, LIMITS as SKY_LIMITS
@@ -41,9 +40,9 @@ NOTIFY_DEFAULTS: dict[str, Any] = {
 }
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    # Implied hours above this flag an SNR goal as unrealistic (PLAN §6.4).
+    # Hours implied by a Match goal above this are flagged as unrealistic.
     "goalCapHours": 40,
-    # Rig used by the SNR model; null fields are filled from the headers in the web app.
+    # Rig used by the sky model; null fields are filled from the headers in the web app.
     "rig": None,
     # Live: where NINA (Advanced API plugin) and PHD2 (event server) run.
     "observatory": dict(OBS_DEFAULTS["observatory"]),
@@ -65,77 +64,19 @@ FORECAST_RETRY_S = 600
 
 
 class GoalBody(BaseModel):
-    mode: Literal["hours", "snr", "none"]
+    mode: Literal["hours", "match", "none"]
     hours: float | None = Field(default=None, ge=0, le=1000)
-    snr: float | None = Field(default=None, ge=0, le=10000)
+    # match: the target revision whose quality in this filter is the goal (api_match.py measures both).
+    ref: str | None = Field(default=None, max_length=200)
 
 
 class GoalsBody(BaseModel):
     goals: dict[str, GoalBody]
 
 
-class HalphaItem(BaseModel):
-    ra: float = Field(ge=0, lt=360)
-    dec: float = Field(ge=-90, le=90)
-    maj: float | None = Field(default=None, ge=0)
-    min: float | None = Field(default=None, ge=0)
-    pa: float | None = None
-
-
-class HalphaLookup(BaseModel):
-    items: list[HalphaItem] = Field(max_length=2000)
-    # Queue the ones not measured yet for a polite background fetch (1 request / s).
-    prefetch: bool = True
-
-
-def halpha_key(ra: float, dec: float, maj: float | None, mnr: float | None, pa: float | None) -> str:
-    return f"halpha:{ra:.4f}|{dec:.4f}|{maj or 0:.2f}|{mnr or 0:.2f}|{pa or 0:.1f}"
-
-
-class HalphaPrefetcher:
-    """One background thread fetching survey cutouts one at a time; results land in the cache."""
-
-    def __init__(self, cache):
-        self.cache = cache
-        self.queue: list[HalphaItem] = []
-        self.failed: set[str] = set()
-        self._lock = threading.Lock()
-        self._thread: threading.Thread | None = None
-
-    def add(self, items: list[HalphaItem]) -> int:
-        with self._lock:
-            queued = {halpha_key(i.ra, i.dec, i.maj, i.min, i.pa) for i in self.queue}
-            new = [i for i in items if (k := halpha_key(i.ra, i.dec, i.maj, i.min, i.pa)) not in queued and k not in self.failed]
-            self.queue.extend(new)
-            if new and not (self._thread and self._thread.is_alive()):
-                self._thread = threading.Thread(target=self._run, name="halpha-prefetch", daemon=True)
-                self._thread.start()
-            return len(self.queue)
-
-    def _run(self) -> None:
-        while True:
-            with self._lock:
-                if not self.queue:
-                    return
-                item = self.queue.pop(0)
-            key = halpha_key(item.ra, item.dec, item.maj, item.min, item.pa)
-            if self.cache.get_json(key):
-                continue
-            try:
-                self.cache.set_json(key, halpha.measure(item.ra, item.dec, item.maj, item.min, item.pa))
-            except Exception as exc:  # noqa: BLE001 — offline: stop quietly, retried on a later page load
-                log.info("halpha prefetch stopped: %s", exc)
-                with self._lock:
-                    self.failed.add(key)
-                    self.queue.clear()
-                return
-            time.sleep(1.0)
-
-
 def register(app: FastAPI, state) -> None:
     cfg = state.cfg
     cache = state.cache
-    prefetcher = HalphaPrefetcher(cache)
     forecast_failures: dict[str, tuple[float, str]] = {}  # cache key → (when, message): no retry on every page load
 
     # ------------------------------------------------------------------ sites
@@ -395,6 +336,10 @@ def register(app: FastAPI, state) -> None:
 
     # ------------------------------------------------------------------ goals
 
+    def _known_goals(goals: dict[str, Any]) -> dict[str, Any]:
+        """Goals in a mode the dashboard still has (an old SNR goal, e.g. from target.json, reads as none)."""
+        return {f: g for f, g in goals.items() if isinstance(g, dict) and g.get("mode") in ("hours", "match", "none")}
+
     @app.get("/api/goals")
     def goals() -> dict[str, Any]:
         return {"goals": cache.goals()}
@@ -408,10 +353,12 @@ def register(app: FastAPI, state) -> None:
         for filt, g in body.goals.items():
             if g.mode == "hours" and g.hours is None:
                 raise HTTPException(422, detail=f"{filt}: an hours goal needs hours")
-            if g.mode == "snr" and g.snr is None:
-                raise HTTPException(422, detail=f"{filt}: an SNR goal needs a target SNR")
-            clean[filt[:20]] = {"mode": g.mode, **({"hours": g.hours} if g.hours is not None else {}),
-                                **({"snr": g.snr} if g.snr is not None else {})}
+            if g.mode == "match" and (not g.ref or g.ref not in lib.revisions):
+                raise HTTPException(422, detail=f"{filt}: a Match goal needs a reference target from the Library")
+            if g.mode == "match" and g.ref == rev_id:
+                raise HTTPException(422, detail=f"{filt}: a target cannot match itself")
+            clean[filt[:20]] = {"mode": g.mode, **({"hours": g.hours} if g.mode == "hours" and g.hours is not None else {}),
+                                **({"ref": g.ref} if g.mode == "match" else {})}
         cache.save_goals(rev_id, clean)
         return {"goals": clean}
 
@@ -431,7 +378,7 @@ def register(app: FastAPI, state) -> None:
                 "pointing": rev["pointing"], "panels": rev["panels"],
                 "lastNight": rev["totals"]["last"], "nights": rev["totals"]["nights"],
                 "filters": [{"filter": f, **v} for f, v in per_filter.items()],
-                "goals": stored_goals.get(rev["id"]) or rev.get("goals") or {},
+                "goals": _known_goals(stored_goals.get(rev["id"]) or rev.get("goals") or {}),
                 "goalsSource": "dashboard" if rev["id"] in stored_goals else ("target.json" if rev.get("goals") else None),
             })
         return {
@@ -476,36 +423,3 @@ def register(app: FastAPI, state) -> None:
     def measured_sky() -> dict[str, Any]:
         lib = state.require_library()
         return planning.sky_samples(cache, lib, cfg)
-
-    @app.get("/api/planning/halpha")
-    def halpha_anchor(ra: float, dec: float, maj: float | None = None, min: float | None = None,  # noqa: A002
-                      pa: float | None = None, refresh: bool = False, cachedOnly: bool = False) -> dict[str, Any]:  # noqa: N803
-        key = halpha_key(ra, dec, maj, min, pa)
-        if not refresh:
-            cached = cache.get_json(key)
-            if cached:
-                return {**cached, "cached": True}
-        if cachedOnly:
-            raise HTTPException(404, detail="Not measured yet")
-        try:
-            result = halpha.measure(ra, dec, maj, min, pa)
-        except Exception as exc:  # noqa: BLE001 — offline, or the service refused
-            log.warning("halpha fetch failed: %s", exc)
-            raise HTTPException(502, detail=f"The Hα survey could not be fetched ({type(exc).__name__}). "
-                                            "The planner falls back to a typical value for the object class.") from exc
-        cache.set_json(key, result)
-        return {**result, "cached": False}
-
-    @app.post("/api/planning/halpha/lookup")
-    def halpha_lookup(body: HalphaLookup) -> dict[str, Any]:
-        """Cached survey values for many targets at once; the missing ones are fetched in the background."""
-        found: dict[str, Any] = {}
-        missing: list[HalphaItem] = []
-        for item in body.items:
-            hit = cache.get_json(halpha_key(item.ra, item.dec, item.maj, item.min, item.pa))
-            if hit:
-                found[f"{item.ra:.3f}|{item.dec:.3f}"] = hit
-            else:
-                missing.append(item)
-        queued = prefetcher.add(missing) if body.prefetch and missing else len(prefetcher.queue)
-        return {"found": found, "missing": len(missing), "queued": queued}

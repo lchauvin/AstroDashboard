@@ -19,9 +19,24 @@ export type Site = {
   lastNight?: string | null;
 };
 
-export type GoalMode = "hours" | "snr" | "none";
-export type Goal = { mode: GoalMode; hours?: number; snr?: number };
+export type GoalMode = "hours" | "match" | "none";
+/** hours: as set; match: as good as the revision `ref` in this filter (see goals.ts). */
+export type Goal = { mode: GoalMode; hours?: number; ref?: string };
 export type Goals = Record<string, Goal>;
+
+/** Engine `api_match.py`: the quality a target gathers per hour in one filter, measured from its subs. */
+export type MatchFilter = { qPerHour: number; spread: number | null; frames: number; nights: number };
+export type MatchRevision = {
+  revisionId: string;
+  filters: Record<string, MatchFilter>;
+  maskFilter: Record<string, string>;
+  scale: number | null;
+  skipped: { noFlat: number; noPedestal: number; unreadable: number };
+  analysedNights: number;
+  unanalysedNights: number;
+  pending: boolean;
+  job: { label: string; status: string; done: number; total: number; error: string | null } | null;
+};
 
 export type PlanFilterTotals = {
   filter: string;
@@ -129,14 +144,3 @@ export type SkySample = {
 };
 
 export type SkyPayload = { sessions: number; samples: SkySample[]; pedestals: Record<string, { adu: number; frames: number } | null> };
-
-export type HalphaMeasurement = {
-  survey: string;
-  objectR: number;
-  backgroundR: number;
-  netR: number;
-  peakR: number | null;
-  objectArcmin: number;
-  beamDiluted: boolean;
-  cached?: boolean;
-};

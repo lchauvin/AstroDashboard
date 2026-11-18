@@ -11,7 +11,7 @@ import { Badge, Marks, StatTile } from "@/components/ui";
 import { GoalsEditor } from "@/components/planning/GoalsEditor";
 import { engineGet } from "@/lib/engine";
 import { isoDate } from "@/lib/planning/night";
-import { goalRowsFor, loadPlanningData, planOne } from "@/server/planning";
+import { goalRowsFor, loadPlanningData, matchMeasuring, planOne } from "@/server/planning";
 import { loadTelescopiusObject } from "@/server/telescopius";
 import { hours, shortDate, stageLabel } from "@/lib/format";
 import type { Revision } from "@/lib/types";
@@ -152,10 +152,10 @@ export default async function TargetPage({ params }: { params: Promise<{ rev: st
           </div>
           <GoalsEditor
             revId={rev.id}
-            rows={goalRowsFor(one)}
+            rows={goalRowsFor(planning.data, one)}
             capHours={planning.data.context.settings.goalCapHours}
             seasonHours={one.plan.hours90}
-            siteName={one.site.name}
+            measuring={one.plan.target ? matchMeasuring(planning.data, one.plan.target) : null}
           />
         </section>
       ) : null}
