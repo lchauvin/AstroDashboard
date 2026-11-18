@@ -85,7 +85,8 @@ class NinaRest:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def get(self, path: str, timeout: float | None = None, **params: Any) -> Any:
+    async def get(self, path: str, timeout: float | None = None, raw: bool = False, **params: Any) -> Any:
+        """The payload of `path` (raises NinaError when NINA says it failed); `raw`: the whole envelope, unjudged."""
         clean = {k: v for k, v in params.items() if v is not None}
         t0 = time.time()
         try:
@@ -97,6 +98,8 @@ class NinaRest:
             body = resp.json()
         except ValueError as exc:
             raise NinaError(f"{path}: non-JSON answer ({resp.status_code})") from exc
+        if raw:
+            return body
         if isinstance(body, dict) and "Success" in body:
             if body.get("Success") is False:
                 raise NinaError(f"{path}: {body.get('Error') or 'error'}")
@@ -135,6 +138,48 @@ class NinaRest:
     async def image_history(self) -> list[dict]:
         rows = await self.get("/image-history", all="true")
         return rows if isinstance(rows, list) else []
+
+    # -------------------------------------------------- control (only ever on a click: "Center on it")
+
+    async def sequence_stop(self) -> None:
+        await self.get("/sequence/stop")
+
+    async def sequence_start(self) -> None:
+        # skipValidation: NINA's pre-sequence checklist would otherwise wait for a click on the observatory PC.
+        # NINA resumes at the first unfinished instruction.
+        await self.get("/sequence/start", skipValidation="true")
+
+    async def sequence_state(self) -> Any:
+        # Large (tens of MB with a polar alignment's data in it): give it time.
+        return await self.get("/sequence/state", timeout=90.0)
+
+    async def set_target(self, index: int, name: str, ra: float, dec: float, rotation: float) -> None:
+        """Rewrite the coordinates of the index-th target container (NINA's own order). It also sets the
+        container's and target's name and rotation, so pass the ones it already has. In memory only: the
+        sequence file on the observatory PC is not rewritten."""
+        await self.get("/sequence/set-target", name=name, ra=f"{ra:.6f}", dec=f"{dec:.6f}", rotation=f"{rotation:.4f}", index=index)
+
+    async def slew_center(self, ra: float, dec: float, timeout: float = 900.0) -> None:
+        """Slew and plate-solve centre (NINA's own Center instruction, its pointing tolerance), waiting for the
+        result. Raises NinaError when NINA reports a failure.
+
+        Not judged by `Success`: the plugin (2.2.15) runs the instruction with `Execute`, which never sets its Status
+        (only `Run` does), so a centre that worked answers Success=false, "Slew failed". A real failure throws
+        inside NINA and comes back as the plugin's error envelope, with `Error` set ("Unknown error", "Mount parked" …).
+        """
+        body = await self.get("/equipment/mount/slew", timeout=timeout, raw=True, ra=f"{ra:.6f}", dec=f"{dec:.6f}",
+                              waitForResult="true", center="true")
+        if not isinstance(body, dict):
+            raise NinaError("/equipment/mount/slew: unexpected answer")
+        err = body.get("Error")
+        if err or int(body.get("StatusCode") or 200) >= 400:
+            raise NinaError(f"/equipment/mount/slew: {err or body.get('StatusCode')} (centering failed: see NINA's log)")
+
+    async def slew_stop(self) -> None:
+        await self.get("/equipment/mount/slew/stop")
+
+    async def guider_start(self) -> None:
+        await self.get("/equipment/guider/start", timeout=120.0, calibrate="false")
 
     async def image_jpeg(self, index: int, scale: float = 0.5) -> tuple[bytes, str]:
         # No `debayer`: on a mono camera NINA answers debayer=true with "Unknown error".
@@ -236,6 +281,46 @@ def state_targets(payload: Any) -> dict[str, str]:
             name = t.get("TargetName") if isinstance(t, dict) else None
             if isinstance(name, str) and name.strip() and isinstance(e.get("Name"), str):
                 out.setdefault(e["Name"], name.strip())
+            for c in e.get("Items") or []:
+                walk(c)
+        elif isinstance(e, list):
+            for c in e:
+                walk(c)
+
+    walk(payload)
+    return out
+
+
+def _coords(target: dict) -> tuple[float, float] | None:
+    """A target's InputCoordinates (RAHours/RAMinutes/RASeconds, NegativeDec/DecDegrees/…) → J2000 degrees."""
+    c = target.get("InputCoordinates")
+    if not isinstance(c, dict):
+        return None
+    try:
+        ra = (float(c.get("RAHours") or 0) + float(c.get("RAMinutes") or 0) / 60 + float(c.get("RASeconds") or 0) / 3600) * 15
+        dec = abs(float(c.get("DecDegrees") or 0)) + float(c.get("DecMinutes") or 0) / 60 + float(c.get("DecSeconds") or 0) / 3600
+    except (TypeError, ValueError):
+        return None
+    if c.get("NegativeDec") or float(c.get("DecDegrees") or 0) < 0:
+        dec = -dec
+    return ra, dec
+
+
+def target_containers(payload: Any) -> list[dict]:
+    """Every target container of `/sequence/state`, depth first (the order `/sequence/set-target`'s index is
+    expected to follow; the caller checks it after writing): name, coordinates, rotation, status."""
+    out: list[dict] = []
+
+    def walk(e: Any) -> None:
+        if isinstance(e, dict):
+            t = e.get("Target")
+            if isinstance(t, dict) and isinstance(t.get("TargetName"), str):
+                xy = _coords(t)
+                rot = t.get("PositionAngle")
+                out.append({"name": t["TargetName"].strip(), "container": e.get("Name"),
+                            "ra": xy[0] if xy else None, "dec": xy[1] if xy else None,
+                            "rotation": float(rot) if isinstance(rot, (int, float)) and not isinstance(rot, bool) else 0.0,
+                            "status": str(e.get("Status") or "").upper()})
             for c in e.get("Items") or []:
                 walk(c)
         elif isinstance(e, list):

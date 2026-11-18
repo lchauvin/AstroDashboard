@@ -20,6 +20,7 @@ from .ingest.service import IngestService
 from .library import slugify
 from .observatory import advisor as adv
 from .observatory import frames as obs_frames
+from .observatory.center import CenterRefused
 from .observatory.nina import NinaError, NinaUnavailable
 from .observatory.runtime import PHD2_ERRORS, Observatory
 from .preview import preview as frame_preview
@@ -42,6 +43,13 @@ class DecModeBody(BaseModel):
 class ControlBody(BaseModel):
     action: Literal["guide", "stop", "pause", "resume", "dither"]
     recalibrate: bool = False
+
+
+class CenterBody(BaseModel):
+    revision: str
+    session: str
+    panel: str | None = None
+    waitFrame: bool = True  # noqa: N815 — JSON name
 
 
 class ModeBody(BaseModel):
@@ -243,6 +251,38 @@ def register(app: FastAPI, state) -> None:
         except RuntimeError as exc:
             raise HTTPException(409, detail=str(exc)) from exc
         return {"started": True}
+
+    # ------------------------------------------------------------------ center on it (a click, never automatic)
+
+    @app.get("/api/live/center")
+    def center_state() -> dict[str, Any]:
+        return {"center": obs.center.as_dict()}
+
+    @app.post("/api/live/center")
+    async def center_start(body: CenterBody) -> dict[str, Any]:
+        rev = state.require_library().revision(body.revision)
+        if rev is None:
+            raise HTTPException(404, detail="No such target revision")
+        sess = next((s for s in rev["sessions"] if s["folder"] == body.session), None)
+        if sess is None:
+            raise HTTPException(404, detail="No such session")
+        t = next((t for t in sess.get("targets") or [] if t["panel"] == body.panel), None)
+        if t is None:
+            raise HTTPException(422, detail="This night's lights carry no NINA target coordinates (OBJCTRA/OBJCTDEC)")
+        # Every name NINA gave this target (panel) on any night of the revision: the sequence may call it otherwise now.
+        names = sorted({x["object"] for s in rev["sessions"] for x in s.get("targets") or [] if x["panel"] == body.panel and x["object"]})
+        target = {**t, "revision": body.revision, "session": body.session, "names": names}
+        try:
+            return {"center": obs.center.start(target, wait_frame=body.waitFrame)}
+        except CenterRefused as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+
+    @app.post("/api/live/center/cancel")
+    def center_cancel() -> dict[str, Any]:
+        try:
+            return {"center": obs.center.cancel()}
+        except CenterRefused as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
 
     @app.post("/api/live/sky/clear")
     def sky_clear() -> dict[str, Any]:

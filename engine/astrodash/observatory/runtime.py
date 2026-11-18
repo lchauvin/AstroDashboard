@@ -26,6 +26,7 @@ from . import equipment as eq
 from . import frames as fr
 from ..planning import nearest_site
 from . import guiding, llm, polar, sky
+from .center import CenterJob
 from .nina import NinaError, NinaRest, NinaUnavailable, listen, parse_sequence, state_targets
 from .phd2 import Phd2Client, Phd2Disconnected, Phd2Error
 
@@ -88,6 +89,8 @@ class Observatory:
         self._wake_frames = asyncio.Event()
         self._wake_history = asyncio.Event()
         self._switches: dict[str, dict] = {}  # axis → an algorithm switch that follows a suggestion, until you click Done
+        self.image_saves = 0  # NINA IMAGE-SAVE events seen (Center on it waits for the frame in progress)
+        self.center = CenterJob(self)
 
     # ------------------------------------------------------------------ config
 
@@ -240,11 +243,15 @@ class Observatory:
         elif event == "AUTOFOCUS-FINISHED":
             d.end("autofocus")
         elif event == "IMAGE-SAVE":
+            self.image_saves += 1
             self._wake_history.set()
             self._wake_frames.set()
         elif event in ("SEQUENCE-STARTING", "SEQUENCE-FINISHED"):
             with contextlib.suppress(NinaError, NinaUnavailable):
                 await self._refresh_sequence()
+
+    async def refresh_sequence(self) -> None:
+        await self._refresh_sequence()
 
     async def _refresh_sequence(self) -> None:
         assert self.nina is not None
@@ -715,6 +722,7 @@ class Observatory:
                 "check": self.advisor_check, "analyses": list(reversed(analyses[-10:])), "changes": list(reversed(changes)),
             },
             "polar": self.polar.summary(),
+            "center": self.center.as_dict(),
             "meridianFlip": self.meridian_flip(),
             "sky": self.sky.as_dict(time.time(), self.sky_settings()),
             "paramInfo": {k: {"label": v[0], "help": v[1], "basic": k in adv.BASIC_PARAMS} for k, v in adv.PARAM_INFO.items()},

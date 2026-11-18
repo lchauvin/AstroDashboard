@@ -26,6 +26,19 @@ corners, stay within the nights' spread (dither and drift); ⚠ up to twice it; 
 same way, so a mis-centred or turned framing shows on the first frame of the night. A night's Diagnostics plots each light's
 framing through the night against its dither (shifts only), so a drift such as field rotation stands out (PLAN.md §4.4).
 
+**Center on it** (Library → target → Sessions, under each night): sends NINA back to that night's target coordinates, the
+ones its sequence was told to point at before any dither (the lights' `OBJCTRA`/`OBJCTDEC`/`OBJCTROT`; one button per
+mosaic panel). Only on a click, after a confirmation. If the sequence is running on that target, the dashboard waits for the
+exposure in progress to be saved, stops the sequence (the Advanced API has no pause), updates the target container's
+coordinates, slews and centres with NINA's own Center (its plate-solve pointing tolerance applies), waits until PHD2 has
+guided without settling for 15 s (asking NINA to start guiding if it did not restart by itself), then starts the sequence
+again with `skipValidation`. If anything fails after the stop, the sequence stays stopped, Live's Sequence card says why,
+and an ntfy notification goes out when notifications are on. If the sequence is loaded but not running, only the target
+container's coordinates are updated, so its own Slew and center goes there. The change lives in NINA's memory: save the
+sequence in NINA to keep it. The target's name and rotation are kept, so `OBJECT` and auto-ingest routing don't change.
+Any name the target had on the revision's nights matches (e.g. "Flaming Star Nebula" for a sequence now called "IC 405").
+How close nights land is still limited by NINA's pointing tolerance (Options › Plate solving): 1′ is about 25 px at 2.4″/px.
+
 ## Run
 
 Two services (registered in `project-dashboard.json`). `.\start.ps1` (or double-click `start.cmd`) starts both,

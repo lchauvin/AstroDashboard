@@ -72,6 +72,8 @@ class Sim:
         self.images: list[dict] = []
         self.exposure_started = time.time()
         self.sequence_running = True
+        self.target_ra, self.target_dec, self.target_rot = RA_H * 15, DEC_DEG, 0.0  # the target container's coordinates
+        self.mount_ra, self.mount_dec = RA_H * 15, DEC_DEG
         self.cloud_until = 0.0  # /fake-nina/v2/api/sim/cloud: the guide star is lost until then
         self.haze_until, self.haze = 0.0, 1.0  # /fake-nina/v2/api/sim/haze: the guide star dimmed to `haze` until then
         self.safe: Optional[Callable[[], bool]] = None  # the dashboard's sky monitor, as NINA's safety monitor
@@ -376,9 +378,58 @@ def nina_router(sim: Sim) -> APIRouter:
     @router.get("/api/sequence/state")
     async def sequence_state():
         # Only the target container's Target matters to the dashboard.
+        run = "RUNNING" if sim.sequence_running else "CREATED"
+        h = sim.target_ra / 15
+        d = abs(sim.target_dec)
+        coords = {"RAHours": int(h), "RAMinutes": int(h * 60) % 60, "RASeconds": (h * 3600) % 60,
+                  "NegativeDec": sim.target_dec < 0, "DecDegrees": int(d), "DecMinutes": int(d * 60) % 60, "DecSeconds": (d * 3600) % 60}
         return ok([{"Name": "Start_Container", "Status": "FINISHED", "Items": []},
-                   {"Name": "Targets_Container", "Status": "RUNNING", "Items": [
-                       {"Name": f"{sim.target}_Container", "Status": "RUNNING", "Target": {"TargetName": sim.target}, "Items": []}]}])
+                   {"Name": "Targets_Container", "Status": run, "Items": [
+                       {"Name": f"{sim.target}_Container", "Status": run,
+                        "Target": {"TargetName": sim.target, "PositionAngle": sim.target_rot, "InputCoordinates": coords}, "Items": []}]}])
+
+    @router.get("/api/sequence/stop")
+    async def sequence_stop():
+        sim.sequence_running = False
+        log.info("[sim] sequence stopped")
+        return ok("Sequence stopped")
+
+    @router.get("/api/sequence/start")
+    async def sequence_start(skipValidation: bool = False):  # noqa: N803 — the API's own name
+        if sim.sequence_running:
+            return {"Response": "", "Error": "Sequence is already running", "StatusCode": 409, "Success": False, "Type": "API"}
+        sim.sequence_running = True
+        sim.exposure_started = time.time()
+        log.info("[sim] sequence started (skipValidation=%s)", skipValidation)
+        return ok("Sequence started")
+
+    @router.get("/api/sequence/set-target")
+    async def sequence_set_target(name: str, ra: float, dec: float, rotation: float, index: int):
+        if index != 0:
+            return {"Response": "", "Error": "Index out of range", "StatusCode": 400, "Success": False, "Type": "API"}
+        sim.target, sim.target_ra, sim.target_dec, sim.target_rot = name, ra, dec, rotation
+        log.info("[sim] target %s → %.5f %.5f (%.2f°)", name, ra, dec, rotation)
+        return ok("Target updated")
+
+    @router.get("/api/equipment/mount/slew")
+    async def mount_slew(ra: float, dec: float, waitForResult: bool = False, center: bool = False, rotate: bool = False,  # noqa: N803
+                         rotationAngle: float = 0.0):  # noqa: N803
+        log.info("[sim] slew to %.5f %.5f (center=%s)", ra, dec, center)
+        if waitForResult:
+            await asyncio.sleep(3.0 if center else 1.0)
+        sim.mount_ra, sim.mount_dec = ra, dec
+        if waitForResult and center:  # like the plugin 2.2.15: a centre that worked says Success=false (see NinaRest.slew_center)
+            return {"Response": "Slew failed", "Error": "", "StatusCode": 200, "Success": False, "Type": "API"}
+        return ok("Slew finished" if waitForResult else "Started Slew")
+
+    @router.get("/api/equipment/mount/slew/stop")
+    async def mount_slew_stop():
+        return ok("Stopped slew")
+
+    @router.get("/api/equipment/guider/start")
+    async def guider_start(calibrate: bool = False):
+        sim.state = "Guiding"
+        return ok("Guiding started")
 
     @router.get("/api/equipment/{device}/info")
     async def equipment(device: str):
@@ -389,7 +440,8 @@ def nina_router(sim: Sim) -> APIRouter:
         if device == "camera":
             end = datetime.now() + timedelta(seconds=max(0.0, EXPOSURE_S - elapsed))
             base.update(Name="Sim ASI2600MM", Temperature=-9.8 + random.gauss(0, 0.1), TemperatureSetPoint=-10.0, CoolerOn=True,
-                        CoolerPower=41.0 + random.gauss(0, 1), IsExposing=True, CameraState="Exposing", ExposureEndTime=end.isoformat(),
+                        CoolerPower=41.0 + random.gauss(0, 1), IsExposing=sim.sequence_running,
+                        CameraState="Exposing" if sim.sequence_running else "Idle", ExposureEndTime=end.isoformat(),
                         Gain=100, Offset=50, BinX=1, BinY=1, ReadoutModes=["Normal"], ReadoutMode=0, LastDownloadTime=1.8, DewHeaterOn=True)
         elif device == "mount":
             base.update(Name="Sim EQ6-R", Altitude=58.2, Azimuth=141.9, SideOfPier="pierWest", TimeToMeridianFlip=1.42,

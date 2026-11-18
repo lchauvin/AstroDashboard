@@ -201,6 +201,8 @@ export type LiveState = {
   paramInfo: Record<string, { label: string; help: string; basic: boolean }>;
   /** Absent from engines older than the polar-alignment estimate. */
   polar?: Polar;
+  /** The last Center on it (engine `center.py`); null when none ran since the engine started. */
+  center?: CenterState | null;
   /** Absent from engines older than the sky monitor. */
   sky?: SkyState;
   /** NINA's coming meridian flip (engine `meridian_flip`): within 15 min, overdue, or under way; null otherwise and once done. */
@@ -208,6 +210,45 @@ export type LiveState = {
   /** The newest light on disk against its target's previous night; null when there is no light to check. */
   framing?: LiveFraming | null;
 };
+
+// ---------------------------------------------------------------- center on it
+
+export type CenterPhase = "waiting-frame" | "stopping" | "updating" | "centering" | "guiding" | "resuming" | "done" | "failed" | "cancelled";
+export const CENTER_ACTIVE: CenterPhase[] = ["waiting-frame", "stopping", "updating", "centering", "guiding", "resuming"];
+
+export type CenterState = {
+  phase: CenterPhase;
+  /** The sequence was running when it started (stop → centre → start), else only its target is rewritten. */
+  running: boolean;
+  target: { object: string | null; ra: number; dec: number; rotation: number | null; panel: string | null; revision: string; session: string };
+  message: string;
+  started: number;
+  finished: number | null;
+  error: string | null;
+  /** Stopped by Center on it and not started again (yet, or because something failed). */
+  sequenceStopped: boolean;
+};
+
+/** 78.93698 → "05h 15m 44.9s" */
+export function raText(deg: number): string {
+  const tenths = Math.round(((((deg / 15) % 24) + 24) % 24) * 36000) % (24 * 36000);
+  const h = Math.floor(tenths / 36000);
+  const m = Math.floor((tenths % 36000) / 600);
+  const s = (tenths % 600) / 10;
+  return `${String(h).padStart(2, "0")}h ${String(m).padStart(2, "0")}m ${s.toFixed(1).padStart(4, "0")}s`;
+}
+
+/** 33.86023 → "+33° 51′ 37″" */
+export function decText(deg: number): string {
+  const a = Math.abs(deg);
+  const m = (a - Math.floor(a)) * 60;
+  let sec = Math.round((m - Math.floor(m)) * 60);
+  let min = Math.floor(m);
+  let d = Math.floor(a);
+  if (sec === 60) [sec, min] = [0, min + 1];
+  if (min === 60) [min, d] = [0, d + 1];
+  return `${deg < 0 ? "−" : "+"}${String(d).padStart(2, "0")}° ${String(min).padStart(2, "0")}′ ${String(sec).padStart(2, "0")}″`;
+}
 
 // ---------------------------------------------------------------- auto-ingest
 

@@ -135,6 +135,18 @@ export interface Conditions {
   moon: { illumination: number; separation: number | null; altitude: number | null } | null;
 }
 
+/** Where the night's NINA sequence was told to point (OBJCTRA/OBJCTDEC/OBJCTROT), per mosaic panel. J2000 degrees. */
+export interface SessionTarget {
+  panel: string | null;
+  object: string | null;
+  ra: number;
+  dec: number;
+  rotation: number | null;
+  frames: number;
+  /** More than 1: the target was changed during the night; the first one is kept. */
+  variants: number;
+}
+
 export interface Session {
   id: string;
   folder: string;
@@ -148,6 +160,8 @@ export interface Session {
   start: string | null;
   end: string | null;
   conditions: Conditions | null;
+  /** Absent from engines older than Center on it. */
+  targets?: SessionTarget[];
   /** seconds: the usable lights; acquiredSeconds: everything shot, set-aside lights included. */
   totals: { lights: number; seconds: number; acquiredSeconds?: number; rejected: number; quarantined: number; flats: number };
   /** Left out of the target: still listed, not in its totals, checks or framing reference. */

@@ -4,6 +4,7 @@ import { Moon } from "lucide-react";
 import { exposure, FILTER_ORDER, filterLabel, hours, num, settingsLabel, shortDate } from "@/lib/format";
 import type { DarkStatus, FlatStatus, LightGroup, Level, Revision, Session } from "@/lib/types";
 import { FramingCell, FramingKey, FramingProvider } from "./Framing";
+import { CenterOnTarget } from "./CenterOnTarget";
 import { IgnoreSession } from "./IgnoreSession";
 import { Badge, FilterChip, StatusIcon, Tip } from "./ui";
 import styles from "./SessionMatrix.module.css";
@@ -300,6 +301,7 @@ export function SessionMatrix({ rev }: { rev: Revision }) {
                     </div>
                   ) : null}
                   {s.totals.lights ? <IgnoreSession revId={rev.id} folder={s.folder} ignored={Boolean(s.ignored)} /> : null}
+                  {s.targets?.length ? <CenterOnTarget revId={rev.id} folder={s.folder} targets={s.targets} /> : null}
                 </td>
                 {filters.map((f) => (
                   <Cell key={f} session={s} filter={f} panels={rev.panels} />

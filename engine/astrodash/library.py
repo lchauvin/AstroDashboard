@@ -332,6 +332,7 @@ class Library:
             "conditions": self._conditions(ok_lights, times),
             "path": _session_path(items, folder),
             "site": _site(ok_lights),
+            "targets": _session_targets(lights),
             "totals": {
                 "lights": len(ok_lights),
                 "seconds": sum(f.exposure or 0 for f in ok_lights),
@@ -734,6 +735,55 @@ def _site(lights: list[Frame]) -> list[float] | None:
     lat = _median(f.header.get("SITELAT") for f in lights if isinstance(f.header.get("SITELAT"), (int, float)))
     lon = _median(f.header.get("SITELONG") for f in lights if isinstance(f.header.get("SITELONG"), (int, float)))
     return [lat, lon] if lat is not None and lon is not None else None
+
+
+_SEXA = re.compile(r"^\s*([+-])?\s*(\d+(?:\.\d+)?)(?:[\s:hd°]+(\d+(?:\.\d+)?))?(?:[\s:m′']+(\d+(?:\.\d+)?))?")
+
+
+def _sexagesimal(v: Any) -> float | None:
+    """'05 15 45' / '+33 51 37' (NINA's OBJCTRA/OBJCTDEC) → 5.2625 / 33.86; numbers pass through."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    if not isinstance(v, str) or not (m := _SEXA.match(v)):
+        return None
+    sign, a, b, c = m.groups()
+    out = float(a) + float(b or 0) / 60 + float(c or 0) / 3600
+    return -out if sign == "-" else out
+
+
+def _session_targets(lights: list[Frame]) -> list[dict[str, Any]]:
+    """Where the night's sequence was told to point, per mosaic panel: NINA's target (OBJCTRA/OBJCTDEC/OBJCTROT).
+
+    These are the target container's coordinates, the centre NINA's Slew and center aims at before any dither,
+    not the mount's RA/DEC. When the target was changed during the night, the first one used is kept
+    (`variants` counts them). J2000 degrees.
+    """
+    first: dict[str | None, tuple] = {}
+    seen: dict[str | None, set] = defaultdict(set)
+    count: dict[tuple, int] = defaultdict(int)
+    for f in lights:
+        if f.status not in ("ok", "rejected", "quarantined"):
+            continue
+        ra_h, dec = _sexagesimal(f.header.get("OBJCTRA")), _sexagesimal(f.header.get("OBJCTDEC"))
+        if ra_h is None or dec is None or not (0 <= ra_h < 24 and -90 <= dec <= 90):
+            continue
+        panel = f.location.panel if f.location else None
+        rot = f.header.get("OBJCTROT")
+        rot = float(rot) if isinstance(rot, (int, float)) and not isinstance(rot, bool) else None
+        name = f.header.get("OBJECT") if isinstance(f.header.get("OBJECT"), str) else None
+        key = (round(ra_h * 15, 5), round(dec, 5), rot, name)
+        seen[panel].add(key)
+        count[(panel,) + key] += 1
+        t = f.time_utc or f.time_local
+        stamp = t.timestamp() if t else float("inf")
+        if panel not in first or stamp < first[panel][0]:
+            first[panel] = (stamp, key)
+    out = []
+    for panel, (_, (ra, dec, rot, name)) in first.items():
+        out.append({"panel": panel, "object": name, "ra": ra, "dec": dec, "rotation": rot,
+                    "frames": count[(panel, ra, dec, rot, name)], "variants": len(seen[panel])})
+    out.sort(key=lambda t: int(t["panel"]) if t["panel"] and t["panel"].isdigit() else 0)
+    return out
 
 
 def _pointing(lights: list[Frame]) -> dict[str, float] | None:

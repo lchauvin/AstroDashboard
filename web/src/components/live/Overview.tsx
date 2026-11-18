@@ -6,7 +6,7 @@ import { Bot, Lightbulb } from "lucide-react";
 
 import { shortDate } from "@/lib/format";
 import { framingLevel, framingText, px, type LiveFraming } from "@/lib/framing";
-import { ago, clock, duration, enginePost, filterLetterOf, fmt, type DeviceCard, type Frame, type IngestStatus, type LiveState, type SeqStep, type SkyState } from "@/lib/live";
+import { ago, CENTER_ACTIVE, clock, duration, enginePost, filterLetterOf, fmt, type DeviceCard, type Frame, type CenterState, type IngestStatus, type LiveState, type SeqStep, type SkyState } from "@/lib/live";
 import { FilterChip, Marks, StatusIcon, Tip } from "../ui";
 import { LiveBar, NotConnected } from "./LiveBar";
 import styles from "./live.module.css";
@@ -194,8 +194,39 @@ function SequenceCard({ s, adv, refresh }: { s: LiveState; adv: boolean; refresh
       ) : (
         <p className={styles.hint}>Waiting for NINA.</p>
       )}
+      {s.center ? <CenterLine c={s.center} now={s.serverTime} refresh={refresh} /> : null}
       {s.sky ? <SkyToggle k={s.sky} now={s.serverTime} refresh={refresh} /> : null}
     </section>
+  );
+}
+
+/** Center on it (started from a night in the Library): while it runs, when it left the sequence stopped, and for an hour after. */
+function CenterLine({ c, now, refresh }: { c: CenterState; now: number; refresh: () => Promise<unknown> }) {
+  const [error, setError] = useState<string | null>(null);
+  const active = CENTER_ACTIVE.includes(c.phase);
+  if (!active && !c.sequenceStopped && c.finished != null && now - c.finished > 3600) return null;
+  const level = c.phase === "failed" ? "bad" : active ? "info" : c.phase === "done" ? "ok" : "info";
+  const cancel = async () => {
+    try {
+      await enginePost("/api/live/center/cancel");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  return (
+    <p className={styles.hint} role="status">
+      <StatusIcon level={level} size={12} /> Center on it{c.target.object ? ` · ${c.target.object}` : ""}: {c.message}
+      {c.phase === "waiting-frame" ? (
+        <>
+          {" "}
+          <button type="button" className={styles.link} onClick={() => void cancel()}>
+            Cancel
+          </button>
+        </>
+      ) : null}
+      {error ? <span className="mono"> {error}</span> : null}
+    </p>
   );
 }
 
