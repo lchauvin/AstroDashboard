@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 import httpx
 
+from . import phone
 from .equipment import _seconds_until
 from .nina import NinaError, NinaUnavailable, parse_sequence, target_containers
 
@@ -358,15 +359,6 @@ class CenterJob:
 
     async def _notify_stopped(self, reason: str) -> None:
         """A phone notification through the Planning ntfy settings, when they are on: the sequence is stopped."""
-        n = (self.obs._settings().get("notify") or {})
-        topic, server = n.get("ntfyTopic"), n.get("ntfyServer") or "https://ntfy.sh"
-        if not n.get("enabled") or not topic:
-            return
         t = (self.state or {}).get("target") or {}
         body = f"Center on it failed for {t.get('object') or 'the target'}: {reason}. NINA's sequence is stopped."
-        try:
-            async with httpx.AsyncClient(timeout=10) as c:
-                await c.post(f"{server.rstrip('/')}/{topic}", content=body.encode("utf-8"),
-                             headers={"Title": "Sequence stopped", "Tags": "warning", "Priority": "high"})
-        except httpx.HTTPError as exc:
-            log.warning("center: notification failed: %s", exc)
+        await phone.notify(self.obs._settings(), "Sequence stopped", body)

@@ -314,6 +314,11 @@ def register(app: FastAPI, state) -> None:
         obs.sky.clear_now()
         return {"ok": True}
 
+    @app.post("/api/live/sky/alpaca")
+    def sky_alpaca(report: dict[str, Any]) -> dict[str, Any]:
+        """The sky monitor process (`skymonitor.py`), every second: what NINA did, for the verdict it answers NINA with."""
+        return obs.sky.report(report)
+
     @app.post("/api/live/advisor/suggestions/{sid}/apply")
     async def advisor_apply(sid: str) -> dict[str, Any]:
         s = obs.advisor.suggestion(sid)

@@ -25,6 +25,7 @@ dev = ["pytest>=8.0", "httpx>=0.27"]
 
 [project.scripts]
 astrodash-engine = "astrodash.__main__:main"
+astrodash-skymonitor = "astrodash.skymonitor:main"
 
 [tool.setuptools.packages.find]
 include = ["astrodash*"]

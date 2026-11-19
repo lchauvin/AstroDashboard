@@ -19,7 +19,7 @@
       "name": "Sky monitor (ASCOM Alpaca, for NINA)",
       "type": "Alpaca",
       "port": 3008,
-      "command": "uv run astrodash-engine --port 3007",
+      "command": "uv run astrodash-skymonitor",
       "cwd": "engine"
     }
   ]

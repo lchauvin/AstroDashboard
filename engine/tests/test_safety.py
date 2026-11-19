@@ -27,6 +27,8 @@ WRITE_ALLOWED = {
     ("preview.py", "tmp.replace(out)"),
     # var/leaks only: a dark set's arrays, named by a generated set id
     ("api_leaks.py", '(out_dir / f"{set_id}.npz").unlink(missing_ok=True)'),
+    # the null device only: stdout/stderr for the sky monitor under pythonw, which has none
+    ("skymonitor.py", 'open(os.devnull, "w", encoding="utf-8")'),
 }
 
 

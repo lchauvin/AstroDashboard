@@ -25,7 +25,7 @@ from . import advisor as adv
 from . import equipment as eq
 from . import frames as fr
 from ..planning import nearest_site
-from . import guiding, llm, polar, sky
+from . import alpaca, guiding, llm, phone, polar, sky
 from .center import CenterJob
 from .nina import NinaError, NinaRest, NinaUnavailable, listen, parse_sequence, state_targets
 from .phd2 import Phd2Client, Phd2Disconnected, Phd2Error
@@ -46,6 +46,8 @@ HISTORY_S = 30.0
 ADVISOR_TICK_S = 20.0
 SKY_TICK_S = 5.0
 LOST_KEEP_S = 1800.0
+SAFETY_RETRY_S = 30.0  # between reconnects of the sky monitor in NINA
+SAFETY_TRIES = 3
 PHD2_ERRORS = (Phd2Error, Phd2Disconnected, asyncio.TimeoutError)
 
 
@@ -91,6 +93,7 @@ class Observatory:
         self._switches: dict[str, dict] = {}  # axis → an algorithm switch that follows a suggestion, until you click Done
         self.image_saves = 0  # NINA IMAGE-SAVE events seen (Center on it waits for the frame in progress)
         self.center = CenterJob(self)
+        self._safety_drop: dict | None = None  # NINA dropped the sky monitor: since, reconnect tries
 
     # ------------------------------------------------------------------ config
 
@@ -277,6 +280,10 @@ class Observatory:
                 self._track_devices(equipment)
                 self.equipment, self.equipment_t = equipment, time.time()
                 self.nina_status.update(connected=True, error=None, lastOk=time.time())
+                try:
+                    await self.guard_safety_monitor(equipment.get("safetymonitor") or {})
+                except Exception:  # noqa: BLE001 — never let it stop the poll
+                    log.exception("sky monitor: reconnect check failed")
                 if self._wake_history.is_set() or time.monotonic() - last_history > HISTORY_S:
                     self._wake_history.clear()
                     self.history = await self.nina.image_history()
@@ -288,6 +295,56 @@ class Observatory:
                 self.nina_status.update(connected=False, error=f"{type(exc).__name__}: {exc}")
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(self._wake_history.wait(), POLL_S)
+
+    def _sky_in_nina(self) -> dict | None:
+        """NINA's own view of its safety monitor (Equipment › Safety Monitor), None while NINA is not answering."""
+        if not self.nina_status["connected"]:
+            return None
+        info = self.equipment.get("safetymonitor") or {}
+        name = str(info.get("Name") or info.get("DisplayName") or "")
+        return {"connected": bool(info.get("Connected")) and not info.get("Error"), "ours": alpaca.DEVICE_NAME in name,
+                "name": name or None, "isSafe": info.get("IsSafe")}
+
+    async def guard_safety_monitor(self, info: dict, now: float | None = None) -> None:
+        """NINA dropped the sky monitor during a sequence (a reply timed out, the network blinked): NINA reads that as
+        unsafe for the rest of the night. Reconnect it through the Advanced API and tell your phone. The one thing the
+        dashboard does to NINA on its own, by your choice (2026-11-19): equipment, never the sequence."""
+        now = now or time.time()
+        drop = self._safety_drop
+        if info.get("Connected"):
+            if drop is not None:
+                self._safety_drop = None
+                when = time.strftime("%H:%M", time.localtime(drop["since"]))
+                msg = f"NINA had dropped the sky monitor at {when}; reconnected it after {now - drop['since']:.0f} s"
+                self.sky.note(f"{msg}.", now)
+                log.warning("sky monitor: %s", msg)
+                await phone.notify(self._settings(), "Sky monitor reconnected", f"{msg}. NINA's sequence goes on.",
+                                   tags="white_check_mark", priority="default")
+            return
+        name = str(info.get("Name") or info.get("DisplayName") or self._seen.get("safetymonitor") or "")
+        if (info.get("Error") or not self.sky_settings()["enabled"] or alpaca.DEVICE_NAME not in name or self.nina is None
+                or self.sequence.get("status") != "running"):
+            return
+        if drop is None:
+            drop = self._safety_drop = {"since": now, "tries": 0, "last": 0.0, "gaveUp": False}
+            self.sky.note("NINA dropped the sky monitor during the sequence; reconnecting it.", now)
+            log.warning("sky monitor: NINA dropped it during the sequence; reconnecting")
+        if drop["tries"] >= SAFETY_TRIES:
+            if not drop["gaveUp"]:
+                drop["gaveUp"] = True
+                msg = f"NINA dropped the sky monitor and {SAFETY_TRIES} reconnects failed"
+                self.sky.note(f"{msg}; connect it in NINA (Equipment › Safety Monitor).", now)
+                await phone.notify(self._settings(), "Sky monitor disconnected",
+                                   f"{msg}. NINA reads that as unsafe and waits: connect it in NINA (Equipment › Safety Monitor).")
+            return
+        if now - drop["last"] < SAFETY_RETRY_S:
+            return
+        drop["tries"] += 1
+        drop["last"] = now
+        try:
+            await self.nina.get("/equipment/safetymonitor/connect", timeout=60.0)
+        except Exception as exc:  # noqa: BLE001 — NINA may refuse; the next poll tells
+            log.warning("sky monitor: reconnect %d failed: %s", drop["tries"], exc)
 
     def _track_devices(self, equipment: dict) -> None:
         now = time.time()
@@ -724,6 +781,6 @@ class Observatory:
             "polar": self.polar.summary(),
             "center": self.center.as_dict(),
             "meridianFlip": self.meridian_flip(),
-            "sky": self.sky.as_dict(time.time(), self.sky_settings()),
+            "sky": {**self.sky.as_dict(time.time(), self.sky_settings()), "nina": self._sky_in_nina()},
             "paramInfo": {k: {"label": v[0], "help": v[1], "basic": k in adv.BASIC_PARAMS} for k, v in adv.PARAM_INFO.items()},
         }

@@ -94,6 +94,8 @@ export type SkyState = SkyMonitorSettings & {
   /** The Alpaca server NINA connects to. */
   server: SkyServer;
   log: { t: number; message: string }[];
+  /** NINA's own view of its safety monitor; null while NINA is not answering. */
+  nina: { connected: boolean; ours: boolean; name: string | null; isSafe: boolean | null } | null;
 };
 export type SkyServer = { running: boolean; port: number | null; error: string | null; discovery: boolean };
 

@@ -30,6 +30,7 @@ export function LiveBar({ s, offline, tab }: { s: LiveState | null; offline: boo
           <>
             <Conn ok={s.nina.connected} name="NINA" detail={s.nina.connected ? (s.nina.websocket ? s.nina.url ?? "" : "events not connected") : s.nina.error ?? ""} where={s.nina.url} />
             <Conn ok={s.phd2.connected} name="PHD2" detail={s.phd2.connected ? s.phd2.address : s.phd2.error ?? ""} where={s.phd2.address} />
+            {s.sky ? <SkyConn k={s.sky} /> : null}
             {adv && tab === "guiding" && s.nina.connected && Math.abs(s.nina.clockOffset) >= 2 ? (
               <span className={styles.conn} title="NINA's timestamps are corrected for this. Windows time sync on the observatory PC would remove it.">
                 <StatusIcon level="info" size={13} /> Observatory PC clock {s.nina.clockOffset > 0 ? "+" : "−"}
@@ -175,6 +176,22 @@ function Conn({ ok, name, detail, where }: { ok: boolean; name: string; detail: 
     <span className={styles.conn} title={detail || undefined}>
       <StatusIcon level={ok ? "ok" : "bad"} size={13} label={ok ? "Connected" : "Not connected"} /> {name}
       <span className={styles.connState}>{ok ? "connected" : `not connected${where ? ` · ${where}` : ""}`}</span>
+    </span>
+  );
+}
+
+/** The sky monitor NINA needs to image: running (its own process), and connected in NINA. */
+function SkyConn({ k }: { k: SkyState }) {
+  const connected = !!k.nina?.connected && k.nina.ours;
+  const [level, state, detail] = !k.server.running
+    ? (["bad", "not running", k.server.error ?? "The sky monitor process is not running."] as const)
+    : connected
+      ? (["ok", "connected", `Running on port ${k.server.port}, connected in NINA.`] as const)
+      : (["warn", "NINA not connected", "Running, but not connected in NINA: connect it in Equipment › Safety Monitor."] as const);
+  return (
+    <span className={styles.conn} title={detail}>
+      <StatusIcon level={level} size={13} label={state} /> Sky monitor
+      <span className={styles.connState}>{state}</span>
     </span>
   );
 }

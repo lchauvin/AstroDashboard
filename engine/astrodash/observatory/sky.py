@@ -46,6 +46,7 @@ BASELINE_MIN_S = 120.0  # …and needs at least this much of it
 BASELINE_MIN_STEPS = 10
 BASELINE_PCTL = 0.80
 MIN_STEPS = 5  # guide steps in a window for its brightness to mean anything
+REPORT_STALE_S = 15.0  # the sky monitor process reports every second: silent this long, it is not running
 KEEP_S = max(BASELINE_S, LIMITS["windowS"][1], LIMITS["clearAfterS"][1])
 
 # PHD2 events that end a guiding run, and how the log says it
@@ -73,13 +74,16 @@ class SkyMonitor:
 
     def __init__(self, store: Any) -> None:
         self.store = store
-        self.log: list[dict] = (store.get_json("sky_monitor") or {}).get("log", [])[-50:]
+        saved = store.get_json("sky_monitor") or {}
+        self.log: list[dict] = saved.get("log", [])[-50:]
+        self.alpaca_clients: set[str] = set(saved.get("alpacaClients", []))  # connected Alpaca ClientIDs, kept over restarts
         self.cloudy_since: float | None = None
         self.reason: str | None = None  # why it is unsafe
         self.gave_up = False  # unsafe too long: clear until the next guiding run
         self.obstructed: str | None = None  # what the mount points at, when below the horizon profile
-        self.polled: dict | None = None  # NINA's last IsSafe question: {"t", "client"} (set by the Alpaca server)
+        self.polled: dict | None = None  # NINA's last IsSafe question: {"t", "client"} (reported by the sky monitor process)
         self.server: dict = {"running": False, "port": None, "error": None, "discovery": False}
+        self.reported: float | None = None  # when the sky monitor process last reported
         self._reset_run()
 
     def _reset_run(self) -> None:
@@ -94,11 +98,37 @@ class SkyMonitor:
         return self.cloudy_since is None
 
     def save(self) -> None:
-        self.store.set_json("sky_monitor", {"log": self.log[-50:]})
+        self.store.set_json("sky_monitor", {"log": self.log[-50:], "alpacaClients": sorted(self.alpaca_clients)})
 
     def note(self, message: str, now: float | None = None) -> None:
         self.log.append({"t": now or time.time(), "message": message})
         self.save()
+
+    # ------------------------------------------------------------------ the sky monitor process
+
+    def report(self, r: dict, now: float | None = None) -> dict:
+        """The sky monitor process's report (`alpaca.Bridge`): what NINA did. Answers with the verdict it serves."""
+        now = now or time.time()
+        self.reported = now
+        self.server = {"running": True, "port": r.get("port"), "error": None, "discovery": bool(r.get("discovery")),
+                       "pid": r.get("pid")}
+        if isinstance(r.get("polled"), dict):
+            self.polled = r["polled"]
+        events = [e for e in r.get("events") or [] if isinstance(e, dict) and e.get("message")]
+        for e in events:
+            if isinstance(e.get("clients"), list):
+                self.alpaca_clients = {str(c) for c in e["clients"]}
+            self.log.append({"t": e.get("t") or now, "message": f"Alpaca: {str(e['message'])[:300]}."})
+        if events:
+            self.save()
+        return {"safe": self.safe, "clients": sorted(self.alpaca_clients)}
+
+    def server_state(self, now: float) -> dict:
+        if self.reported is not None and now - self.reported <= REPORT_STALE_S:
+            return self.server
+        why = "has not reported for a while" if self.reported else "has not reported since the engine started"
+        return {**self.server, "running": False,
+                "error": f"the sky monitor process {why} (the engine starts it; scripts/install-skymonitor-task.ps1 keeps it running)"}
 
     # ------------------------------------------------------------------ evidence
 
@@ -240,6 +270,6 @@ class SkyMonitor:
             "clearNeedPct": self.clear_need(s),
             "steadyForS": round(now - self.steady_since) if self.steady_since else None,
             "giveUpAt": self.cloudy_since + s["giveUpMin"] * 60 if self.cloudy_since else None,
-            "polled": self.polled, "server": self.server,
+            "polled": self.polled, "server": self.server_state(now),
             "log": list(reversed(self.log[-10:])),
         }

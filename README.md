@@ -70,8 +70,12 @@ local path on this PC; `G:\Astro\.Download` by default, and it must be on the da
 `uv run astrodash-engine --fake-observatory` (simulated NINA and PHD2; the guiding reacts to its parameters).
 The Guiding page's AI advisor uses the model set in the same Settings tab; API keys go in `.env` (see `.env.example`).
 To have NINA react to clouds, connect its safety monitor (Equipment › Safety Monitor) to "AstroDashboard sky monitor",
-an ASCOM Alpaca device the engine serves on port 3008 (found by Alpaca discovery; allow it through this PC's firewall),
+an ASCOM Alpaca device on port 3008 (found by Alpaca discovery; allow it through this PC's firewall),
 and use Loop While Safe / Loop While Unsafe in the sequence. The steps are in Settings → Live · Ingest.
+NINA cannot image without it, so it runs apart from the engine (`uv run astrodash-skymonitor`, a supervisor that restarts
+it) and keeps answering NINA when the engine is stopped or has crashed (it then says clear). The engine starts it when
+nothing answers on the port; run `scripts\install-skymonitor-task.ps1` once so a scheduled task also starts it at logon
+and every minute. If NINA drops it during a sequence anyway, the engine reconnects it and notifies your phone (ntfy).
 For the weather forecast on the Planning page, set `ASTROSPHERIC_API_KEY` (an Astrospheric Professional key, from
 My Profile) in `.env` at the project root (copy `.env.example`; git-ignored) or in the engine's environment; forecasts are cached per site for an hour and only cover the RDPS domain
 (North America, Greenland, Iceland, Ireland, UK). Optionally set `TELESCOPIUS_API_KEY` (Telescopius → account settings →

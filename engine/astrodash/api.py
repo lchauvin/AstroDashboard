@@ -116,6 +116,25 @@ class EngineState:
         return self.library
 
 
+SKY_MONITOR_CHECK_S = 30.0
+
+
+async def _keep_sky_monitor(cfg: Config) -> None:
+    """The sky monitor runs apart from the engine (`skymonitor.py`); start it whenever nothing answers on its port.
+    It outlives the engine: stopping the engine leaves NINA's safety monitor up."""
+    import asyncio
+
+    from . import skymonitor
+
+    while True:
+        try:
+            if await asyncio.to_thread(skymonitor.ensure_running, cfg.alpaca_host, cfg.alpaca_port):
+                log.warning("sky monitor: nothing answered on port %d; started it", cfg.alpaca_port)
+        except Exception:  # noqa: BLE001 — keep checking
+            log.exception("sky monitor: could not start it")
+        await asyncio.sleep(SKY_MONITOR_CHECK_S)
+
+
 def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None, observatory: bool | None = None,
                fake_observatory: bool = False) -> FastAPI:
     """`observatory` (default: same as scan_on_start) connects to NINA and PHD2; `fake_observatory` simulates both."""
@@ -150,17 +169,14 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
             state.observatory._nina_override = f"http://127.0.0.1:{cfg.port}/fake-nina"
             state.observatory._phd2_override = ("127.0.0.1", port)
             sim.safe = lambda: state.observatory.sky.safe
-        alpaca = None
+        keeper = None
         if run_observatory or fake_observatory:
             await state.observatory.start()
-            if cfg.alpaca_port:
-                from .observatory.alpaca import AlpacaServer
-
-                alpaca = AlpacaServer(state.observatory.sky, cfg.alpaca_host, cfg.alpaca_port, cfg.alpaca_discovery)
-                alpaca.start()
+            if cfg.alpaca_port and not fake_observatory:
+                keeper = asyncio.create_task(_keep_sky_monitor(cfg))
         yield
-        if alpaca is not None:
-            await asyncio.to_thread(alpaca.stop)
+        if keeper is not None:
+            keeper.cancel()
         if run_observatory or fake_observatory:
             await state.observatory.stop()
         for t in sim_tasks:
