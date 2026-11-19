@@ -150,7 +150,7 @@ function SkyRow({ k, now }: { k: SkyState; now: number }) {
         <StatusIcon level="info" size={13} /> {k.obstructed}: not cloud, NINA is told clear.
       </>
     );
-  } else if (last && now - last.t < 900) {
+  } else if (last && now - last.t < 300) {
     body = (
       <>
         <StatusIcon level="info" size={13} /> {clock(last.t)} · {last.message}
