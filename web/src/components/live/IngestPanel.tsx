@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
-import { downloadName, fileName, type IngestAction, type IngestHold, type IngestStatus } from "@/lib/live";
+import { ago, downloadName, fileName, type IngestAction, type IngestHold, type IngestStatus } from "@/lib/live";
 import { relativeTime } from "@/lib/format";
 import { FilterChip, Marks, StatusIcon } from "../ui";
 import styles from "./live.module.css";
@@ -22,7 +22,8 @@ async function post(path: string, body?: unknown, method = "POST") {
 }
 
 /** Auto-ingest from NINA's image folder (PLAN §5.1): mode, plan per night, held frames, and the journal with undo. */
-export function IngestPanel({ initial }: { initial: IngestStatus | null }) {
+/** `advanced`: also the journal's most recent moves, file by file. */
+export function IngestPanel({ initial, advanced = false }: { initial: IngestStatus | null; advanced?: boolean }) {
   const [st, setSt] = useState<IngestStatus | null>(initial);
   const [confirmAuto, setConfirmAuto] = useState(false);
   const [confirm, setConfirm] = useState<string | null>(null); // "undo:<night>" | "cleanup:<night>" | "copies:<night>"
@@ -137,7 +138,67 @@ export function IngestPanel({ initial }: { initial: IngestStatus | null }) {
           act={act}
         />
       ))}
+
+      {advanced ? <RecentMoves st={st} /> : null}
     </div>
+  );
+}
+
+/** The journal's newest entries: what moved where, undone or failed. */
+function RecentMoves({ st }: { st: IngestStatus }) {
+  const rows = st.recent.slice(0, 100);
+  return (
+    <section className={styles.block}>
+      <h3 className="eyebrow">Recent moves</h3>
+      {rows.length ? (
+        <div className={styles.scroller}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Op</th>
+                <th>Kind</th>
+                <th>Filter</th>
+                <th>File</th>
+                <th>To</th>
+                <th>State</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td className="num" title={new Date(r.ts * 1000).toLocaleString()}>
+                    {ago(r.ts)}
+                  </td>
+                  <td className={styles.hint}>{r.op}</td>
+                  <td className={styles.hint}>{r.kind.toLowerCase()}</td>
+                  <td>{r.filter ? <FilterChip filter={r.filter} /> : "—"}</td>
+                  <td className="mono" title={r.src}>
+                    {fileName(r.src)}
+                  </td>
+                  <td className="mono" title={r.dst}>
+                    {r.dst.split(/[\\/]/).slice(-4, -1).join("\\")}
+                  </td>
+                  <td>
+                    {r.error ? (
+                      <span className={styles.error} title={r.error}>
+                        failed
+                      </span>
+                    ) : r.undone ? (
+                      <span className={styles.hint}>undone</span>
+                    ) : (
+                      <StatusIcon level="ok" size={12} label="Done" />
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className={styles.hint}>Nothing journaled yet.</p>
+      )}
+    </section>
   );
 }
 

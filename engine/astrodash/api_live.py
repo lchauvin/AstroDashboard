@@ -18,6 +18,7 @@ from .ingest import paths as ingest_paths
 from .ingest.planner import NIGHT_DIR_RE, evening_of, match_target, split_panel
 from .ingest.service import IngestService
 from .library import slugify
+from .live_flats import tonight_flats
 from .observatory import advisor as adv
 from .observatory import frames as obs_frames
 from .observatory.center import CenterRefused
@@ -176,6 +177,25 @@ def register(app: FastAPI, state) -> None:
             "selected": len(selected),
             "frames": [{**f, "filterKey": key(f)} for f in selected[: max(1, min(limit, 5000))]],
         }
+
+    @app.get("/api/live/flats")
+    def live_flats() -> dict[str, Any]:
+        """Tonight's flats per filter of the imaging sequence, and whether they are in the flats readout mode."""
+        tonight = service.status()["tonight"]
+        lib = state.library
+        plan = service.last_plan
+        waiting = [a.src for a in plan.actions if a.kind == "FLAT"] + [h.src for h in plan.holds if h.kind == "FLAT"] if plan else []
+        aliases = state.cfg.filter_aliases
+        lights = [canonical_filter(f.get("filter"), aliases) for f in obs.frames if f.get("type") == "LIGHT"]
+        return tonight_flats(
+            tonight=tonight,
+            steps=obs.sequence.get("steps") or [],
+            light_filters=[f for f in lights if f],
+            session_roots=[t.session_root for t in service.targets(lib)] if lib else [],
+            waiting=waiting,
+            aliases=aliases,
+            want_readout=state.cfg.flat_readout,
+        )
 
     @app.get("/api/live/frame.jpg")
     async def live_frame(v: str | None = None):  # noqa: ARG001 — cache buster: the URL changes with the frame

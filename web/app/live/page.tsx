@@ -10,14 +10,7 @@ export const metadata = { title: "Live" };
 
 export default async function LivePage() {
   const [live, ingest] = await Promise.all([engineGet<LiveState>("/api/live/state?graph=180"), engineGet<IngestStatus>("/api/ingest")]);
-  const ingestSection = (
-    <section key="auto-ingest">
-      <h2 className="section-title" style={{ marginBottom: 14 }}>
-        Auto-ingest
-      </h2>
-      <IngestPanel initial={ingest.ok ? ingest.data : null} />
-    </section>
-  );
+  const ingestPanel = <IngestPanel initial={ingest.ok ? ingest.data : null} />;
   return (
     <main className="page">
       <div className={pageStyles.head}>
@@ -30,13 +23,18 @@ export default async function LivePage() {
           </p>
         </div>
       </div>
-      {/* Auto-ingest sits above Tonight's frames (inside the Overview); without the engine it stays below the notice. */}
+      {/* Equipment, Sequence, Auto-ingest and Tonight's frames open from the Overview's buttons; without the engine Auto-ingest stays below the notice. */}
       {live.ok || live.reason !== "offline" ? (
-        <Overview initial={live.ok ? live.data : null} ingest={ingest.ok ? ingest.data : null} beforeFrames={ingestSection} />
+        <Overview initial={live.ok ? live.data : null} ingest={ingest.ok ? ingest.data : null} />
       ) : (
         <>
           <EngineNotice reason={live.reason} message={live.message} />
-          {ingestSection}
+          <section>
+            <h2 className="section-title" style={{ marginBottom: 14 }}>
+              Auto-ingest
+            </h2>
+            {ingestPanel}
+          </section>
         </>
       )}
     </main>

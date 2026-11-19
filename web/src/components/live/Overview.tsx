@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Bot, Lightbulb } from "lucide-react";
 
@@ -9,52 +9,127 @@ import { framingLevel, framingText, px, type LiveFraming } from "@/lib/framing";
 import { ago, CENTER_ACTIVE, clock, duration, enginePost, filterLetterOf, fmt, type DeviceCard, type Frame, type CenterState, type IngestStatus, type LiveState, type SeqStep, type SkyState } from "@/lib/live";
 import { FilterChip, Marks, StatusIcon, Tip } from "../ui";
 import { LiveBar, NotConnected } from "./LiveBar";
+import { LiveModal } from "./LiveModal";
 import styles from "./live.module.css";
+import { StatusStrip } from "./StatusStrip";
 import { TimeChart } from "./TimeChart";
 import { TonightTarget } from "./TonightTarget";
-import { useAdvanced, useLive } from "./useLive";
+import { IngestPanel } from "./IngestPanel";
+import { useLive, useStoredFlag } from "./useLive";
 
 const RA = "var(--filter-B)";
 const DEC = "var(--filter-H)";
 
-/** `beforeFrames` is rendered just above Tonight's frames (the page puts Auto-ingest there). */
-export function Overview({ initial, ingest, beforeFrames }: { initial: LiveState | null; ingest: IngestStatus | null; beforeFrames?: React.ReactNode }) {
+type Dialog = "equipment" | "sequence" | "ingest" | "frames" | null;
+
+/** The page shows the basic view; each dialog (Equipment, Sequence, Ingestion, Tonight's frames) has its own Advanced switch. */
+export function Overview({ initial, ingest }: { initial: LiveState | null; ingest: IngestStatus | null }) {
   const { data: s, offline, refresh } = useLive(initial, 180);
-  const [adv] = useAdvanced();
+  const advEquipment = useStoredFlag("astrodash.live.adv.equipment");
+  const advSequence = useStoredFlag("astrodash.live.adv.sequence");
+  const advIngest = useStoredFlag("astrodash.live.adv.ingest");
+  const advFrames = useStoredFlag("astrodash.live.adv.frames");
+  const [open, setOpen] = useState<Dialog>(null);
+  const close = useCallback(() => setOpen(null), []);
+  const attention = useIngestAttention(ingest);
   if (!s)
     return (
       <div className={styles.live}>
         <LiveBar s={null} offline tab="overview" />
-        {beforeFrames}
+        <section>
+          <h2 className="section-title" style={{ marginBottom: 14 }}>
+            Auto-ingest
+          </h2>
+          <IngestPanel initial={ingest} />
+        </section>
       </div>
     );
+  const lights = s.frames.filter((f) => f.type === "LIGHT").length;
+  const actions = (
+    <>
+      <button type="button" className={styles.primaryBtn} onClick={() => setOpen("equipment")}>
+        Equipment <span className={styles.btnCount}>{s.equipment.length}</span>
+      </button>
+      <button type="button" className={styles.primaryBtn} onClick={() => setOpen("sequence")} disabled={!s.sequence.available}
+        title={s.sequence.available ? undefined : "No sequence loaded in NINA"}>
+        Sequence {s.sequence.available ? <span className={styles.btnCount}>{s.sequence.done}/{s.sequence.total}</span> : null}
+      </button>
+      <button type="button" className={styles.primaryBtn} onClick={() => setOpen("ingest")} title={attention.text || undefined}>
+        Ingestion
+        {attention.level ? <StatusIcon level={attention.level} size={13} label={attention.text} /> : null}
+      </button>
+      <button type="button" className={styles.primaryBtn} onClick={() => setOpen("frames")}>
+        Tonight&apos;s frames {lights ? <span className={styles.btnCount}>{lights}</span> : null}
+      </button>
+    </>
+  );
   return (
     <div className={styles.live}>
       <LiveBar s={s} offline={offline} tab="overview" />
       {!s.nina.connected ? <NotConnected what="NINA" error={s.nina.error} where={s.nina.url} /> : null}
+      <StatusStrip s={s} actions={actions} />
       <div className={styles.topGrid}>
-        <LatestFrame s={s} adv={adv} />
+        <LatestFrame s={s} adv={false} />
         <div className={styles.sideCol}>
-          <SequenceCard s={s} adv={adv} refresh={refresh} />
+          <SequenceCard s={s} adv={false} refresh={refresh} />
           <GuidingMini s={s} />
           <TonightTarget initial={ingest} />
         </div>
       </div>
-      {s.equipment.length ? (
-        <section className={styles.block}>
-          <h2 className="section-title">Equipment</h2>
-          <div className={styles.devices}>
-            {s.equipment.map((d) => (
-              <Device key={d.key} d={d} adv={adv} />
-            ))}
-          </div>
-        </section>
+      {open === "equipment" ? (
+        <LiveModal title="Equipment" onClose={close} advanced={advEquipment}>
+          {s.equipment.length ? (
+            <div className={styles.devices}>
+              {s.equipment.map((d) => (
+                <Device key={d.key} d={d} adv={advEquipment[0]} />
+              ))}
+            </div>
+          ) : (
+            <p className={styles.hint}>No device connected in NINA.</p>
+          )}
+        </LiveModal>
       ) : null}
-      {adv && s.sequence.available ? <SequenceTree steps={s.sequence.steps} /> : null}
-      {beforeFrames}
-      <Frames s={s} adv={adv} />
+      {open === "sequence" ? (
+        <LiveModal title={`Sequence${s.sequence.target ? ` · ${s.sequence.target}` : ""}`} onClose={close} advanced={advSequence}>
+          {s.sequence.available ? <SequenceTree s={s} adv={advSequence[0]} /> : <p className={styles.hint}>No sequence loaded in NINA.</p>}
+        </LiveModal>
+      ) : null}
+      {open === "ingest" ? (
+        <LiveModal title="Auto-ingest" onClose={close} advanced={advIngest}>
+          <IngestPanel initial={ingest} advanced={advIngest[0]} />
+        </LiveModal>
+      ) : null}
+      {open === "frames" ? (
+        <LiveModal title="Tonight's frames" onClose={close} advanced={advFrames}>
+          <Frames s={s} adv={advFrames[0]} bare />
+        </LiveModal>
+      ) : null}
     </div>
   );
+}
+
+/** Whether Auto-ingest needs you while its dialog is closed: frames held for a decision, or an error. */
+function useIngestAttention(initial: IngestStatus | null): { level: "warn" | "bad" | null; text: string } {
+  const [st, setSt] = useState(initial);
+  useEffect(() => {
+    let stop = false;
+    const load = async () => {
+      try {
+        const res = await fetch("/engine/api/ingest", { cache: "no-store" });
+        if (res.ok && !stop) setSt(await res.json());
+      } catch {}
+    };
+    const id = setInterval(() => !document.hidden && void load(), 15_000);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+  }, []);
+  if (!st) return { level: null, text: "" };
+  if (st.error || st.downloadProblem) return { level: "bad", text: st.error ?? st.downloadProblem ?? "" };
+  const prompts = new Set((st.plan?.holds ?? []).filter((h) => h.prompt).map((h) => h.object ?? ""));
+  if (prompts.size) return { level: "warn", text: `Frames waiting for a decision (${[...prompts].filter(Boolean).join(", ") || "unknown object"})` };
+  return { level: null, text: "" };
 }
 
 function LatestFrame({ s, adv }: { s: LiveState; adv: boolean }) {
@@ -416,10 +491,19 @@ function Device({ d, adv }: { d: DeviceCard; adv: boolean }) {
   );
 }
 
-function SequenceTree({ steps }: { steps: SeqStep[] }) {
+/** Every step of NINA's sequence, the running one highlighted (in its dialog, which carries the title).
+ *  Advanced: where the sequence is, and each step's image type, gain, offset and binning. */
+function SequenceTree({ s, adv }: { s: LiveState; adv: boolean }) {
+  const q = s.sequence;
+  const steps: SeqStep[] = q.steps;
   return (
     <section className={styles.block}>
-      <h2 className="section-title">Sequence</h2>
+      {adv ? (
+        <p className={styles.hint}>
+          {q.path.length ? `${q.path.join(" › ")} · ` : ""}
+          {q.done}/{q.total} steps done{q.error ? ` · ${q.error}` : ""}
+        </p>
+      ) : null}
       <ol className={styles.tree}>
         {steps.map((st) => (
           <li key={st.id} style={{ paddingLeft: st.depth * 18 }} className={st.status === "RUNNING" ? styles.treeOn : st.status === "FINISHED" || st.status === "SKIPPED" ? styles.treeDone : undefined}>
@@ -428,6 +512,18 @@ function SequenceTree({ steps }: { steps: SeqStep[] }) {
             {st.info.Filter ? <FilterChip filter={filterLetterOf(st.info.Filter)} /> : null}
             {st.info.ExposureTime ? <span className={styles.hint}>{st.info.ExposureTime} s</span> : null}
             {st.info.Iterations ? <span className={styles.hint}>{st.info.CompletedIterations ?? 0}/{st.info.Iterations}</span> : null}
+            {adv ? (
+              <span className={styles.hint}>
+                {[
+                  st.info.ImageType ? st.info.ImageType.toLowerCase() : null,
+                  st.info.Gain != null ? `gain ${st.info.Gain}` : null,
+                  st.info.Offset != null ? `offset ${st.info.Offset}` : null,
+                  st.info.Binning ? `bin ${st.info.Binning}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            ) : null}
           </li>
         ))}
       </ol>
@@ -440,7 +536,8 @@ const FILTER_ORDER = ["L", "R", "G", "B", "H", "O", "S"];
 type FramesData = { total: number; counts: Record<string, number>; selected: number; frames: (Frame & { filterKey?: string })[] };
 const PAGE = 50;
 
-function Frames({ s, adv }: { s: LiveState; adv: boolean }) {
+/** `bare`: in its dialog, which already carries the title. */
+function Frames({ s, adv, bare = false }: { s: LiveState; adv: boolean; bare?: boolean }) {
   const [only, setOnly] = useState<string | null>(null);
   const [limit, setLimit] = useState(PAGE);
   const [data, setData] = useState<FramesData | null>(null);
@@ -487,7 +584,7 @@ function Frames({ s, adv }: { s: LiveState; adv: boolean }) {
   return (
     <section className={styles.block}>
       <div className={styles.framesHead}>
-        <h2 className="section-title">Tonight&apos;s frames</h2>
+        {bare ? null : <h2 className="section-title">Tonight&apos;s frames</h2>}
         {keys.length > 1 ? (
           <div className={styles.seg} role="group" aria-label="Show frames of one filter">
             <button type="button" className={!active ? styles.segOn : undefined} aria-pressed={!active} onClick={() => choose(null)}>

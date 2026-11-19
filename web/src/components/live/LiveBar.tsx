@@ -30,7 +30,7 @@ export function LiveBar({ s, offline, tab }: { s: LiveState | null; offline: boo
           <>
             <Conn ok={s.nina.connected} name="NINA" detail={s.nina.connected ? (s.nina.websocket ? s.nina.url ?? "" : "events not connected") : s.nina.error ?? ""} where={s.nina.url} />
             <Conn ok={s.phd2.connected} name="PHD2" detail={s.phd2.connected ? s.phd2.address : s.phd2.error ?? ""} where={s.phd2.address} />
-            {adv && s.nina.connected && Math.abs(s.nina.clockOffset) >= 2 ? (
+            {adv && tab === "guiding" && s.nina.connected && Math.abs(s.nina.clockOffset) >= 2 ? (
               <span className={styles.conn} title="NINA's timestamps are corrected for this. Windows time sync on the observatory PC would remove it.">
                 <StatusIcon level="info" size={13} /> Observatory PC clock {s.nina.clockOffset > 0 ? "+" : "−"}
                 {Math.abs(s.nina.clockOffset).toFixed(0)} s vs this PC
@@ -40,10 +40,13 @@ export function LiveBar({ s, offline, tab }: { s: LiveState | null; offline: boo
           </>
         ) : null}
       </div>
-      <label className={styles.advToggle}>
-        <input type="checkbox" checked={adv} onChange={(e) => setAdv(e.target.checked)} />
-        <span>Advanced</span>
-      </label>
+      {/* The Overview's dialogs each have their own Advanced switch; this one is the Guiding page's. */}
+      {tab === "guiding" ? (
+        <label className={styles.advToggle}>
+          <input type="checkbox" checked={adv} onChange={(e) => setAdv(e.target.checked)} />
+          <span>Advanced</span>
+        </label>
+      ) : null}
       {s?.lost.length ? (
         <div className={styles.lostRow} role="status">
           {s.lost.map((d) => (

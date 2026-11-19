@@ -234,6 +234,14 @@ def cards(equipment: dict[str, Any]) -> list[dict]:
             "level": level,
             "facts": facts,
         })
+        if key == "camera":
+            # The Live status strip's cooler line: on/off, power, and the sensor against its set point.
+            out[-1]["cooler"] = {
+                "on": bool(_pick(payload, "CoolerOn")),
+                "power": _num(_pick(payload, "CoolerPower")),
+                "temperature": _num(_pick(payload, "Temperature")),
+                "setPoint": _num(_pick(payload, "TemperatureSetPoint", "SetTemperature")),
+            }
     return out
 
 

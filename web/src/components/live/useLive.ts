@@ -66,3 +66,23 @@ export function useAdvanced(): [boolean, (v: boolean) => void] {
   }, []);
   return [adv, set];
 }
+
+/** A per-dialog Advanced switch, remembered in this browser (a convenience: off when storage is unavailable). */
+export function useStoredFlag(key: string): [boolean, (v: boolean) => void] {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    try {
+      setOn(localStorage.getItem(key) === "1");
+    } catch {}
+  }, [key]);
+  const set = useCallback(
+    (v: boolean) => {
+      setOn(v);
+      try {
+        localStorage.setItem(key, v ? "1" : "0");
+      } catch {}
+    },
+    [key],
+  );
+  return [on, set];
+}

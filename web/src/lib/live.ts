@@ -6,7 +6,12 @@ import type { Level } from "./types";
 export type { Level };
 
 export type DeviceFact = { label: string; value: string; advanced: boolean; level?: Level };
-export type DeviceCard = { key: string; label: string; name: string | null; status: string; level: Level | null; facts: DeviceFact[] };
+export type CoolerState = { on: boolean; power: number | null; temperature: number | null; setPoint: number | null };
+export type DeviceCard = { key: string; label: string; name: string | null; status: string; level: Level | null; facts: DeviceFact[]; cooler?: CoolerState };
+
+/** Tonight's flats per filter of the imaging sequence (`/api/live/flats`). */
+export type FlatRow = { filter: string; level: "ok" | "warn" | "bad"; frames: number; readouts: string[]; wrong: string[]; unknownReadout: number };
+export type FlatsState = { night: string; source: "sequence" | "lights"; wantReadout: string | null; filters: FlatRow[]; other: FlatRow[] };
 
 export type SeqStep = {
   id: string;
