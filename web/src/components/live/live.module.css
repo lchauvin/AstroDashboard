@@ -290,14 +290,14 @@
   gap: 7px;
   height: 32px;
   padding: 0 14px;
-  border: 1px solid var(--color-accent);
-  background: var(--color-accent);
-  color: #fff;
+  border: 1px solid var(--color-divider);
+  background: var(--color-surface);
+  color: var(--text-secondary);
   font: 500 10.5px/1 var(--font-mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   cursor: pointer;
-  transition: background var(--transition), border-color var(--transition);
+  transition: color var(--transition), border-color var(--transition);
 }
 
 .primaryBtn:disabled {
@@ -306,8 +306,8 @@
 }
 
 .primaryBtn:hover:not(:disabled) {
-  background: var(--color-accent-700);
-  border-color: var(--color-accent-700);
+  border-color: var(--color-accent);
+  color: var(--color-text);
 }
 
 .primaryBtn:focus-visible {
@@ -317,14 +317,9 @@
 
 .btnCount {
   padding: 2px 5px;
-  background: rgba(255, 255, 255, 0.22);
+  background: color-mix(in srgb, var(--color-text) 8%, transparent);
+  color: var(--color-text);
   font-variant-numeric: tabular-nums;
-}
-
-/* The status icon inside a filled button: on a white disc so warn/bad colours keep their contrast. */
-.primaryBtn :global(svg) {
-  background: #fff;
-  border-radius: 50%;
 }
 
 .modalScrim {
