@@ -13,12 +13,13 @@ framing being redone (a meridian flip, a re-centring). The distance between two 
 corner shift: how far a corner of one field lies from the same corner of the other, so a shift
 and a rotation are judged in the same pixels, the ones the stack loses at its edges.
 
-A night is compared with the previous night of the same revision and mosaic panel, median to
-median. Within the tolerance (the larger of the two nights' dither spreads, never less than
+A night is compared with the reference night of the same revision and mosaic panel (its first
+night with a framing, so small shifts cannot add up from night to night), median to median.
+Within the tolerance (the larger of the two nights' dither spreads, never less than
 MIN_TOLERANCE_PX) is aligned (ok), within twice that a little off (warn), beyond it off (bad).
-A frame is judged against the previous night's median the same way, with its own night's spread
+A frame is judged against the reference night's median the same way, with its own night's spread
 added to the tolerance since it dithers around that night's median; Live, with one frame of
-tonight, takes tonight's spread to be the previous night's.
+tonight, takes tonight's spread to be the reference night's.
 
 Frames are only read.
 """
@@ -419,9 +420,9 @@ def level(distance: float, tolerance: float) -> str:
 
 
 def compare(prev: Night, cur: Night, prev_anchor: Stars, cur_anchor: Stars) -> dict[str, Any] | None:
-    """This night against the previous one, median to median; None when their anchors do not match.
+    """This night against an earlier one (the reference), median to median; None when their anchors do not match.
 
-    Also gives every frame of this night against the previous night's median ("byFrame", by path).
+    Also gives every frame of this night against that night's median ("byFrame", by path).
     """
     fit = register(prev_anchor, cur_anchor)
     if fit is None:
@@ -450,9 +451,9 @@ def compare(prev: Night, cur: Night, prev_anchor: Stars, cur_anchor: Stars) -> d
 
 
 def compare_frame(prev: Night, prev_anchor: Stars, frame: Stars) -> dict[str, Any] | None:
-    """One frame against the previous night's median (Live); None when its stars do not match.
+    """One frame against an earlier night's median (Live); None when its stars do not match.
 
-    Tonight's own dither is not known from one frame: it is taken to be the previous night's.
+    Tonight's own dither is not known from one frame: it is taken to be the earlier night's.
     """
     fit = register(prev_anchor, frame)
     if fit is None:
@@ -465,6 +466,8 @@ def compare_frame(prev: Night, prev_anchor: Stars, frame: Stars) -> dict[str, An
         "cornerPx": round(dist, 1),
         "shiftPx": round(centre_shift(prev.median, here), 1),
         "rotation": round(fold(here.rot - prev.median.rot), 3),
+        # The frame against the anchor, not folded: ±180° when one of them is across the meridian.
+        "turn": round((-fit.angle + 180.0) % 360.0 - 180.0, 3),
         "tolerancePx": round(tol, 1),
         "previousSpreadPx": round(prev.spread, 1),
         "matches": fit.matches,

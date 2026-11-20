@@ -49,7 +49,7 @@ export function SessionDiagnostics({
   const [panelId, setPanelId] = useState<string | null>(initialPanel ?? null);
   const active = job && (job.status === "queued" || job.status === "running");
   const url = `/engine/api/diagnostics/${detail.revision.id}/${encodeURIComponent(detail.session.folder)}`;
-  // Framing against the previous night; asked again once a new analysis has measured every light.
+  // Framing against the reference night; asked again once a new analysis has measured every light.
   const framing = useSessionFraming(detail.revision.id, detail.session.folder, current.stored?.finished);
   const frameFraming = useMemo(() => framesOf(framing.data), [framing.data]);
 

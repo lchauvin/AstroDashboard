@@ -9,6 +9,7 @@ import { framingLevel, framingText, px, type LiveFraming } from "@/lib/framing";
 import { ago, CENTER_ACTIVE, clock, duration, enginePost, filterLetterOf, fmt, type DeviceCard, type Frame, type CenterState, type IngestStatus, type LiveState, type SeqStep, type SkyState } from "@/lib/live";
 import { FilterChip, Marks, StatusIcon, Tip } from "../ui";
 import { LiveBar, NotConnected } from "./LiveBar";
+import { FramingCompare } from "./FramingCompare";
 import { LiveModal } from "./LiveModal";
 import styles from "./live.module.css";
 import { StatusStrip } from "./StatusStrip";
@@ -20,7 +21,7 @@ import { useLive, useStoredFlag } from "./useLive";
 const RA = "var(--filter-B)";
 const DEC = "var(--filter-H)";
 
-type Dialog = "equipment" | "sequence" | "ingest" | "frames" | null;
+type Dialog = "equipment" | "sequence" | "ingest" | "frames" | "framing" | null;
 
 /** The page shows the basic view; each dialog (Equipment, Sequence, Ingestion, Tonight's frames) has its own Advanced switch. */
 export function Overview({ initial, ingest }: { initial: LiveState | null; ingest: IngestStatus | null }) {
@@ -69,7 +70,7 @@ export function Overview({ initial, ingest }: { initial: LiveState | null; inges
       {!s.nina.connected ? <NotConnected what="NINA" error={s.nina.error} where={s.nina.url} /> : null}
       <StatusStrip s={s} actions={actions} />
       <div className={styles.topGrid}>
-        <LatestFrame s={s} adv={false} />
+        <LatestFrame s={s} adv={false} onFraming={() => setOpen("framing")} />
         <div className={styles.sideCol}>
           <SequenceCard s={s} adv={false} refresh={refresh} />
           <GuidingMini s={s} />
@@ -97,6 +98,11 @@ export function Overview({ initial, ingest }: { initial: LiveState | null; inges
       {open === "ingest" ? (
         <LiveModal title="Auto-ingest" onClose={close} advanced={advIngest}>
           <IngestPanel initial={ingest} advanced={advIngest[0]} />
+        </LiveModal>
+      ) : null}
+      {open === "framing" && s.framing?.hasImages ? (
+        <LiveModal title={`Framing vs the reference${s.framing.target ? ` · ${s.framing.target}` : ""}`} onClose={close}>
+          <FramingCompare key={`${s.framing.frame}|${s.framing.referenceFrame}`} f={s.framing} />
         </LiveModal>
       ) : null}
       {open === "frames" ? (
@@ -132,7 +138,7 @@ function useIngestAttention(initial: IngestStatus | null): { level: "warn" | "ba
   return { level: null, text: "" };
 }
 
-function LatestFrame({ s, adv }: { s: LiveState; adv: boolean }) {
+function LatestFrame({ s, adv, onFraming }: { s: LiveState; adv: boolean; onFraming?: () => void }) {
   const l = s.latest;
   const r = l?.record;
   return (
@@ -165,16 +171,16 @@ function LatestFrame({ s, adv }: { s: LiveState; adv: boolean }) {
           ) : null}
         </div>
       ) : null}
-      <FramingLine f={s.framing} />
+      <FramingLine f={s.framing} onOpen={onFraming} />
     </section>
   );
 }
 
-/** The newest light against its target's previous night: shift and rotation at the corners, against that night's spread. */
-function FramingLine({ f }: { f: LiveFraming | null | undefined }) {
+/** The newest light against its target's reference night: shift and rotation at the corners, against that night's spread. */
+function FramingLine({ f, onOpen }: { f: LiveFraming | null | undefined; onOpen?: () => void }) {
   if (!f) return null;
   const level = framingLevel(f);
-  const prev = f.previousDate ? shortDate(f.previousDate) : f.previous;
+  const prev = `the reference (${f.previousDate ? shortDate(f.previousDate) : f.previous})`;
   const turned = Math.abs(f.rotation ?? 0) >= 0.1 ? `, rotated ${Math.abs(f.rotation ?? 0).toFixed(1)}°` : "";
   let text = framingText(f);
   if (f.status === "ready") {
@@ -194,14 +200,27 @@ function FramingLine({ f }: { f: LiveFraming | null | undefined }) {
   }
   const title =
     f.status === "ready"
-      ? `${f.frame} vs ${f.target} ${f.previous}: shifted ${px(f.shiftPx)}, rotated ${Math.abs(f.rotation ?? 0).toFixed(2)}°; ` +
+      ? `${f.frame} vs ${f.target} ${f.previous} (the reference): shifted ${px(f.shiftPx)}, rotated ${Math.abs(f.rotation ?? 0).toFixed(2)}°; ` +
         `that night's spread ${px(f.previousSpreadPx)}, dither and drift (tonight's is taken to be the same)`
       : f.error ?? f.frame;
-  return (
-    <div className={styles.framingLine} title={title}>
+  const body = (
+    <>
       {level ? <StatusIcon level={level} size={13} /> : null}
       <span className="eyebrow">Framing</span>
       <span>{text}</span>
+    </>
+  );
+  if (onOpen && f.hasImages)
+    return (
+      <button type="button" className={`${styles.framingLine} ${styles.framingButton}`} title={`${title}
+Click to compare with the reference image`} onClick={onOpen}>
+        {body}
+        <span className={styles.framingCompare}>Compare</span>
+      </button>
+    );
+  return (
+    <div className={styles.framingLine} title={title}>
+      {body}
     </div>
   );
 }

@@ -214,7 +214,7 @@ export type LiveState = {
   sky?: SkyState;
   /** NINA's coming meridian flip (engine `meridian_flip`): within 15 min, overdue, or under way; null otherwise and once done. */
   meridianFlip?: MeridianFlip | null;
-  /** The newest light on disk against its target's previous night; null when there is no light to check. */
+  /** The newest light on disk against its target's reference night; null when there is no light to check. */
   framing?: LiveFraming | null;
 };
 

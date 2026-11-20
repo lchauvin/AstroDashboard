@@ -45,7 +45,7 @@ export function FrameTable({
   onDecide?: (frame: LightFrame, reject: boolean) => void;
   /** Path of the frame whose decision is being saved. */
   deciding?: string | null;
-  /** Each frame against the previous night's framing (adds a Framing column). */
+  /** Each frame against the reference night's framing (adds a Framing column). */
   framing?: Record<string, FrameFraming>;
   /** Paths moved to the quarantine folder (out of WBPP's reach). */
   quarantined?: Set<string>;
@@ -106,7 +106,7 @@ export function FrameTable({
               <th>Findings</th>
               {framing ? (
                 <th
-                  title="Largest corner shift from the previous night's framing (px): within both nights' spread, up to twice that, beyond"
+                  title="Largest corner shift from the reference night's framing (px): within both nights' spread, up to twice that, beyond"
                   aria-sort={sort.key === "framing" ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
                   onClick={() => setSort((s) => ({ key: "framing", dir: s.key === "framing" ? ((-s.dir) as 1 | -1) : 1 }))}
                   style={{ textAlign: "right" }}
@@ -208,7 +208,7 @@ export function FrameTable({
   );
 }
 
-/** A frame against the previous night's framing: px, with a mark when beyond both nights' spread. */
+/** A frame against the reference night's framing: px, with a mark when beyond both nights' spread. */
 function FramingValue({ x }: { x: FrameFraming | undefined }) {
   if (x?.cornerPx == null) return <>—</>;
   return (

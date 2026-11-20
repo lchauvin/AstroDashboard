@@ -1,4 +1,4 @@
-"""Framing: is each night framed like the night before it? (framing.py measures, this serves.)
+"""Framing: is each night framed like the target's reference night? (framing.py measures, this serves.)
 
 Star lists are measured in the background (a process pool, one job at a time, Live first) and
 kept in the dashboard database by path and size, so a frame is read once. The Library measures a
@@ -6,9 +6,10 @@ sample of every night (SAMPLE lights per night and mosaic panel, spread over the
 Diagnostics page every light of its night, Live the newest light as it lands. A night's framing
 uses every light of it whose stars are known, so it only gets better as more are measured.
 
-The previous night is the one before in the same revision and panel; a night whose stars all
-failed (clouds), or one you left out of the target, is skipped over, so the next one is compared
-with the last night that has a framing. An ignored night is still compared with that reference.
+Every night is compared with the same reference: the first night of the revision and panel that
+has a framing (not each night with the one before, which could drift a little every night and
+still pass). A night whose stars all failed (clouds), or one you left out of the target, is never
+the reference; an ignored night is still compared with it.
 """
 
 from __future__ import annotations
@@ -246,10 +247,11 @@ class FramingService:
     def _evaluate(self, chain: list[_Night], full: str | None = None
                   ) -> tuple[list[dict[str, Any]], set[Frame], tuple[_Night, tuple, Night] | None]:
         """Verdicts for one panel's nights (oldest first), the frames still to measure, and the
-        last night with a framing (the reference for whatever comes next).
+        reference: the first night (not ignored) with a framing, which every other night is compared with.
 
         `full`: the night whose every light is wanted (a Diagnostics page), not just a sample.
-        Once a night waits for its stars, every later one waits too (it may be their reference).
+        Until the reference is known, a night waiting for its stars makes every later one wait too
+        (it may be the reference).
         """
         self._load(f for n in chain for f in n.frames)
         verdicts: list[dict[str, Any]] = []
@@ -261,7 +263,7 @@ class FramingService:
             need = [f for f in wanted if not self._known(*f)]
             missing.update(need)
             if need or waiting:
-                waiting = True
+                waiting = waiting or ref is None
                 verdicts.append({"status": "pending"})
                 continue
             key, cur = self._framing([f for f in n.frames if self._known(*f)])
@@ -269,9 +271,9 @@ class FramingService:
                 verdicts.append({"status": "unmeasured"})
                 continue
             verdicts.append(self._compare(ref, n, key, cur))
-            if not n.ignored:
+            if ref is None and not n.ignored:
                 ref = (n, key, cur)
-        return verdicts, missing, (None if waiting else ref)
+        return verdicts, missing, ref
 
     def _rel(self, path: str) -> str:
         return path.replace("\\", "/").removeprefix(self._root)
@@ -279,7 +281,7 @@ class FramingService:
     # ------------------------------------------------------------------ views
 
     def revision(self, rev_id: str) -> dict[str, Any] | None:
-        """Every night of a revision (per mosaic panel) against the night before it."""
+        """Every night of a revision (per mosaic panel) against its reference night."""
         lib = self._library()
         rev = lib.revisions.get(rev_id) if lib else None
         if rev is None:
@@ -297,7 +299,7 @@ class FramingService:
                 "sessions": sessions, "job": job, "minTolerancePx": framing.MIN_TOLERANCE_PX}
 
     def session(self, rev_id: str, folder: str) -> dict[str, Any] | None:
-        """One night against the previous one, with every light of it (keyed like Diagnostics' frames)."""
+        """One night against the reference night, with every light of it (keyed like Diagnostics' frames)."""
         lib = self._library()
         rev = lib.revisions.get(rev_id) if lib else None
         if rev is None or not any(s["folder"] == folder for s in rev["sessions"]):
@@ -313,13 +315,12 @@ class FramingService:
             upto = next((i for i, n in enumerate(chain) if n.folder == folder), None)
             if upto is None:
                 continue
-            verdicts, need, ref = self._evaluate(chain[: upto + 1], full=folder)
+            verdicts, need, _ = self._evaluate(chain[: upto + 1], full=folder)
             missing |= need
             v = dict(verdicts[-1])
             # Through the night (every night, the first one too): each light against the night's own framing.
-            night = ref[2] if ref and ref[0].folder == folder else None
-            if night is None and chain[upto].ignored and v.get("status") not in ("pending", "unmeasured"):
-                # An ignored night is not the reference, but it still has a framing of its own.
+            night = None
+            if v.get("status") not in ("pending", "unmeasured"):
                 _, night = self._framing([f for f in chain[upto].frames if self._known(*f)])
             frames: dict[str, dict[str, Any]] = {}
             for p in (night.poses if night else {}):
@@ -346,7 +347,7 @@ class FramingService:
         self._measure(sorted(missing), lambda done, total: progress("framing", done, total))
 
     def live(self, path: str, revision_id: str | None, panel: str | None, night: str | None) -> dict[str, Any]:
-        """The newest light against the last night before `night` of its revision (and panel)."""
+        """The newest light against the reference night of its revision (and panel), among the nights before `night`."""
         try:
             size = os.stat(path).st_size
         except OSError:
@@ -367,7 +368,9 @@ class FramingService:
         if ref is None:
             return {"status": "first", **base}
         rn, rkey, rnight = ref
-        info = {**base, "previous": rn.folder, "previousDate": rn.date}
+        # The images to compare (the reference night's anchor: the light the framings are measured in).
+        info = {**base, "previous": rn.folder, "previousDate": rn.date, "referenceFrame": Path(rnight.anchor).name,
+                "images": {"current": path, "reference": rnight.anchor}}
         frame = self._get(path)
         pair = (rkey, ((path, size),))
         with self._lock:

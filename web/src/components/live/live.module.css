@@ -564,6 +564,29 @@
   color: var(--text-secondary);
 }
 
+/* The framing line as a button: opens the comparison with the reference image. */
+.framingButton {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.framingButton:hover > span:not(.eyebrow),
+.framingButton:focus-visible > span:not(.eyebrow) {
+  color: var(--color-text);
+}
+
+.framingCompare {
+  margin-left: auto;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .stepLine {
   display: flex;
   flex-wrap: wrap;

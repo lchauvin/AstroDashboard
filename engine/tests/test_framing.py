@@ -185,7 +185,7 @@ def _light(night: str, i: int, filt: str = "H") -> dict:
                 DATE_OBS=f"{night}T03:{10 + i:02d}:00", DATE_LOC=f"{night}T22:{10 + i:02d}:00")
 
 
-def test_framing_api_compares_each_night_with_the_one_before(tmp_path):
+def test_framing_api_compares_every_night_with_the_reference(tmp_path):
     root = tmp_path / "Astro"
     nights = root / "NGC 1 (Test)" / ".SessionData"
     sky, flux = _small_sky()
@@ -211,6 +211,8 @@ def test_framing_api_compares_each_night_with_the_one_before(tmp_path):
         assert s["NIGHT_2026-09-02"][""]["level"] == "ok"
         assert s["NIGHT_2026-09-02"][""]["previous"] == "NIGHT_2026-09-01"
         third = s["NIGHT_2026-09-03"][""]
+        # Against the first night (the reference), not the second.
+        assert third["previous"] == "NIGHT_2026-09-01"
         assert third["level"] == "bad" and third["rotation"] == pytest.approx(-6.0, abs=0.05)
         assert "byFrame" not in third
 
@@ -230,7 +232,7 @@ def test_framing_api_compares_each_night_with_the_one_before(tmp_path):
         assert all("nightShiftPx" in x and "level" not in x for x in first["frames"].values())
         assert client.get("/api/framing/sessions/ngc-1-test/NIGHT_1999-01-01").status_code == 404
 
-        # Live: a light of the next night, back on the first night's framing (it lands next to the target folder).
+        # Live: a light of the next night, on the first night's framing (it lands next to the target folder).
         live = root / ".Download" / "2026-09-04" / "NGC 1" / "LIGHT" / "H" / "x.fits"
         _render(live, sky, flux, 0.0, (2, 1), OBJECT="NGC 1", **_light("2026-09-04", 0))
         svc = app.state.engine.framing
@@ -239,17 +241,21 @@ def test_framing_api_compares_each_night_with_the_one_before(tmp_path):
             if res["status"] != "pending":
                 break
             time.sleep(0.1)
-        assert res["status"] == "ready" and res["previous"] == "NIGHT_2026-09-03" and res["level"] == "bad"
+        assert res["status"] == "ready" and res["previous"] == "NIGHT_2026-09-01" and res["level"] == "ok"
+        # The images to compare: this light and the reference night's anchor, the same way up.
+        assert res["images"]["current"] == str(live) and "NIGHT_2026-09-01" in res["images"]["reference"]
+        assert res["referenceFrame"].startswith("2026-09-01_") and abs(res["turn"]) < 1
         assert svc.live(str(live), None, None, "2026-09-04")["status"] == "no-target"
         assert svc.live(str(live), "ngc-1-test", None, "2026-09-01")["status"] == "first"
 
-        # Ignoring the third night: the next one is compared with the second, the third still with the second.
+        # Ignoring the third night changes nothing for the others; it is still compared with the reference.
         r = client.put("/api/revisions/ngc-1-test/sessions/NIGHT_2026-09-03/ignored", json={"ignored": True})
         assert r.status_code == 200 and r.json()["totals"]["nights"] == 2
         res = svc.live(str(live), "ngc-1-test", None, "2026-09-04")
-        assert res["status"] == "ready" and res["previous"] == "NIGHT_2026-09-02" and res["level"] == "ok"
+        assert res["status"] == "ready" and res["previous"] == "NIGHT_2026-09-01" and res["level"] == "ok"
         third = client.get("/api/framing/sessions/ngc-1-test/NIGHT_2026-09-03").json()["panels"][0]
-        assert third["verdict"]["previous"] == "NIGHT_2026-09-02" and third["night"]["frames"] == 3
+        assert third["verdict"]["previous"] == "NIGHT_2026-09-01" and third["night"]["frames"] == 3
+        client.put("/api/revisions/ngc-1-test/sessions/NIGHT_2026-09-03/ignored", json={"ignored": False})
         # Ignoring the first night: the second becomes the reference.
         client.put("/api/revisions/ngc-1-test/sessions/NIGHT_2026-09-01/ignored", json={"ignored": True})
         s = client.get("/api/framing/revisions/ngc-1-test").json()["sessions"]
@@ -259,3 +265,4 @@ def test_framing_api_compares_each_night_with_the_one_before(tmp_path):
         client.put("/api/revisions/ngc-1-test/sessions/NIGHT_2026-09-01/ignored", json={"ignored": False})
         s = client.get("/api/framing/revisions/ngc-1-test").json()["sessions"]
         assert s["NIGHT_2026-09-02"][""]["previous"] == "NIGHT_2026-09-01"
+        assert s["NIGHT_2026-09-03"][""]["previous"] == "NIGHT_2026-09-01"

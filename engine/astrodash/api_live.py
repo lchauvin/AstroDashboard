@@ -111,19 +111,47 @@ def register(app: FastAPI, state) -> None:
 
     # ------------------------------------------------------------------ live
 
+    # The two lights the last framing compared (absolute paths, kept here rather than sent to the page).
+    framing_images: dict[str, str] = {}
+
+    def _framing_now() -> dict[str, Any] | None:
+        res = _latest_framing()
+        images = res.pop("images", None) if res else None
+        framing_images.clear()
+        framing_images.update(images or {})
+        if res is not None:
+            res["hasImages"] = bool(images)
+        return res
+
     @app.get("/api/live/state")
     def live_state(graph: float = 180) -> dict[str, Any]:
         snap = obs.snapshot(graph_s=min(max(graph, 30), 3600))
         try:
-            snap["framing"] = _latest_framing()
+            snap["framing"] = _framing_now()
         except Exception as exc:  # noqa: BLE001 — never at the cost of the live page
             snap["framing"] = {"status": "unmeasured", "error": f"{type(exc).__name__}: {exc}"}
         return snap
 
+    @app.get("/api/live/framing/{which}.jpg")
+    async def live_framing_image(which: str, v: str | None = None):  # noqa: ARG001 — cache buster
+        """The newest light, or its reference night's light, stretched the same way (Live's framing comparison)."""
+        if which not in ("current", "reference"):
+            raise HTTPException(404, detail="current or reference")
+        if which not in framing_images:
+            await asyncio.to_thread(_framing_now)
+        src = framing_images.get(which)
+        if not src:
+            raise HTTPException(404, detail="No framing comparison right now")
+        try:
+            jpg = await asyncio.to_thread(frame_preview, Path(src), state.cfg.db_path.parent / "previews")
+        except Exception as exc:  # noqa: BLE001 — a frame still landing or an odd file
+            raise HTTPException(404, detail=f"Could not render {Path(src).name}: {exc}") from exc
+        return FileResponse(jpg, media_type="image/jpeg", headers={"Cache-Control": "max-age=86400"})
+
     last_header: dict[str, Any] = {"key": None, "header": None}
 
     def _latest_framing() -> dict[str, Any] | None:
-        """The newest light on disk against its target's previous night (None: no light to check)."""
+        """The newest light on disk against its target's reference night (None: no light to check)."""
         latest = obs.latest_frame()
         path = (latest.get("path") if latest["source"] == "file" else latest.get("fallback")) if latest else None
         lib = state.library

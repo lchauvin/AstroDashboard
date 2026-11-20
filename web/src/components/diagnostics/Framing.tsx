@@ -11,7 +11,7 @@ import findingStyles from "./Findings.module.css";
 
 type State = { data: SessionFraming | null; error: string | null };
 
-/** A night's framing against the previous night; asked again while the engine measures its lights. */
+/** A night's framing against the reference night; asked again while the engine measures its lights. */
 export function useSessionFraming(revId: string, folder: string, refresh?: unknown): State {
   const [state, setState] = useState<State>({ data: null, error: null });
   useEffect(() => {
@@ -58,7 +58,7 @@ function courseText(c: NightCourse): string {
 type Panel = SessionFraming["panels"][number];
 
 /** The Through the night chart's Framing metrics: each light against its night's framing, with the dither; its
- *  rotation in px at the corners, against ± the dither; and against the previous night, with "aligned up to". */
+ *  rotation in px at the corners, against ± the dither; and against the reference night, with "aligned up to". */
 export function framingMetrics(data: SessionFraming | null, panel: string | null): Metric[] {
   const panels = (data?.panels ?? []).filter((p) => !panel || p.panel === panel);
   // != null: engines from before the night's course send no `night` at all.
@@ -105,7 +105,7 @@ export function framingMetrics(data: SessionFraming | null, panel: string | null
   if (compared.length) {
     out.push({
       key: "framing-previous",
-      label: "Vs the previous night",
+      label: "Vs the reference night",
       unit: " px",
       digits: 0,
       zero: true,
@@ -117,7 +117,7 @@ export function framingMetrics(data: SessionFraming | null, panel: string | null
   return out;
 }
 
-/** Summary: the night against the previous one, per mosaic panel (`panel`: only that one). */
+/** Summary: the night against the reference night, per mosaic panel (`panel`: only that one). */
 export function FramingBlock({ state, panel }: { state: State; panel: string | null }) {
   const { data, error } = state;
   const rows = (data?.panels ?? []).filter((p) => !panel || p.panel === panel);
@@ -126,7 +126,7 @@ export function FramingBlock({ state, panel }: { state: State; panel: string | n
     <section className={styles.block}>
       <div className={styles.blockHead}>
         <h2 className="section-title">Framing</h2>
-        <span className="eyebrow">vs the previous night · shift and rotation at the corners, against the nights' spread</span>
+        <span className="eyebrow">vs the reference night · shift and rotation at the corners, against the nights' spread</span>
       </div>
       {!data ? (
         <p className="muted">{error ? `Framing unavailable: ${error}` : "Loading…"}</p>
@@ -153,7 +153,7 @@ export function FramingBlock({ state, panel }: { state: State; panel: string | n
                   {r.night ? <p className={findingStyles.text}>{courseText(r.night)}</p> : null}
                   {v.status === "ready" ? (
                     <p className={findingStyles.text}>
-                      Frame by frame, against {v.previous} with this night&apos;s spread added (up to{" "}
+                      Frame by frame, against {v.previous} (the reference) with this night&apos;s spread added (up to{" "}
                       {Math.round(v.frameTolerancePx ?? 0)} px): {counts.ok} aligned · {counts.warn} a little off · {counts.bad} off
                       {outliers ? ` (${outliers} framed differently from the rest of the night)` : ""}. See the Framing column under Frames.
                     </p>

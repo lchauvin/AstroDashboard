@@ -276,7 +276,7 @@ export function SessionMatrix({ rev }: { rev: Revision }) {
               <th style={{ textAlign: "right" }} title="Integration left after diagnostics rejection">
                 Usable
               </th>
-              <th title="Framing against the previous night: shift and rotation, within the dither">Framing</th>
+              <th title="Framing against the reference night (the target's first night): shift and rotation, within the dither">Framing</th>
               <th>Conditions</th>
             </tr>
           </thead>

@@ -1,6 +1,7 @@
 // Shapes returned by the engine's framing endpoints (engine/astrodash/api_framing.py), and their wording.
-// A night's framing is compared with the previous night's: the largest corner shift (shift and
-// rotation together) against the nights' dither spread.
+// A night's framing is compared with the target's reference night (its first night with a framing, so
+// small shifts cannot add up from night to night): the largest corner shift (shift and rotation together)
+// against the nights' dither spread. The `previous*` fields name that reference night.
 
 import { shortDate } from "./format";
 import type { Level } from "./types";
@@ -9,7 +10,7 @@ export type FramingLevel = "ok" | "warn" | "bad";
 
 export interface FramingVerdict {
   /** ready: compared · pending: stars being measured · first: no earlier night · unmatched: no stars in common with
-   *  the previous night · unmeasured: no frame with enough stars · no-target: Live frame not matched to a target. */
+   *  the reference night · unmeasured: no frame with enough stars · no-target: Live frame not matched to a target. */
   status: "ready" | "pending" | "first" | "unmatched" | "unmeasured" | "no-target";
   level?: FramingLevel;
   previous?: string;
@@ -21,7 +22,7 @@ export interface FramingVerdict {
   rotation?: number;
   tolerancePx?: number;
   frameTolerancePx?: number;
-  /** How far this night's frames sit from its framing (dither and drift), and the night before's. */
+  /** How far this night's frames sit from its framing (dither and drift), and the reference night's. */
   spreadPx?: number;
   previousSpreadPx?: number;
   /** This night's dither (the spread of its shifts alone) and how much its rotation changed (°). */
@@ -52,7 +53,7 @@ export interface RevisionFraming {
 }
 
 export interface FrameFraming {
-  /** Against the previous night's framing (absent on a first night). */
+  /** Against the reference night's framing (absent on the reference night itself). */
   cornerPx?: number;
   level?: FramingLevel;
   /** Framed differently from the rest of its own night. */
@@ -85,6 +86,11 @@ export interface SessionFraming {
 
 export interface LiveFraming extends FramingVerdict {
   frame?: string;
+  /** The reference night's light shown next to this one (`/engine/api/live/framing/{current,reference}.jpg`). */
+  referenceFrame?: string;
+  hasImages?: boolean;
+  /** This light against that one, not folded (°): near ±180 when one of them is across the meridian. */
+  turn?: number;
   revisionId?: string | null;
   target?: string | null;
   panel?: string | null;
@@ -105,7 +111,8 @@ export function framingLevel(v: FramingVerdict | null | undefined): Level | null
   return v.status === "unmatched" ? "warn" : null;
 }
 
-const night = (v: FramingVerdict) => (v.previousDate ? shortDate(v.previousDate) : (v.previous ?? "the previous night"));
+const night = (v: FramingVerdict) =>
+  v.previousDate ? `the reference (${shortDate(v.previousDate)})` : v.previous ? `the reference (${v.previous})` : "the reference night";
 
 /** One sentence: the verdict and the numbers behind it. */
 export function framingText(v: FramingVerdict): string {
@@ -113,7 +120,7 @@ export function framingText(v: FramingVerdict): string {
     case "pending":
       return "Measuring the stars…";
     case "first":
-      return "First night: the reference for the next one";
+      return "First night: the reference for the nights after it";
     case "unmeasured":
       return "No frame with enough stars to tell (clouds?)";
     case "unmatched":
@@ -131,9 +138,9 @@ export function framingText(v: FramingVerdict): string {
 export function framingDetails(v: FramingVerdict, minTolerancePx = 10): string[] {
   const out: string[] = [];
   if (v.status === "ready") {
-    out.push(`Shifted ${px(v.shiftPx)}, rotated ${deg(v.rotation)} from ${v.previous}`);
+    out.push(`Shifted ${px(v.shiftPx)}, rotated ${deg(v.rotation)} from ${v.previous} (the reference)`);
     out.push(
-      `Spread ${px(v.spreadPx)} this night (dither ${px(v.ditherPx)}, rotation changed ${deg(v.rotationDeg)}), ${px(v.previousSpreadPx)} the night before` +
+      `Spread ${px(v.spreadPx)} this night (dither ${px(v.ditherPx)}, rotation changed ${deg(v.rotationDeg)}), ${px(v.previousSpreadPx)} the reference night` +
         ((v.tolerancePx ?? 0) <= minTolerancePx ? ` (tolerance never below ${px(minTolerancePx)})` : ""),
     );
   }

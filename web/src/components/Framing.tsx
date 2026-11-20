@@ -81,7 +81,7 @@ function Mark({ v, panel, minTolerancePx }: { v: FramingVerdict; panel: string; 
   );
 }
 
-/** One night's framing against the previous night (one mark per mosaic panel). */
+/** One night's framing against the reference night (one mark per mosaic panel). */
 export function FramingCell({ folder }: { folder: string }) {
   const { data, error } = useContext(FramingContext);
   const byPanel = data?.sessions[folder];
@@ -108,7 +108,7 @@ export function FramingKey() {
   const job = data?.job;
   return (
     <p className={styles.key}>
-      Framing vs the previous night (shift and rotation, at the corners): <StatusIcon level="ok" size={12} /> within the nights&apos; spread (dither and drift) ·{" "}
+      Framing vs the reference night (shift and rotation, at the corners): <StatusIcon level="ok" size={12} /> within the nights&apos; spread (dither and drift) ·{" "}
       <StatusIcon level="warn" size={12} /> up to twice it · <StatusIcon level="bad" size={12} /> beyond; ref = first night.
       {job && job.status !== "failed" ? (
         <span>
