@@ -5,7 +5,10 @@
  */
 
 import assert from "node:assert/strict";
-import { Horizon, Observer } from "astronomy-engine";
+import { Body, Equator, Horizon, Illumination, Observer } from "astronomy-engine";
+
+import { angularSeparation } from "../src/lib/astro/angles.js";
+import { calibrateSites } from "../src/lib/planning/calibrate.js";
 
 import { nightWindow, summariseNight } from "../src/lib/astro/ephemeris.js";
 import { moonSkyBrightnessNl, skyElectronRate } from "../src/lib/snr/index.js";
@@ -16,7 +19,7 @@ import { goalStatus } from "../src/lib/planning/plan.js";
 import { evaluateNight } from "../src/lib/planning/evaluate.js";
 import { parseLatLon } from "../src/lib/planning/sites.js";
 import { readFrameSite } from "../src/lib/planning/frameHeader.js";
-import type { Site } from "../src/lib/planning/types.js";
+import type { Site, SkySample } from "../src/lib/planning/types.js";
 
 let checks = 0;
 function check(label: string, fn: () => void) {
@@ -140,6 +143,38 @@ check("moon efficiency: 1 with the moon down, lower for OIII than Hα under the 
   const lit = evaluateNight([{ t: 0, alt: 50, az: 180, moonAlt: 40, moonSep: 60 }], 60, 0.8, ["H", "O"], skies);
   const eff = (l: string) => lit.find((f) => f.letter === l)!.efficiency;
   assert.ok(eff("O") < eff("H") && eff("H") < 1, `O ${eff("O")} vs H ${eff("H")}`);
+});
+
+check("calibration recovers a known κ and moon factor from synthetic subs", () => {
+  // Subs every 30 min over 30 nights on a circumpolar-ish target: sky = κ·dark + μ·KS91 moonlight.
+  const kappa = 2, mu = 5, ra = 10, dec = 60;
+  const spec = rig.filters.H!;
+  const base = filterSky(rig, spec, home.sqm, 1);
+  const obs = new Observer(home.lat, home.lon, 0);
+  const samples: SkySample[] = [];
+  for (let d = 0; d < 30; d++) {
+    for (let h = 0; h < 24; h += 0.5) {
+      const when = new Date(Date.UTC(2026, 9, 1 + d, 0, 0) + h * 3_600_000);
+      const sun = Equator(Body.Sun, when, obs, true, true);
+      if (Horizon(when, obs, sun.ra, sun.dec, "normal").altitude > -18) continue;
+      const alt = Horizon(when, obs, ra / 15, dec, "normal").altitude;
+      if (alt < 30) continue;
+      const m = Equator(Body.Moon, when, obs, true, true);
+      const moonAlt = Horizon(when, obs, m.ra, m.dec, "normal").altitude;
+      const nl = moonAlt > 0
+        ? moonlightNl({ illumination: Illumination(Body.Moon, when).phase_fraction, altitudeDeg: moonAlt, separationDeg: angularSeparation(ra, dec, m.ra * 15, m.dec), targetAltitudeDeg: alt })
+        : null;
+      const rate = kappa * base.darkRate + (nl ? mu * skyRate({ ...base, darkRate: 0 }, nl) : 0);
+      samples.push({ revisionId: "r", session: `n${d}`, filter: "H", time: when.toISOString(), exposure: 300, ra, dec, lat: home.lat, lon: home.lon, altitude: alt, skyE: rate * 300, skyRate: rate, gainEPerAdu: 0.7 });
+    }
+  }
+  const c = calibrateSites(samples, [home], rig).home.filters.H!;
+  assert.ok(Math.abs(c.kappa - kappa) < 1e-6, `κ ${c.kappa}`);
+  assert.ok(Math.abs(c.moonFactor - mu) < 1e-6 && c.moonNights >= 3, `μ ${c.moonFactor} on ${c.moonNights} nights`);
+  // μ scales the moon only: same dark rate, moonlight ×μ.
+  const scaled = filterSky(rig, spec, home.sqm, kappa, mu);
+  assert.equal(scaled.darkRate, filterSky(rig, spec, home.sqm, kappa).darkRate);
+  assert.ok(Math.abs(scaled.perNlMie - mu * base.perNlMie) < 1e-12 * base.perNlMie);
 });
 
 check("lat/long paste formats", () => {

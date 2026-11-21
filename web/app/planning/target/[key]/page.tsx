@@ -155,8 +155,8 @@ export default async function TargetPlanPage({ params, searchParams }: { params:
                     </td>
                     <td className="num">
                       {fs ? rate(fs.darkRate) : "—"}
-                      <div className={styles.sub} style={{ whiteSpace: "nowrap" }} title={c ? `Calibrated from ${c.frames} of your frames (${c.moonDownFrames} with the moon down)` : undefined}>
-                        {c ? `measured, κ ${c.kappa.toFixed(2)}` : "estimated"}
+                      <div className={styles.sub} style={{ whiteSpace: "nowrap" }} title={c ? `Calibrated from ${c.frames} of your frames (${c.moonDownFrames} with the moon down)${c.moonFrames ? `; moonlight ×${c.moonFactor.toFixed(2)} the Krisciunas–Schaefer model, from ${c.moonFrames} moonlit frames on ${c.moonNights} nights` : "; moonlight from the Krisciunas–Schaefer model (too few moonlit nights to measure)"}` : undefined}>
+                        {c ? `measured, κ ${c.kappa.toFixed(2)}${c.moonFrames ? `, moon ×${c.moonFactor.toFixed(1)}` : ""}` : "estimated"}
                       </div>
                     </td>
                     <td className="num">{night && night.hours > 0 ? `${Math.round(night.efficiency * 100)} %` : "—"}</td>

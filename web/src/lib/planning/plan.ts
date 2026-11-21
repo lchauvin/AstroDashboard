@@ -110,7 +110,7 @@ export function siteSkies(rig: PlanRig, site: Site, cal: SiteCalibration | null)
   const out: Partial<Record<FilterLetter, FilterSky>> = {};
   for (const letter of FILTER_LETTERS) {
     const f = rig.filters[letter];
-    if (f) out[letter] = filterSky(rig, f, site.sqm, cal?.filters[letter]?.kappa ?? 1);
+    if (f) out[letter] = filterSky(rig, f, site.sqm, cal?.filters[letter]?.kappa ?? 1, cal?.filters[letter]?.moonFactor ?? 1);
   }
   return out;
 }

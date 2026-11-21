@@ -16,6 +16,12 @@
  *    roughly grey, is left as is. This is why OIII and B lose more to the moon
  *    than Hα and SII — the effect every imager knows, from the model rather than
  *    from a rule of thumb.
+ *
+ * 3. The moon factor mu scales the moonlight per filter, measured from your
+ *    moonlit subs (calibrate.ts). KS91 was fitted on Mauna Kea; under a hazy,
+ *    light-polluted sky the measured narrowband moonlight runs several times
+ *    above it, and uncalibrated the model says a bright moon costs a narrowband
+ *    filter almost nothing.
  */
 
 import { airmass, apertureAreaCm2, extinctionFactor, throughput, VEGA_PHOTON_FLUX, type FilterSpec, type MoonGeometry } from "@/lib/snr";
@@ -60,22 +66,25 @@ export type FilterSky = {
   filter: FilterSpec;
   /** Dark-sky (no moon) electron rate, κ applied. */
   darkRate: number;
-  /** Rate per nanoLambert of Rayleigh / Mie moonlight. */
+  /** Rate per nanoLambert of Rayleigh / Mie moonlight, mu applied. */
   perNlRayleigh: number;
   perNlMie: number;
   kappa: number;
+  /** Measured moonlight ÷ KS91 (1 = uncalibrated). */
+  moonFactor: number;
 };
 
 /** Precomputed per-filter sky terms for a site. */
-export function filterSky(rig: PlanRig, filter: FilterSpec, siteSqm: number, kappa = 1): FilterSky {
+export function filterSky(rig: PlanRig, filter: FilterSpec, siteSqm: number, kappa = 1, moonFactor = 1): FilterSky {
   const k = fluxToRate(rig, filter);
   const perNl = k * nlToFlux(1);
   return {
     filter,
     darkRate: kappa * k * Math.pow(10, -0.4 * siteSqm),
-    perNlRayleigh: perNl * moonColour(filter),
-    perNlMie: perNl,
+    perNlRayleigh: moonFactor * perNl * moonColour(filter),
+    perNlMie: moonFactor * perNl,
     kappa,
+    moonFactor,
   };
 }
 

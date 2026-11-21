@@ -178,7 +178,7 @@ export default async function PlanningTargetsPage({ searchParams }: { searchPara
       <p className={styles.foot}>
         Sky model calibrated from {calibration?.frames ?? 0} of your frames at {site.name}
         {calibrated.length
-          ? `: ${calibrated.map((c) => `${FILTER_NAMES[c.letter]} κ ${c.kappa.toFixed(2)}`).join(", ")} (κ = measured sky ÷ the flat-spectrum SQM prediction)`
+          ? `: ${calibrated.map((c) => `${FILTER_NAMES[c.letter]} κ ${c.kappa.toFixed(2)}${c.moonFrames ? ` moon ×${c.moonFactor.toFixed(1)}` : ""}`).join(", ")} (κ = measured sky ÷ the flat-spectrum SQM prediction; moon × = measured moonlight ÷ the Krisciunas–Schaefer model)`
           : " — none yet; analyse nights in Diagnostics to calibrate it"}
         . Hours per filter come from your goals (Match goals are measured from your subs). Computed in {result.computeMs} ms.
       </p>

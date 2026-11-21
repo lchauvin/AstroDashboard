@@ -143,4 +143,7 @@ export type SkySample = {
   gainEPerAdu: number;
 };
 
+  /** From the frame's header (XPIXSZ includes binning; FOCALLEN), when present. */
+  pixelSizeUm?: number | null;
+  focalLength?: number | null;
 export type SkyPayload = { sessions: number; samples: SkySample[]; pedestals: Record<string, { adu: number; frames: number } | null> };

@@ -17,7 +17,7 @@ import { Body, Equator, Horizon, Illumination, Observer } from "astronomy-engine
 import { angularSeparation } from "@/lib/astro/angles";
 import type { FilterLetter, PlanRig } from "./rig";
 import { FILTER_LETTERS } from "./rig";
-import { filterSky, moonlightNl, skyRate } from "./skymodel";
+import { filterSky, moonlightNl, skyRate, type FilterSky } from "./skymodel";
 import type { Site, SkySample } from "./types";
 import { distanceKm, SITE_RADIUS_KM } from "./sites";
 
@@ -31,7 +31,27 @@ export type FilterCalibration = {
   sqmEquivalent: number | null;
   /** Median measured sky, e⁻/s/px (moonless frames when available). */
   measuredRate: number;
+  /** Measured moonlight ÷ the KS91 prediction (1 when there are too few moonlit nights to tell). */
+  moonFactor: number;
+  /** Moonlit frames and nights the moon factor was measured on (0 = not measured). */
+  moonFrames: number;
+  moonNights: number;
 };
+
+/** A frame counts for the moon factor when the model's moonlight is at least this share of the dark sky. */
+const MOON_MIN_SHARE = 0.05;
+/**
+ * A moonlit frame is compared with moon-down frames of the same filter taken
+ * within this many days. Your moonless sky is not constant: it moves with the
+ * season (snow cover multiplies city light) and over the years, so a pooled
+ * baseline turns those changes into "moonlight".
+ */
+const MOON_BASELINE_DAYS = 21;
+/** Moon-down frames needed in that window for a local baseline. */
+const MOON_BASELINE_MIN_FRAMES = 5;
+/** Moonlit nights needed before the moon factor replaces 1. */
+const MOON_MIN_NIGHTS = 3;
+const MOON_FACTOR_RANGE: [number, number] = [0.25, 25];
 
 export type SiteCalibration = {
   siteId: string;
@@ -82,8 +102,44 @@ function prepare(samples: SkySample[]): Prepared[] {
   return out;
 }
 
+/**
+ * Measured moonlight ÷ KS91 for one filter: each moonlit frame's excess over
+ * the local moonless sky (moon-down frames of that filter within
+ * MOON_BASELINE_DAYS) is divided by the model's moonlight. Median per night
+ * first, then over nights, so one hazy or cloudy night (city light reflected
+ * back) does not set the factor. Frames with no local baseline are not used.
+ */
+function moonFactorOf(rows: Prepared[], base: FilterSky): { factor: number; frames: number; nights: number } | null {
+  const downs = rows.filter((s) => s.moonDown).map((s) => ({ t: Date.parse(s.time!), rate: s.skyRate }));
+  const window = MOON_BASELINE_DAYS * 86_400_000;
+  const perNight = new Map<string, number[]>();
+  let frames = 0;
+  for (const s of rows) {
+    if (!s.moonNl) continue;
+    const t = Date.parse(s.time!);
+    const local = downs.filter((d) => Math.abs(d.t - t) <= window).map((d) => d.rate);
+    if (local.length < MOON_BASELINE_MIN_FRAMES) continue;
+    const dark = median(local);
+    const model = skyRate({ ...base, darkRate: 0 }, s.moonNl);
+    if (!(model >= MOON_MIN_SHARE * dark)) continue;
+    const key = `${s.revisionId}/${s.session}`;
+    perNight.set(key, [...(perNight.get(key) ?? []), (s.skyRate - dark) / model]);
+    frames++;
+  }
+  if (perNight.size < MOON_MIN_NIGHTS) return null;
+  const factor = median([...perNight.values()].map(median));
+  if (!Number.isFinite(factor)) return null;
+  const [lo, hi] = MOON_FACTOR_RANGE;
+  return { factor: Math.min(hi, Math.max(lo, factor)), frames, nights: perNight.size };
+}
+
 export function calibrateSites(samples: SkySample[], sites: Site[], rig: PlanRig): Record<string, SiteCalibration> {
-  const prepared = prepare(samples);
+  // Rates are per pixel: bring binned frames (or another optic) to the rig's pixel scale.
+  const prepared = prepare(samples).map((s) => {
+    const scale = s.pixelSizeUm && s.focalLength ? (206.265 * s.pixelSizeUm) / s.focalLength : null;
+    const k = scale ? (rig.pixelScale / scale) ** 2 : 1;
+    return k === 1 ? s : { ...s, skyRate: s.skyRate * k, skyE: s.skyE * k };
+  });
   const out: Record<string, SiteCalibration> = {};
   for (const site of sites) {
     const here = prepared.filter((s) => distanceKm(s.lat, s.lon, site.lat, site.lon) <= SITE_RADIUS_KM);
@@ -105,6 +161,7 @@ export function calibrateSites(samples: SkySample[], sites: Site[], rig: PlanRig
         letter,
         kappa,
         frames: rows.length,
+      const moon = down.length >= 10 ? moonFactorOf(rows, base) : null;
         moonDownFrames: down.length,
         nights: new Set(use.map((s) => `${s.revisionId}/${s.session}`)).size,
         sqmEquivalent: spec.line ? null : site.sqm - 2.5 * Math.log10(kappa),
@@ -113,6 +170,9 @@ export function calibrateSites(samples: SkySample[], sites: Site[], rig: PlanRig
     }
     const broadGain = here.filter((s) => ["L", "R", "G", "B"].includes(s.letter)).map((s) => s.gainEPerAdu);
     out[site.id] = { siteId: site.id, filters, gainEPerAdu: broadGain.length ? median(broadGain) : null, frames: here.length };
+        moonFactor: moon?.factor ?? 1,
+        moonFrames: moon?.frames ?? 0,
+        moonNights: moon?.nights ?? 0,
   }
   return out;
 }
