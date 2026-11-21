@@ -30,6 +30,10 @@ DEFAULT_FILTER_ALIASES = {
 @dataclass
 class Config:
     data_root: Path = Path("G:/Astro")
+    # More folders holding target folders (e.g. finished targets moved to another disk), from
+    # Settings → Library (the dashboard database, applied by the engine at start and on save).
+    # Read-only for the dashboard: the organizer, quarantine and ingest only ever write under data_root.
+    archive_roots: list[Path] = field(default_factory=list)
     db_path: Path = PROJECT_ROOT / "var" / "astrodash.db"
     host: str = "127.0.0.1"
     port: int = 3007
@@ -58,8 +62,51 @@ class Config:
     # measured ~24.5 ADU temporal noise vs ~1.4 ADU for every other HDR frame.
     min_bias_exposure_s: float = 0.2
 
+    @property
+    def roots(self) -> list[Path]:
+        """Every folder target folders are found in: the data root first, then the archives."""
+        return [self.data_root, *self.archive_roots]
+
+    def root_of(self, path: str | Path) -> Path | None:
+        """The root a path lies under (the data root wins when an archive sits inside it)."""
+        p = _posix(path).casefold()
+        for root in self.roots:
+            r = _posix(root).rstrip("/").casefold()
+            if p == r or p.startswith(r + "/"):
+                return root
+        return None
+
+    def rel_path(self, path: str | Path) -> str:
+        """"Target/.SessionData/…" for a path under any root (the key diagnostics and framing use, which
+        stays the same when a target moves to another disk); other paths are returned unchanged, with "/"."""
+        p = _posix(path)
+        root = self.root_of(p)
+        return p[len(_posix(root).rstrip("/")) + 1:] if root is not None else p
+
+    def locate(self, rel: str) -> Path:
+        """A "Target/…" path back to a file: under the first root that holds that target folder.
+        An absolute path is returned as is."""
+        if Path(rel).is_absolute():
+            return Path(rel)
+        top = rel.replace("\\", "/").split("/", 1)[0]
+        if top and self.archive_roots:
+            for root in self.roots:
+                if (root / top).is_dir():
+                    return root / rel
+        return self.data_root / rel
+
     def gain_ignored(self, readout: str | None) -> bool:
         return readout is not None and readout.casefold() in {r.casefold() for r in self.gain_ignored_readouts}
+
+
+def archive_dirs(settings: dict | None) -> list[Path]:
+    """The archive folders saved in Settings → Library (`library.archiveDirs`)."""
+    dirs = ((settings or {}).get("library") or {}).get("archiveDirs") or []
+    return [Path(d) for d in dirs if isinstance(d, str) and d.strip()]
+
+
+def _posix(path: str | Path) -> str:
+    return str(path).replace("\\", "/")
 
 
 def load_env_file(path: Path = PROJECT_ROOT / ".env") -> list[str]:

@@ -87,6 +87,7 @@ class Library:
         # (revision id, session folder) of the nights you left out: listed, never counted.
         self.ignored_sessions = ignored_sessions or set()
         self.scanned_at = scan.finished_at
+        self.roots = [r.as_dict() for r in scan.roots]
         self.scan_duration = scan.duration_s
         today = date.today()
         self.today = today
@@ -95,9 +96,8 @@ class Library:
         resolve_rejected_copies(frames)
         self.frame_count = len(frames)
         # Headers of every light, keyed like diagnostics results ("Target/…/file.fits"), for the detectors.
-        root = str(cfg.data_root).replace("\\", "/").rstrip("/") + "/"
         self.light_headers = {
-            f.path.replace("\\", "/").removeprefix(root): f.header
+            cfg.rel_path(f.path): f.header
             for f in frames if f.kind == "LIGHT" and f.area == "session"
         }
         self.unreadable = sum(1 for f in frames if f.status == "unreadable")
@@ -179,6 +179,9 @@ class Library:
         rev = {
             "id": rev_id,
             "folder": t.folder,
+            # Found in an archive folder (Settings → Library): shown and analysed, never reorganised or ingested into.
+            "root": info.root.replace("\\", "/"),
+            "archived": bool(info.root) and self.cfg.root_of(info.root) not in (None, self.cfg.data_root),
             "catalogId": tj.get("catalog_id") or t.catalog_id,
             "name": tj.get("name") or t.name,
             "revision": int(tj.get("revision") or t.revision),
@@ -652,6 +655,7 @@ class Library:
             "folder": rev["folder"],
             "revision": rev["revision"],
             "stage": rev["stage"],
+            "archived": rev["archived"],
             "hasPreview": rev["hasPreview"],
             "panels": rev["panels"],
             "totals": rev["totals"],

@@ -1,4 +1,4 @@
-"""Walks the data root and reads headers for new or changed frames.
+"""Walks the data root (and any archive folders) and reads headers for new or changed frames.
 
 Read-only by construction: this module only lists directories, stats files and
 opens them in "rb" mode through `headers.read_header`.
@@ -6,6 +6,11 @@ opens them in "rb" mode through `headers.read_header`.
 Only raw-data areas are walked file by file (`.SessionData`, the mispointed
 quarantine, the global `.Calibration` library). Processing folders (WBPP,
 1.–7., .Finished) are only inspected shallowly for the status badge.
+
+Archive folders (Settings → Library) hold more target folders, e.g. finished
+targets moved to another disk: only their target folders are read (dot folders
+such as .Calibration or .Download are the data root's alone). A target folder
+name already found in an earlier root is skipped and reported.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .cache import HeaderCache
 from .headers import HEADER_VERSION, IMAGE_SUFFIXES, read_header
@@ -53,6 +58,7 @@ class FrameFile:
 class TargetFolderInfo:
     target: TargetName
     path: str
+    root: str = ""                                             # the data root or archive folder holding it
     legacy_years: list[str] = field(default_factory=list)
     legacy_stages: list[str] = field(default_factory=list)     # non-empty 1.–7. folders
     wbpp_masters: list[str] = field(default_factory=list)      # WBPP*/master folders with files
@@ -63,6 +69,18 @@ class TargetFolderInfo:
 
 
 @dataclass
+class RootInfo:
+    path: str
+    archive: bool
+    exists: bool = False
+    targets: int = 0
+    skipped: list[str] = field(default_factory=list)          # target folders already found in an earlier root
+
+    def as_dict(self) -> dict[str, Any]:
+        return dict(self.__dict__)
+
+
+@dataclass
 class ScanResult:
     frames: list[FrameFile]
     targets: list[TargetFolderInfo]
@@ -70,6 +88,7 @@ class ScanResult:
     duration_s: float
     files_read: int
     read_errors: int
+    roots: list[RootInfo] = field(default_factory=list)
 
 
 @dataclass
@@ -187,19 +206,34 @@ def _read_target_json(path: str) -> dict[str, Any] | None:
         return None
 
 
-def discover(data_root: Path) -> tuple[list[FrameFile], list[TargetFolderInfo]]:
+def discover(data_root: Path, archive_roots: list[Path] = ()) -> tuple[list[FrameFile], list[TargetFolderInfo], list[RootInfo]]:
     frames: list[FrameFile] = []
     targets: list[TargetFolderInfo] = []
-    root = str(data_root)
+    roots: list[RootInfo] = []
+    seen: set[str] = set()
+    for i, root_path in enumerate([data_root, *archive_roots]):
+        ri = RootInfo(str(root_path), archive=i > 0, exists=Path(root_path).is_dir())
+        roots.append(ri)
+        if ri.exists:
+            _discover_root(str(root_path), ri, seen, frames, targets)
+    return frames, targets, roots
+
+
+def _discover_root(root: str, ri: RootInfo, seen: set[str], frames: list[FrameFile], targets: list[TargetFolderInfo]) -> None:
     for entry in sorted(_list_dirs(root), key=lambda e: e.name.casefold()):
         name = entry.name
-        if name == ".Calibration":
+        if name == ".Calibration" and not ri.archive:
             for path, rel, st in _walk_files(entry.path):
                 frames.append(FrameFile(path, "library", None, rel, st.st_size, st.st_mtime))
             continue
         if name.startswith("."):
             continue
-        info = TargetFolderInfo(parse_target_folder(name), entry.path)
+        if name.casefold() in seen:
+            ri.skipped.append(name)
+            continue
+        seen.add(name.casefold())
+        ri.targets += 1
+        info = TargetFolderInfo(parse_target_folder(name), entry.path, root)
         info.target_json = _read_target_json(entry.path)
         _inspect_root(entry.path, info, frames)
         for sub in _list_dirs(entry.path):
@@ -208,7 +242,6 @@ def discover(data_root: Path) -> tuple[list[FrameFile], list[TargetFolderInfo]]:
                 _inspect_root(sub.path, info, frames)
         info.legacy_years.sort()
         targets.append(info)
-    return frames, targets
 
 
 def _read_one(path: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -219,8 +252,10 @@ def _read_one(path: str) -> tuple[dict[str, Any] | None, str | None]:
 
 
 class Scanner:
-    def __init__(self, data_root: Path, cache: HeaderCache, workers: int = 16):
+    def __init__(self, data_root: Path, cache: HeaderCache, workers: int = 16,
+                 archive_roots: Callable[[], list[Path]] = lambda: []):
         self.data_root = data_root
+        self.archive_roots = archive_roots
         self.cache = cache
         self.workers = workers
         self.progress = ScanProgress()
@@ -244,7 +279,7 @@ class Scanner:
     def _scan(self, started: float) -> ScanResult:
         if not self.data_root.is_dir():
             raise FileNotFoundError(f"data root not found: {self.data_root}")
-        frames, targets = discover(self.data_root)
+        frames, targets, roots = discover(self.data_root, list(self.archive_roots()))
         self.progress.files_found = len(frames)
 
         cached = self.cache.load_all()
@@ -272,7 +307,9 @@ class Scanner:
         self.cache.upsert(batch)
 
         seen = {f.path for f in frames}
-        self.cache.forget(p for p in cached if p not in seen)
+        # Headers on a disk that is not plugged in right now are kept for when it comes back.
+        offline = tuple(r.path.replace("\\", "/").rstrip("/").casefold() + "/" for r in roots if not r.exists)
+        self.cache.forget(p for p in cached if p not in seen and not (offline and p.replace("\\", "/").casefold().startswith(offline)))
         finished = time.time()
         self.cache.set_meta("last_scan", str(finished))
         self.cache.set_meta("header_version", HEADER_VERSION)
@@ -283,4 +320,5 @@ class Scanner:
             duration_s=finished - started,
             files_read=len(todo),
             read_errors=sum(1 for f in todo if f.error),
+            roots=roots,
         )

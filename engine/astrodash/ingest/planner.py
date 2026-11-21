@@ -178,7 +178,7 @@ def match_target(obj: str, targets: list["TargetRef"], object_map: dict[str, dic
     """
     by_revision = {t.revision_id: t for t in targets}
     mapped = object_map.get(obj.casefold())
-    if mapped and mapped.get("revisionId") in by_revision:
+    if mapped and mapped.get("revisionId") in by_revision and by_revision[mapped["revisionId"]].stage != "archived":
         return by_revision[mapped["revisionId"]], ""
     candidates: list[TargetRef] = []
     if mapped and mapped.get("catalogId"):
@@ -192,7 +192,7 @@ def match_target(obj: str, targets: list["TargetRef"], object_map: dict[str, dic
     if acquiring:
         return max(acquiring, key=lambda t: t.revision), ""
     latest = max(candidates, key=lambda t: t.revision)
-    if allow_finished:
+    if allow_finished and latest.stage != "archived":
         return latest, ""
     return None, (f'{latest.target} is "{latest.stage}": not switching to it. Turn on "Also switch to finished '
                   f'targets", choose it yourself, or start a new revision.')
@@ -269,7 +269,7 @@ def plan_ingest(
     if not base.is_dir():
         return plan
 
-    by_revision = {t.revision_id: t for t in targets}
+    by_revision = {t.revision_id: t for t in targets if t.stage != "archived"}  # never ingested into
 
     def resolve(obj: str) -> tuple[TargetRef | None, str, str]:
         """→ (target, how, problem message)."""

@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -257,3 +258,66 @@ def test_acquired_time_counts_set_aside_lights_once(data_root, tmp_path):
     assert t["lights"] == 2 and t["rejected"] == 1
     assert t["acquiredSeconds"] == t["seconds"] * 3 / 2
     assert rev["totals"]["acquiredSeconds"] == sum(s["totals"]["acquiredSeconds"] for s in rev["sessions"])
+
+
+def _archive_soul(data_root: Path, tmp_path: Path) -> Path:
+    """Move the Soul Nebula target folder to an "archive disk" beside the data root."""
+    archive = tmp_path / "Archive"
+    archive.mkdir()
+    shutil.move(str(data_root / "IC 1848 (Soul Nebula)"), str(archive / "IC 1848 (Soul Nebula)"))
+    return archive
+
+
+def test_targets_in_an_archive_folder_stay_in_the_library(data_root, tmp_path):
+    archive = _archive_soul(data_root, tmp_path)
+    cfg = Config(data_root=data_root, db_path=tmp_path / "var" / "a.db", archive_roots=[archive, tmp_path / "Unplugged"])
+    result = Scanner(data_root, HeaderCache(cfg.db_path), workers=2, archive_roots=lambda: cfg.archive_roots).scan()
+    lib = Library(result, cfg)
+    rev = lib.revision("ic-1848-soul-nebula")
+    assert rev is not None and rev["archived"] and rev["root"] == str(archive).replace("\\", "/")
+    assert {f["filter"]: f["frames"] for f in rev["filters"]}["H"] == 2
+    assert not any(r["archived"] for r in lib.revisions.values() if r["id"] != rev["id"])
+    roots = {Path(r["path"]): r for r in lib.roots}
+    assert roots[archive]["exists"] and roots[archive]["targets"] == 1
+    assert not roots[tmp_path / "Unplugged"]["exists"]
+    # Diagnostics keys stay "Target/…" whichever disk the target is on, and lead back to the file.
+    key = next(k for k in lib.light_headers if k.startswith("IC 1848 (Soul Nebula)/"))
+    assert cfg.locate(key) == archive / key and cfg.locate(key).is_file()
+    assert cfg.rel_path(archive / key) == key and cfg.root_of(archive / key) == archive
+    assert cfg.locate("Elsewhere/x.fits") == data_root / "Elsewhere/x.fits"
+
+
+def test_a_target_folder_in_two_roots_is_read_from_the_first(data_root, tmp_path):
+    archive = tmp_path / "Archive"
+    shutil.copytree(data_root / "IC 1848 (Soul Nebula)", archive / "IC 1848 (Soul Nebula)")   # copied, not moved yet
+    cfg = Config(data_root=data_root, db_path=tmp_path / "var" / "d.db", archive_roots=[archive])
+    result = Scanner(data_root, HeaderCache(cfg.db_path), workers=2, archive_roots=lambda: cfg.archive_roots).scan()
+    lib = Library(result, cfg)
+    assert not lib.revision("ic-1848-soul-nebula")["archived"]
+    assert lib.roots[1]["skipped"] == ["IC 1848 (Soul Nebula)"] and lib.roots[1]["targets"] == 0
+
+
+def test_archive_folders_setting(data_root, tmp_path):
+    archive = _archive_soul(data_root, tmp_path)
+    app = create_app(Config(data_root=data_root, db_path=tmp_path / "var" / "s.db"), scan_on_start=False)
+    with TestClient(app) as client:
+        engine = app.state.engine
+        engine._run_scan()
+        assert "ic-1848-soul-nebula" not in engine.library.revisions
+        put = lambda dirs: client.put("/api/settings", json={"library": {"archiveDirs": dirs}})  # noqa: E731
+        for bad in ([str(tmp_path / "missing")], ["Archive"], [str(data_root)], [str(data_root / "IC 1848")],
+                    [str(tmp_path)], [str(archive), str(archive) + "\\"]):
+            assert put(bad).status_code == 422, bad
+        saved = put([f'"{archive}\\"', " "]).json()["settings"]["library"]
+        assert saved == {"archiveDirs": [str(archive)]}
+        engine.rescan()
+        assert engine.library.revision("ic-1848-soul-nebula")["archived"]
+        roots = client.get("/api/library/roots").json()["roots"]
+        assert [r["archive"] for r in roots] == [False, True] and roots[1]["targets"] == 1
+        # The organizer never writes on an archive disk.
+        assert client.post("/api/organizer/plans", json={"revisionId": "ic-1848-soul-nebula"}).status_code == 409
+        assert all(r["revisionId"] != "ic-1848-soul-nebula" for r in client.get("/api/organizer").json()["revisions"])
+        # A saved folder on an unplugged disk can stay in the list.
+        shutil.rmtree(archive)
+        assert put([str(archive)]).status_code == 200
+        assert client.put("/api/settings", json={"library": {"archiveDirs": []}}).json()["settings"]["library"] == {"archiveDirs": []}

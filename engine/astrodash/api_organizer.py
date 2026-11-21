@@ -74,6 +74,8 @@ def register(app: FastAPI, state) -> None:
         lib = state.require_library()
         rows = []
         for rev in sorted(lib.revisions.values(), key=lambda r: r["folder"].casefold()):
+            if rev.get("archived"):
+                continue  # on an archive disk: the organizer only works under the data root
             p = canonical_plan(root, rev["id"], rev["folder"])
             d = p.as_dict()
             rows.append({
@@ -82,6 +84,11 @@ def register(app: FastAPI, state) -> None:
                 "canonical": not d["ops"],
             })
         return {"revisions": rows, "plans": [_summary(p) for p in cache.plans()], "trash": _trash(), "dataRoot": str(root)}
+
+    def _writable(rev: dict[str, Any]) -> None:
+        if rev.get("archived"):
+            raise HTTPException(409, detail=f"{rev['folder']} is in the archive folder {rev['root']}: the dashboard only "
+                                            f"changes files under the data root {root}. Move it back there first.")
 
     def _summary(p: dict[str, Any]) -> dict[str, Any]:
         return {k: p[k] for k in ("id", "created", "revisionId", "title", "status", "counts", "result") if k in p}
@@ -111,6 +118,7 @@ def register(app: FastAPI, state) -> None:
         rev = lib.revisions.get(body.revisionId)
         if rev is None:
             raise HTTPException(404, detail="No such target revision")
+        _writable(rev)
         p = canonical_plan(root, rev["id"], rev["folder"])
         if not p.ops and not p.conflicts:
             raise HTTPException(409, detail=f"{rev['folder']} already follows the canonical layout")
@@ -147,6 +155,7 @@ def register(app: FastAPI, state) -> None:
         rev = lib.revisions.get(body.revisionId)
         if rev is None or lib.session(body.revisionId, body.session) is None:
             raise HTTPException(404, detail="No such night")
+        _writable(rev)
         return rev, cache.diagnostic(body.revisionId, body.session)
 
     @app.post("/api/organizer/quarantine")

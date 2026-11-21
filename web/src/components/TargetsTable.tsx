@@ -146,6 +146,7 @@ export function TargetsTable({ rows }: { rows: TargetRow[] }) {
                 </td>
                 <td>
                   <Badge tone={r.stage.value === "acquiring" ? "accent" : "neutral"}>{stageLabel(r.stage.value)}</Badge>
+                  {r.archived ? <> <Badge tone="muted">Archive</Badge></> : null}
                 </td>
                 <td className="num" style={{ textAlign: "right" }}>
                   {r.totals.nights}

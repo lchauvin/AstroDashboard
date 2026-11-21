@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -21,6 +22,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from . import astrospheric, planning
+from .config import archive_dirs
 from .ingest import paths as ingest_paths
 from .observatory.llm import EFFORTS, LlmError, split_model
 from .observatory.sky import FLAGS as SKY_FLAGS, LIMITS as SKY_LIMITS
@@ -54,6 +56,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "notify": dict(NOTIFY_DEFAULTS),
     # Live · Ingest: the folder NINA's frames land in (the SMB share's local path); empty = <data root>\.Download.
     "ingest": {"downloadDir": ""},
+    # Library: more folders holding target folders (finished targets moved to another disk), scanned after the
+    # data root. Read-only for the dashboard (never reorganised or ingested into).
+    "library": {"archiveDirs": []},
 }
 # Settings that are no longer used (AstroController's address); dropped on the next save.
 RETIRED_SETTINGS = {"liveUrl", "guard"}  # guard: the sequence guard, replaced by the sky monitor
@@ -198,7 +203,7 @@ def register(app: FastAPI, state) -> None:
     def _settings() -> dict[str, Any]:
         stored = {k: v for k, v in (cache.get_json("settings") or {}).items() if k not in RETIRED_SETTINGS}
         out = {**DEFAULT_SETTINGS, **stored}
-        for key in ("observatory", "advisor", "skyMonitor", "notify", "ingest"):  # partial objects keep the defaults for missing fields
+        for key in ("observatory", "advisor", "skyMonitor", "notify", "ingest", "library"):  # partial objects keep the defaults for missing fields
             out[key] = {**DEFAULT_SETTINGS[key], **(stored.get(key) or {})}
         return out
 
@@ -283,6 +288,37 @@ def register(app: FastAPI, state) -> None:
         # The default itself is stored as "default", so it follows the data root.
         return {"downloadDir": "" if Path(folder) == Path(os.path.abspath(state.cfg.data_root / ingest_paths.DOWNLOAD)) else folder}
 
+    def _check_library(g: Any, stored: dict[str, Any]) -> dict[str, Any]:
+        """Archive folders: absolute, distinct, neither inside nor holding the data root or one another.
+        A folder added now must exist; one already saved may be on a disk that is unplugged."""
+        if not isinstance(g, dict) or set(g) - set(DEFAULT_SETTINGS["library"]):
+            raise HTTPException(422, detail="library: unknown fields")
+        raw = g.get("archiveDirs", [])
+        if not isinstance(raw, list) or len(raw) > 20 or not all(isinstance(d, str) and len(d) <= 500 for d in raw):
+            raise HTTPException(422, detail="library.archiveDirs must be a list of at most 20 folder paths")
+        before = {os.path.normcase(os.path.abspath(d)) for d in stored.get("archiveDirs") or []}
+        data_root = os.path.normcase(os.path.abspath(state.cfg.data_root))
+        out: list[str] = []
+        for d in raw:
+            folder = d.strip().strip('"').rstrip("\\/")
+            if not folder:
+                continue
+            if folder.endswith(":"):
+                folder += "\\"  # a whole disk (H:\)
+            if not Path(folder).is_absolute():
+                raise HTTPException(422, detail=f"{folder}: give the full path, with its drive (e.g. H:\\Astro).")
+            folder = os.path.abspath(folder)
+            key = os.path.normcase(folder)
+            if key not in before and not Path(folder).is_dir():
+                raise HTTPException(422, detail=f"There is no folder {folder}.")
+            for other, name in [(data_root, "the data root"), *((os.path.normcase(o), o) for o in out)]:
+                if key == other:
+                    raise HTTPException(422, detail=f"{folder} is {name} already." if name == "the data root" else f"{folder} is listed twice.")
+                if key.startswith(other.rstrip("\\") + "\\") or other.startswith(key.rstrip("\\") + "\\"):
+                    raise HTTPException(422, detail=f"{folder} and {name} are inside one another: list folders that hold target folders side by side.")
+            out.append(folder)
+        return {"archiveDirs": out}
+
     @app.get("/api/settings")
     def settings() -> dict[str, Any]:
         lib = state.library
@@ -310,9 +346,16 @@ def register(app: FastAPI, state) -> None:
             body["notify"] = {**(stored.get("notify") or {}), **_check_notify(body["notify"])}
         if "ingest" in body:
             body["ingest"] = {**(stored.get("ingest") or {}), **_check_ingest(body["ingest"])}
+        if "library" in body:
+            body["library"] = _check_library(body["library"], stored.get("library") or {})
         reconnect = "observatory" in body and body["observatory"] != (stored.get("observatory") or {})
         moved_download = "ingest" in body and body["ingest"] != (stored.get("ingest") or {})
+        new_roots = "library" in body and body["library"] != (stored.get("library") or {"archiveDirs": []})
         cache.set_json("settings", {**stored, **body})
+        if new_roots:
+            state.cfg.archive_roots = archive_dirs(cache.get_json("settings"))
+            # The Library follows the new folders (after any scan already running, which walked the old ones).
+            threading.Thread(target=state.rescan, name="rescan-roots", daemon=True).start()
         obs, loop = getattr(state, "observatory", None), getattr(state, "loop", None)
         if reconnect and obs is not None and loop is not None and obs.tasks:
             asyncio.run_coroutine_threadsafe(obs.reconfigure(), loop)

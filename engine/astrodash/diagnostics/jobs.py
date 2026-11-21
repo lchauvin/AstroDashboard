@@ -102,7 +102,7 @@ class DiagnosticsJobs:
         t0 = time.time()
         site = tuple(session["site"]) if session.get("site") else None
         result = self.runner(
-            Path(session["path"]), self.cfg.data_root, self.cfg.astro_eval_path,
+            Path(session["path"]), self.cfg.root_of(session["path"]) or self.cfg.data_root, self.cfg.astro_eval_path,
             site=site, workers=self.cfg.diagnostics_workers or None, progress=progress,
         )
         previous = self.cache.diagnostic(job["revisionId"], job["session"])

@@ -43,7 +43,6 @@ class MatchService:
         self.cfg = cfg
         self.cache = cache
         self._library = library
-        self._root = str(cfg.data_root).replace("\\", "/").rstrip("/") + "/"
         self._lock = threading.Lock()
         self._results: dict[str, tuple[tuple, dict[str, Any]]] = {}   # revision → (signature, result)
         self._panels: tuple[Any, dict[str, str | None]] | None = None  # (library, rel path → panel)
@@ -55,11 +54,15 @@ class MatchService:
 
     # ------------------------------------------------------------------ inputs
 
+    def _abs(self, rel: str) -> str:
+        """A diagnostics path ("Target/…") on whichever disk holds the target now."""
+        return str(self.cfg.locate(rel)).replace("\\", "/")
+
     def _panel_of(self, lib) -> dict[str, str | None]:
         with self._lock:
             if self._panels and self._panels[0] is lib:
                 return self._panels[1]
-        out = {f.path.replace("\\", "/").removeprefix(self._root): (f.location.panel if f.location else None) for f in lib.ok_lights}
+        out = {self.cfg.rel_path(f.path): (f.location.panel if f.location else None) for f in lib.ok_lights}
         with self._lock:
             self._panels = (lib, out)
         return out
@@ -80,7 +83,7 @@ class MatchService:
             for fr in fs.get("frames", []):
                 filt = canonical_filter(fr.get("filter_name"), self.cfg.filter_aliases)
                 if not fr.get("rejected") and fr.get("path") and filt:
-                    flats[filt].append(self._root + fr["path"])
+                    flats[filt].append(self._abs(fr["path"]))
         lights = []
         for group in result.get("lights", []):
             kept = [fr for fr in group.get("frames", []) if not fr.get("rejected") and fr.get("path")]
@@ -133,7 +136,7 @@ class MatchService:
                 if header.get("XPIXSZ") and header.get("FOCALLEN"):
                     scale = 206.265 * float(header["XPIXSZ"]) / float(header["FOCALLEN"])
                 lights.append({
-                    "path": self._root + rel, "filter": filt, "night": s["folder"], "panel": panels.get(rel),
+                    "path": self._abs(rel), "filter": filt, "night": s["folder"], "panel": panels.get(rel),
                     "noise": fr["noise"], "exptime": fr["exptime"], "pedestal": pedestals[pkey],
                     "flipped": str(header.get("PIERSIDE", "")).strip().lower() == "west", "flat": fkey, "scale": scale,
                 })

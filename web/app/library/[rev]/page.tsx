@@ -65,6 +65,11 @@ export default async function TargetPage({ params }: { params: Promise<{ rev: st
           </h1>
           <div className={styles.meta}>
             <Badge tone={rev.stage.value === "acquiring" ? "accent" : "neutral"}>{stageLabel(rev.stage.value)}</Badge>
+            {rev.archived ? (
+              <span title={`In the archive folder ${rev.root}: read only (Settings → Library)`}>
+                <Badge tone="muted">Archive · {rev.root}</Badge>
+              </span>
+            ) : null}
             {rev.siblings.length > 1 ? (
               <span className={styles.revisions} role="group" aria-label="Revisions">
                 {rev.siblings.map((s) => (

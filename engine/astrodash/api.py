@@ -16,7 +16,7 @@ from . import __version__, api_framing, api_leaks, api_live, api_match, api_orga
 from .api_framing import FramingService
 from .api_match import MatchService
 from .cache import HeaderCache
-from .config import Config
+from .config import Config, archive_dirs
 from .diagnostics.detectors import analyse as analyse_frames, horizon_samples, learn_horizon
 from .diagnostics import overrides
 from .diagnostics.jobs import DiagnosticsJobs, summarize as summarize_diagnostic
@@ -56,7 +56,8 @@ class EngineState:
     def __init__(self, cfg: Config, runner=None):
         self.cfg = cfg
         self.cache = HeaderCache(cfg.db_path)
-        self.scanner = Scanner(cfg.data_root, self.cache, cfg.scan_workers)
+        cfg.archive_roots = archive_dirs(self.cache.get_json("settings"))
+        self.scanner = Scanner(cfg.data_root, self.cache, cfg.scan_workers, lambda: cfg.archive_roots)
         self.library: Library | None = None
         self.last_scan = None
         self.last_error: str | None = None
@@ -203,6 +204,16 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
             "scannedAt": lib.overview()["scannedAt"] if lib else None,
             "dataRoot": str(cfg.data_root),
         }
+
+    @app.get("/api/library/roots")
+    def library_roots() -> dict[str, Any]:
+        """Where target folders are found: the data root, then the archive folders (as of the last scan)."""
+        lib = state.library
+        scanned = {r["path"]: r for r in (lib.roots if lib else [])}
+        return {"roots": [
+            scanned.get(str(r)) or {"path": str(r), "archive": i > 0, "exists": r.is_dir(), "targets": None, "skipped": []}
+            for i, r in enumerate(cfg.roots)
+        ]}
 
     @app.post("/api/scan")
     def scan() -> dict[str, Any]:
@@ -373,6 +384,8 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
     def _quarantine(rev: dict[str, Any], session: str, stored: dict[str, Any] | None) -> dict[str, Any]:
         """Rejected lights WBPP would still load, and lights the dashboard quarantined that can go back."""
         result = overrides.apply(stored["result"]) if stored else {}
+        if rev.get("archived"):  # nothing is moved on an archive disk
+            return {"pending": 0, "restorable": 0, "paths": sorted(quarantine.quarantined_lights(result))}
         plans = state.cache.plans(10000)
         return {
             # Rejected lights still in .SessionData, and refiled copies of quarantined ones: WBPP would stack both.
@@ -402,9 +415,8 @@ def create_app(cfg: Config, scan_on_start: bool = True, diagnostics_runner=None,
 
     @app.get("/api/frames/preview.jpg")
     def preview(path: str):
-        root = cfg.data_root.resolve()
-        target = (root / path).resolve()
-        if root not in target.parents or not target.is_file():
+        target = cfg.locate(path).resolve()
+        if not any(root.resolve() in target.parents for root in cfg.roots) or not target.is_file():
             raise HTTPException(404, detail="No such frame")
         try:
             out = frame_preview(target, cfg.db_path.parent / "previews")

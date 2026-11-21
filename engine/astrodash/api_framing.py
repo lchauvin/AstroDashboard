@@ -62,7 +62,6 @@ class FramingService:
         self.cfg = cfg
         self.cache = cache
         self._library = library
-        self._root = str(cfg.data_root).replace("\\", "/").rstrip("/") + "/"
         self._lock = threading.RLock()
         self._stars: dict[str, tuple[int, Stars | None]] = {}     # path → (size measured at, stars or None if unreadable)
         self._nights: OrderedDict[tuple, Night | None] = OrderedDict()
@@ -276,7 +275,7 @@ class FramingService:
         return verdicts, missing, ref
 
     def _rel(self, path: str) -> str:
-        return path.replace("\\", "/").removeprefix(self._root)
+        return self.cfg.rel_path(path)
 
     # ------------------------------------------------------------------ views
 

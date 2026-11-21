@@ -102,11 +102,14 @@ export type DashSettings = {
   notify?: NotifySettings;
   /** Live · Ingest: the folder NINA's frames land in (the SMB share's local path); "" = <data root>\.Download. */
   ingest?: IngestSettings;
+  /** Library: more folders holding target folders (finished targets moved to another disk); read only. */
+  library?: LibraryPathSettings;
 };
 
 export type NotifySettings = { enabled: boolean; ntfyServer: string; ntfyTopic: string; moonlit: boolean; dashboardUrl: string };
 
 export type IngestSettings = { downloadDir: string };
+export type LibraryPathSettings = { archiveDirs: string[] };
 export type ObservatorySettings = { ninaHost: string; ninaPort: number; phd2Host: string; phd2Instance: number };
 export type SkyMonitorSettings = {
   enabled: boolean;

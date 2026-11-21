@@ -83,6 +83,10 @@ API Keys; patrons and sponsors) the same way: target pages then show the object'
 surface brightness, Planning lists your Telescopius target lists and the month's sky events. Everything is cached in the engine. The engine scans on startup (about 8 s cold, under 1 s after that thanks to the
 header cache in `var/astrodash.db`); **Rescan** on the Library page picks up new nights.
 
+Finished targets can move to another disk and stay in the Library: add that disk's folder in Settings → Library.
+Move each target folder whole and keep its name (diagnostics and goals follow the name). Archive folders are read only:
+the organizer, quarantine and auto-ingest only work under the data root.
+
 To get tonight's Planning verdict on your phone, set a topic in Settings → Notifications and subscribe to it in the free
 **ntfy** app, then run `scripts\install-notify-task.ps1` once: a scheduled task checks at 15:00 and 19:30 (the dashboard has
 to be running) and notifies only for good nights, with an update if the verdict changes. Runs are logged in `var\notify.log`.

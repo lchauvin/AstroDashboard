@@ -19,6 +19,8 @@ export interface RevisionSummary {
   folder: string;
   revision: number;
   stage: Stage;
+  /** Found in an archive folder (Settings → Library) rather than the data root: read only. */
+  archived?: boolean;
   hasPreview: boolean;
   panels: string[];
   totals: RevisionTotals;
@@ -197,6 +199,10 @@ export interface Revision {
   revision: number;
   groupId: string;
   stage: Stage;
+  /** The data root or archive folder holding the target folder ("/" separators). */
+  root?: string;
+  /** Found in an archive folder (Settings → Library) rather than the data root: read only. */
+  archived?: boolean;
   legacyYears: string[];
   legacyStages: string[];
   wbppMasters: string[];

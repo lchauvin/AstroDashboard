@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { EngineNotice } from "@/components/EngineNotice";
+import { LibrarySettings, type LibraryRoot } from "@/components/settings/LibrarySettings";
 import { LiveIngestSettings, type LiveConn } from "@/components/settings/LiveIngestSettings";
 import { NotifySettings } from "@/components/settings/NotifySettings";
 import { GoalCapForm, RigForm } from "@/components/settings/RigForm";
@@ -20,6 +21,7 @@ const TABS = [
   { id: "sites", label: "Sites" },
   { id: "rig", label: "Rig" },
   { id: "goals", label: "Goals" },
+  { id: "library", label: "Library" },
   { id: "live", label: "Live · Ingest" },
   { id: "notify", label: "Notifications" },
 ] as const;
@@ -32,6 +34,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     engineGet<{ suggestions: Suggestion[] }>("/api/sites/suggest"),
     engineGet<{ bins: LearnedBin[] }>("/api/horizon"),
   ]);
+  const roots = tab === "library" ? await engineGet<{ roots: LibraryRoot[] }>("/api/library/roots") : null;
   const [live, ingest] =
     tab === "live" ? await Promise.all([engineGet<LiveState>("/api/live/state?graph=30"), engineGet<IngestStatus>("/api/ingest")]) : [null, null];
 
@@ -83,6 +86,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           </p>
           <GoalCapForm cap={data.data.context.settings.goalCapHours} />
         </div>
+      ) : tab === "library" ? (
+        <LibrarySettings archiveDirs={data.data.context.settings.library?.archiveDirs ?? []} roots={roots?.ok ? roots.data.roots : null} />
       ) : tab === "notify" ? (
         <NotifySettings saved={{ ...NOTIFY_DEFAULTS, ...data.data.context.settings.notify }} />
       ) : (

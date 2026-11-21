@@ -217,7 +217,9 @@ class IngestService:
     @staticmethod
     def targets(library) -> list[TargetRef]:
         return [
-            TargetRef(r["id"], r["folder"], r["catalogId"], r["name"], r["stage"]["value"], r["sessionRoot"], r["revision"])
+            # An archived revision (on another disk) is known by name but never receives frames.
+            TargetRef(r["id"], r["folder"], r["catalogId"], r["name"], "archived" if r.get("archived") else r["stage"]["value"],
+                      r["sessionRoot"], r["revision"])
             for r in library.revisions.values()
         ]
 
