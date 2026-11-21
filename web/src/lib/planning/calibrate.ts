@@ -142,7 +142,11 @@ export function calibrateSites(samples: SkySample[], sites: Site[], rig: PlanRig
   });
   const out: Record<string, SiteCalibration> = {};
   for (const site of sites) {
-    const here = prepared.filter((s) => distanceKm(s.lat, s.lon, site.lat, site.lon) <= SITE_RADIUS_KM);
+    // Local time: a night that starts on the chosen date counts, even after UTC midnight.
+    const since = site.calibrateSince ? new Date(`${site.calibrateSince}T12:00:00`).getTime() : null;
+    const here = prepared.filter(
+      (s) => distanceKm(s.lat, s.lon, site.lat, site.lon) <= SITE_RADIUS_KM && (since == null || Date.parse(s.time!) >= since),
+    );
     const filters: SiteCalibration["filters"] = {};
     for (const letter of FILTER_LETTERS) {
       const spec = rig.filters[letter];
@@ -157,22 +161,22 @@ export function calibrateSites(samples: SkySample[], sites: Site[], rig: PlanRig
         .filter((r) => Number.isFinite(r) && r > 0);
       if (!ratios.length) continue;
       const kappa = median(ratios);
+      const moon = down.length >= 10 ? moonFactorOf(rows, base) : null;
       filters[letter] = {
         letter,
         kappa,
         frames: rows.length,
-      const moon = down.length >= 10 ? moonFactorOf(rows, base) : null;
         moonDownFrames: down.length,
         nights: new Set(use.map((s) => `${s.revisionId}/${s.session}`)).size,
         sqmEquivalent: spec.line ? null : site.sqm - 2.5 * Math.log10(kappa),
         measuredRate: median(use.map((s) => s.skyRate)),
+        moonFactor: moon?.factor ?? 1,
+        moonFrames: moon?.frames ?? 0,
+        moonNights: moon?.nights ?? 0,
       };
     }
     const broadGain = here.filter((s) => ["L", "R", "G", "B"].includes(s.letter)).map((s) => s.gainEPerAdu);
     out[site.id] = { siteId: site.id, filters, gainEPerAdu: broadGain.length ? median(broadGain) : null, frames: here.length };
-        moonFactor: moon?.factor ?? 1,
-        moonFrames: moon?.frames ?? 0,
-        moonNights: moon?.nights ?? 0,
   }
   return out;
 }

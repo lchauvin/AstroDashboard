@@ -15,6 +15,8 @@ export type Site = {
   horizon: HorizonPoint[];
   isDefault: boolean;
   notes: string;
+  /** YYYY-MM-DD: frames before it don't calibrate this site's sky (the scope moved, the lighting changed). */
+  calibrateSince?: string | null;
   nights?: number;
   lastNight?: string | null;
 };
@@ -141,9 +143,9 @@ export type SkySample = {
   skyE: number;
   skyRate: number;
   gainEPerAdu: number;
-};
-
   /** From the frame's header (XPIXSZ includes binning; FOCALLEN), when present. */
   pixelSizeUm?: number | null;
   focalLength?: number | null;
+};
+
 export type SkyPayload = { sessions: number; samples: SkySample[]; pedestals: Record<string, { adu: number; frames: number } | null> };

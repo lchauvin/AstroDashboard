@@ -14,7 +14,7 @@ import re
 import statistics
 import uuid
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -216,6 +216,13 @@ def normalize_site(body: dict[str, Any]) -> dict[str, Any]:
         if 0 <= az < 360 and 0 <= alt <= 90:
             horizon.append({"az": round(az, 1), "alt": round(alt, 1)})
     horizon.sort(key=lambda p: p["az"])
+    # Frames before this date don't calibrate the site's sky (moved the scope, new lights nearby…).
+    since = str(body.get("calibrateSince") or "").strip() or None
+    if since is not None:
+        try:
+            since = date.fromisoformat(since).isoformat()
+        except ValueError:
+            raise ValueError("Sky calibration date must be YYYY-MM-DD") from None
     return {
         "name": name[:80],
         "lat": round(lat, 6),
@@ -226,6 +233,7 @@ def normalize_site(body: dict[str, Any]) -> dict[str, Any]:
         "horizon": horizon,
         "isDefault": bool(body.get("isDefault")),
         "notes": str(body.get("notes") or "")[:1000],
+        "calibrateSince": since,
     }
 
 

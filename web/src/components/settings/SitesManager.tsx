@@ -28,9 +28,10 @@ type Draft = {
   horizon: HorizonPoint[];
   isDefault: boolean;
   notes: string;
+  calibrateSince: string;
 };
 
-const emptyDraft = (lat = "", lon = ""): Draft => ({ id: null, name: "", lat, lon, elevation: "", sqm: "18", minAlt: "20", horizon: [], isDefault: false, notes: "" });
+const emptyDraft = (lat = "", lon = ""): Draft => ({ id: null, name: "", lat, lon, elevation: "", sqm: "18", minAlt: "20", horizon: [], isDefault: false, notes: "", calibrateSince: "" });
 const fromSite = (s: Site): Draft => ({
   id: s.id,
   name: s.name,
@@ -42,6 +43,7 @@ const fromSite = (s: Site): Draft => ({
   horizon: s.horizon,
   isDefault: s.isDefault,
   notes: s.notes,
+  calibrateSince: s.calibrateSince ?? "",
 });
 
 async function api(path: string, method: string, body?: unknown) {
@@ -97,6 +99,7 @@ export function SitesManager({ sites, suggestions, learned, sky }: { sites: Site
         horizon: draft.horizon,
         isDefault: draft.isDefault,
         notes: draft.notes,
+        calibrateSince: draft.calibrateSince || null,
       };
       if (draft.id) await api(`/api/sites/${draft.id}`, "PUT", body);
       else await api("/api/sites", "POST", body);
@@ -309,6 +312,15 @@ export function SitesManager({ sites, suggestions, learned, sky }: { sites: Site
               ) : null;
             })()}
 
+            <label className={styles.field}>
+              <span>Sky calibration from (optional)</span>
+              <input className={styles.input} type="date" value={draft.calibrateSince} onChange={(e) => setDraft({ ...draft, calibrateSince: e.target.value })} />
+            </label>
+            <p className={styles.hint}>
+              Frames before this night are ignored when measuring the sky here (κ and the moon factor). Set it when the scope
+              moved or the lighting around it changed; frame headers can&apos;t tell spots a few metres apart.
+            </p>
+
             <div className={styles.field}>
               <span>Horizon profile (optional): obstruction altitude by azimuth, interpolated</span>
               <HorizonEditor points={draft.horizon} minAlt={Number(draft.minAlt) || 0} onChange={(horizon) => setDraft({ ...draft, horizon })} />
@@ -372,6 +384,7 @@ export function SitesManager({ sites, suggestions, learned, sky }: { sites: Site
                   {m?.lSqm != null ? ` · measured ≈ ${m.lSqm.toFixed(2)}` : ""}
                   <br />
                   {s.nights ?? 0} night{s.nights === 1 ? "" : "s"} shot{s.lastNight ? ` · last ${s.lastNight}` : ""}
+                  {s.calibrateSince ? <><br />Sky calibrated from {s.calibrateSince}</> : null}
                   {s.notes ? <><br />{s.notes}</> : null}
                 </div>
                 <div className={styles.rowActions}>

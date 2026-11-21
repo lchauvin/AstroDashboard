@@ -52,6 +52,10 @@ def test_normalize_site_validates():
                                  "horizon": [{"az": 200, "alt": 25}, {"az": 10, "alt": 15}, {"az": 400, "alt": 3}]})
     assert s["name"] == "Dark" and s["minAlt"] == 20
     assert [p["az"] for p in s["horizon"]] == [10, 200]
+    assert s["calibrateSince"] is None
+    assert planning.normalize_site({"name": "x", "lat": 1, "lon": 1, "calibrateSince": "2026-07-01"})["calibrateSince"] == "2026-07-01"
+    with pytest.raises(ValueError):
+        planning.normalize_site({"name": "x", "lat": 1, "lon": 1, "calibrateSince": "July"})
 
 
 def test_sites_goals_settings_api(data_root, tmp_path):
