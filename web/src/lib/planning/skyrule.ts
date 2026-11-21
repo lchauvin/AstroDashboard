@@ -27,13 +27,27 @@ export const POOR_SEEING = 2;
 /** OIII (or L) hours are worth at least this share of moonless ones on the target: "little moonlight". */
 export const LITTLE_MOONLIGHT = 0.8;
 
-const ORDER: Record<SkyClass, FilterLetter[]> = {
+export const SKY_ORDER: Record<SkyClass, FilterLetter[]> = {
   oiii: ["O", "L", "B", "G", "R"],
   ha: ["H", "S"],
   sii: ["S", "H"],
 };
 
-const LABEL: Record<SkyClass, string> = { oiii: "OIII sky", ha: "Hα sky", sii: "SII sky" };
+export const SKY_LABEL: Record<SkyClass, string> = { oiii: "OIII sky", ha: "Hα sky", sii: "SII sky" };
+
+/** Which of your three skies a night is, and the facts that made it so. */
+export function skyClass(sky: NightSky, eff: (l: FilterLetter) => number | undefined): { cls: SkyClass; why: string[] } {
+  const moonlight = eff("O") ?? eff("L") ?? eff("B");
+  const transparent = sky.transparency != null && sky.transparency <= GOOD_TRANSPARENCY;
+  const steady = sky.seeing == null || sky.seeing >= POOR_SEEING;
+  const cls: SkyClass = transparent && (moonlight ?? 0) >= LITTLE_MOONLIGHT ? "oiii" : steady ? "ha" : "sii";
+  const why = [
+    sky.transparency != null ? `transparency ${Math.round(sky.transparency)}` : null,
+    cls === "oiii" ? "little moonlight" : moonlight != null && moonlight < LITTLE_MOONLIGHT ? "moonlit" : null,
+    sky.seeing != null ? `seeing ${sky.seeing.toFixed(1)}/5` : null,
+  ].filter((x): x is string => !!x);
+  return { cls, why };
+}
 
 /** Null when the night has no clear dark hour to judge (the moon-only choice stays). */
 export function nightSky(f: NightForecast | null): NightSky | null {
@@ -58,24 +72,15 @@ export function ruleFilter(
   needOf: (l: FilterLetter) => number,
 ): RuleChoice | null {
   if (!sky) return null;
-  const eff = (l: FilterLetter) => evals.find((f) => f.letter === l)?.efficiency;
-  const moonlight = eff("O") ?? eff("L") ?? eff("B");
-  const transparent = sky.transparency != null && sky.transparency <= GOOD_TRANSPARENCY;
-  const steady = sky.seeing == null || sky.seeing >= POOR_SEEING;
-  const cls: SkyClass = transparent && (moonlight ?? 0) >= LITTLE_MOONLIGHT ? "oiii" : steady ? "ha" : "sii";
+  const { cls, why } = skyClass(sky, (l) => evals.find((f) => f.letter === l)?.efficiency);
 
   const usable = (l: FilterLetter) => relevant.includes(l) && evals.some((f) => f.letter === l);
-  const wanted = ORDER[cls].filter(usable);
+  const wanted = SKY_ORDER[cls].filter(usable);
   const pick = wanted.find((l) => needOf(l) > 0.05);
   if (!pick) return null;
 
-  const why = [
-    sky.transparency != null ? `transparency ${Math.round(sky.transparency)}` : null,
-    cls === "oiii" ? "little moonlight" : moonlight != null && moonlight < LITTLE_MOONLIGHT ? "moonlit" : null,
-    sky.seeing != null ? `seeing ${sky.seeing.toFixed(1)}/5` : null,
-  ].filter(Boolean);
   const skipped = wanted.slice(0, wanted.indexOf(pick)).map((l) => FILTER_NAMES[l]);
-  const note = `${LABEL[cls]} (${why.join(", ")}) → shoot ${FILTER_NAMES[pick]}${skipped.length ? `; ${skipped.join(", ")} goal met` : ""}.`;
+  const note = `${SKY_LABEL[cls]} (${why.join(", ")}) → shoot ${FILTER_NAMES[pick]}${skipped.length ? `; ${skipped.join(", ")} goal met` : ""}.`;
   return { letter: pick, sky: cls, note };
 }
 

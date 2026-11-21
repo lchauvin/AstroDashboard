@@ -27,6 +27,7 @@ import { filterSky, type FilterSky } from "./skymodel";
 import { goalStatus, type GoalStatus, type MatchInput } from "./goals";
 import type { NightForecast } from "./forecast";
 import { nightSky, ruleFilter, type RuleChoice } from "./skyrule";
+import { nightPriority, type NightPriority } from "./priority";
 import type { MatchRevision, PlanTarget, Site } from "./types";
 
 export { goalStatus, type GoalStatus };
@@ -101,6 +102,8 @@ export type PlanResult = {
   yours: TargetPlan[];
   ideas: TargetPlan[];
   calendar: CalendarNight[];
+  /** One filter order for the night, every filter you own (priority.ts). */
+  priority: NightPriority;
   computeMs: number;
 };
 
@@ -280,6 +283,7 @@ export function plan(input: PlanInput): PlanResult {
     yours.push(build("library", t, info, ra, dec));
   }
   yours.sort((a, b) => b.score - a.score || b.tonightHours - a.tonightHours);
+  const priority = nightOrder(yours, tonight, site, rig, skies, tonightSky);
 
   // Season strips for your targets: a year of usable hours, coarse.
   const seasonDays = input.seasonDays ?? 365;
@@ -363,6 +367,38 @@ export function plan(input: PlanInput): PlanResult {
     yours,
     ideas: shownIdeas,
     calendar,
+    priority,
     computeMs: Date.now() - t0,
   };
+}
+
+/** The night-level filter order: every owned filter, evaluated on your active targets that are up (hours-weighted). */
+function nightOrder(
+  yours: TargetPlan[],
+  tonight: NightGrid,
+  site: Site,
+  rig: PlanRig,
+  skies: Partial<Record<FilterLetter, FilterSky>>,
+  sky: ReturnType<typeof nightSky>,
+): NightPriority {
+  const owned = rig.owned.filter((l) => skies[l]);
+  const sum = new Map<FilterLetter, { worth: number; hours: number }>();
+  let downSamples = 0;
+  let allSamples = 0;
+  for (const p of yours) {
+    if ((STAGE_WEIGHT[p.target?.stage ?? "acquiring"] ?? 1) === 0) continue;
+    const samples = usableSamples(tonight, site, p.ra, p.dec);
+    if (!samples.length) continue;
+    downSamples += samples.filter((s) => s.moonAlt <= 0).length;
+    allSamples += samples.length;
+    for (const f of evaluateNight(samples, tonight.stepMinutes, tonight.moonIllum, owned, skies)) {
+      const acc = sum.get(f.letter) ?? { worth: 0, hours: 0 };
+      sum.set(f.letter, { worth: acc.worth + f.efficiency * f.hours, hours: acc.hours + f.hours });
+    }
+  }
+  const evals: FilterNight[] = [...sum].map(([letter, a]) => ({ letter, hours: a.hours, efficiency: a.hours ? a.worth / a.hours : 1, meanSky: 0 }));
+  const sensitivity: Partial<Record<FilterLetter, number>> = {};
+  for (const f of evaluateNight([REFERENCE_MOON], 60, 0.75, owned, skies)) sensitivity[f.letter] = Math.max(0, 1 - f.efficiency);
+  const moonDownFraction = allSamples ? downSamples / allSamples : tonight.darkHours > 0 ? tonight.moonFreeHours / tonight.darkHours : 1;
+  return nightPriority({ owned, evals, sensitivity, moonDownFraction, moonIllum: tonight.moonIllum, sky });
 }

@@ -5,9 +5,10 @@ import { EfficiencyBars, GoalMini, MoonGlyph, SeasonStrip, localTime } from "@/c
 import { PlanControls } from "@/components/planning/PlanControls";
 import styles from "@/components/planning/planning.module.css";
 import { FilterChip, Marks } from "@/components/ui";
-import { hm, stageLabel } from "@/lib/format";
+import { filterColor, hm, stageLabel } from "@/lib/format";
 import { isoDate } from "@/lib/planning/night";
 import type { TargetPlan } from "@/lib/planning/plan";
+import type { NightPriority } from "@/lib/planning/priority";
 import { FILTER_NAMES } from "@/lib/planning/rig";
 import { bortleFromSqm } from "@/lib/planning/sites";
 import { loadForecast, loadPlanningData, planFor, siteFor } from "@/server/planning";
@@ -126,13 +127,23 @@ export default async function PlanningTargetsPage({ searchParams }: { searchPara
 
       <section className={styles.section}>
         <div className={styles.sectionHead}>
+          <h2 className="section-title">Filter priority</h2>
+          <p className={styles.sectionNote}>
+            {result.priority.summary} Your sky rules, when Astrospheric covers the night: OIII (or L/RGB) on clear, transparent
+            nights with little moonlight; Hα unless the seeing is poor; SII otherwise. Percentages: what an hour tonight is worth
+            against a moonless one, averaged over your active targets that are up. A target whose goal in a filter is met skips to
+            the next one.
+          </p>
+        </div>
+        <FilterPriorityList priority={result.priority} />
+      </section>
+
+      <section className={styles.section}>
+        <div className={styles.sectionHead}>
           <h2 className="section-title">Your targets</h2>
           <p className={styles.sectionNote}>
-            Score = usable hours × what an hour tonight is worth in the filter (how much the moon brightens its sky) × how far it
-            is from its goal, with moonless hours
-            favouring the filters the moon hurts most. When Astrospheric covers the night, the filter follows your sky rules
-            instead: OIII (or L/RGB) on clear, transparent nights with little moonlight; Hα unless the seeing is poor; SII
-            otherwise — skipping filters whose goal is met. Finished targets are {sp.finished === "1" ? "included" : "hidden"}.
+            Score = usable hours × what an hour tonight is worth in its best filter × how far that filter is from its goal, with
+            moonless hours favouring the filters the moon hurts most. Finished targets are {sp.finished === "1" ? "included" : "hidden"}.
           </p>
         </div>
         <YourTargets plans={result.yours} q={q} start={date} />
@@ -186,6 +197,33 @@ export default async function PlanningTargetsPage({ searchParams }: { searchPara
   );
 }
 
+function FilterPriorityList({ priority }: { priority: NightPriority }) {
+  if (!priority.filters.length) return <p className="muted">No filters in the rig.</p>;
+  return (
+    <ol className={styles.priorityList}>
+      {priority.filters.map((f, i) => (
+        <li key={f.letter} className={styles.priorityItem}>
+          <span className={styles.rank}>{i + 1}</span>
+          <span className={styles.priorityName}>
+            <FilterChip filter={f.letter} />
+            {FILTER_NAMES[f.letter]}
+          </span>
+          <span className={styles.bar} style={{ width: 64, display: "block" }} aria-hidden>
+            {f.efficiency != null ? <span style={{ width: `${Math.round(f.efficiency * 100)}%`, background: filterColor(f.letter) }} /> : null}
+          </span>
+          <span className="num" style={{ color: "var(--text-secondary)" }}>
+            {f.efficiency != null ? `${Math.round(f.efficiency * 100)} %` : "—"}
+          </span>
+          <span className={styles.priorityReason}>
+            {f.reason}
+            {f.byRule ? <span className={styles.priorityRule}>RULE</span> : null}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function YourTargets({ plans, q, start }: { plans: TargetPlan[]; q: string; start: string }) {
   if (!plans.length) return <p className="muted">No targets with a known position.</p>;
   return (
@@ -196,7 +234,6 @@ function YourTargets({ plans, q, start }: { plans: TargetPlan[]; q: string; star
             <th aria-label="Rank" />
             <th>Target</th>
             <th>Tonight</th>
-            <th>Suggestion</th>
             <th>Filters tonight</th>
             <th>Goals</th>
             <th>Next 30 / 90 d</th>
@@ -218,15 +255,6 @@ function YourTargets({ plans, q, start }: { plans: TargetPlan[]; q: string; star
               <td className="num" style={{ whiteSpace: "nowrap" }}>
                 {hm(p.tonightHours)}
                 <div className={styles.sub}>max {Math.round(p.maxAlt)}°</div>
-              </td>
-              <td className={styles.adviceCell}>
-                {p.best ? (
-                  <div className={styles.best}>
-                    <FilterChip filter={p.best.letter} />
-                    {FILTER_NAMES[p.best.letter]}
-                  </div>
-                ) : null}
-                <div className={styles.advice}>{p.advice}</div>
               </td>
               <td>
                 <EfficiencyBars nights={p.tonight} relevant={p.relevant} />
@@ -287,7 +315,6 @@ function Ideas({
             <SortHead by="h90" sort={sort} sortHref={sortHref}>
               Next 90 d
             </SortHead>
-            <th>Suggestion</th>
           </tr>
         </thead>
         <tbody>
@@ -308,15 +335,6 @@ function Ideas({
               </td>
               <td className="num">{hm(p.tonightHours)}</td>
               <td className="num">{p.hours90.toFixed(0)} h</td>
-              <td className={styles.adviceCell}>
-                {p.best ? (
-                  <div className={styles.best}>
-                    <FilterChip filter={p.best.letter} />
-                    {FILTER_NAMES[p.best.letter]}
-                  </div>
-                ) : null}
-                <div className={styles.advice}>{p.advice}</div>
-              </td>
             </tr>
           ))}
         </tbody>

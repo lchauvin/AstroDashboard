@@ -142,6 +142,55 @@ select.input {
   font-weight: 600;
 }
 
+/* the night's filter priority: one row per owned filter */
+.priorityList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 880px;
+}
+
+.priorityItem {
+  display: grid;
+  grid-template-columns: 20px 112px 64px 40px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-divider);
+  font-size: 13.5px;
+}
+
+.priorityItem:first-child .priorityName {
+  font-weight: 600;
+}
+
+.priorityName {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.priorityReason {
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.priorityRule {
+  font: 400 10.5px/1 var(--font-mono);
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+
+@media (max-width: 720px) {
+  .priorityItem {
+    grid-template-columns: 20px 1fr 64px 40px;
+  }
+  .priorityReason {
+    grid-column: 2 / -1;
+  }
+}
+
 /* efficiency bars: one per relevant filter */
 .effList {
   display: grid;
